@@ -1,0 +1,22 @@
+{
+  "name": "@agent-dev/daemon",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@agent-dev/blueprint": "file:../../packages/blueprint",
+    "@agent-dev/policy": "file:../../packages/policy",
+    "@agent-dev/storage": "file:../../packages/storage",
+    "@agent-dev/workflow": "file:../../packages/workflow",
+    "@hono/node-server": "^1.14.1",
+    "hono": "^4.7.7",
+    "zod": "^3.24.3"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@agent-dev/cli",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "agent-dev": "./src/index.ts"
+  },
+  "scripts": {
+    "doctor": "tsx src/index.ts doctor",
+    "start": "tsx src/index.ts start",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agent-dev/daemon": "file:../daemon"
+  }
+}

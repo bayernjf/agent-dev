@@ -1,0 +1,31 @@
+{
+  "name": "agent-dev",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "description": "Agentic product delivery framework",
+  "type": "module",
+  "packageManager": "npm@10.8.2",
+  "engines": {
+    "node": ">=20.20.0",
+    "npm": ">=10.8.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n daemon,studio -c cyan,magenta \"npm run dev -w @agent-dev/daemon\" \"npm run dev -w @agent-dev/studio\"",
+    "build": "npm run typecheck && npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "doctor": "npm run doctor -w @agent-dev/cli",
+    "start": "npm run start -w @agent-dev/cli"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2"
+  }
+}

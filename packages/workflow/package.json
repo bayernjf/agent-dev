@@ -1,0 +1,14 @@
+{
+  "name": "@agent-dev/workflow",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "xstate": "^5.23.0"
+  }
+}
