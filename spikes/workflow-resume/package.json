@@ -1,0 +1,11 @@
+{
+  "name": "@agent-dev/spike-workflow-resume",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe": "node probe.mjs"
+  },
+  "dependencies": {
+    "xstate": "^5.0.0"
+  }
+}

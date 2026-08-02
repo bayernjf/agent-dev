@@ -40,6 +40,11 @@ Agent Runtime  -> 用户电脑中的 Codex
 - [产品路线图](docs/roadmap.md)：从内部闭环到托管运行时、模板生态和企业能力。
 - [AI Agent 全周期开发 SOP](ai-agent-development-sop.md)：需求到生产交付的通用治理基线。
 - [现有项目组合复盘](portfolio-development-review.md)：六个已有项目的流程资产、缺口和证据。
+
+### 当前实施
+
+- [Phase 0 技术 Spike 状态](docs/spikes/README.md)：本机实测证据、阻塞项和进入工程阶段的 Gate。
+- [项目交接](handoff.md)：当前分支、硬约束、已完成工作和下一步。
 - [项目交接](handoff.md)：当前完成状态、硬约束、未决事项和下一步执行顺序。
 
 ## 当前状态

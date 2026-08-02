@@ -27,10 +27,10 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 实施计划和路线图 | 已完成 |
 | 现有项目流程复盘/SOP | 已完成 |
 | 六项目能力矩阵 | 已完成 |
-| 技术 Spike | Codex CLI 协议已探测；实际执行因本机认证无效而阻塞；其余待开始 |
+| 技术 Spike | Workflow Resume、macOS Secret Boundary 已通过；Codex 部分通过；Dual Preview、Supabase Auth 前置阻塞 |
 | Git 仓库 | 已初始化；`main` 基线完成，当前开发分支为 `feature/phase-0-spikes` |
-| package.json / 代码骨架 | 不存在 |
-| 测试、构建和部署 | 未运行 |
+| package.json / 代码骨架 | 正式骨架不存在；Workflow Spike 有独立实验 package |
+| 测试、构建和部署 | 两个本地 Spike 已通过；真实云端部署未运行 |
 
 不要把文档中的设计描述为已实现能力。
 
@@ -122,6 +122,8 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 5. **Workflow Resume**：SQLite 持久化后从暂停 Gate 或失败 Step 恢复。
 
 Codex Runtime 已确认本机 `codex-cli 0.145.0` 提供非交互执行、JSONL 事件、最终输出 Schema、sandbox、超时终止和 resume 命令入口。真实只读请求因本机认证无效而失败；用户恢复认证前不要运行写入、恢复和取消 Probe。详见 [Codex Runtime Spike](docs/spikes/codex-runtime.md)。
+
+Workflow Resume 与 macOS Secret Boundary 已通过真实本地 Probe。Dual Preview 和 Supabase Auth 尚未取得云端 Evidence；当前 Vercel/GitHub CLI 已认证，Wrangler/Supabase CLI 未安装。完整状态见 [Phase 0 技术 Spike](docs/spikes/README.md)。
 
 OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`。不得基于未核实记忆固定 Codex CLI 参数；需要重新访问官方资料或把首版降级为生成任务包后由用户手动启动 Codex。
 
