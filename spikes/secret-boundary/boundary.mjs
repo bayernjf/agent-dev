@@ -1,5 +1,5 @@
 const sensitiveNamePattern = /(?:token|secret|password|private[_-]?key|api[_-]?key|database[_-]?url)/i;
-const commonSecretPattern = /\b(?:sk|ghp|github_pat)-?[A-Za-z0-9_*.-]{4,}/g;
+const commonSecretPattern = /\b(?:sk-[A-Za-z0-9_*.-]{4,}|ghp_[A-Za-z0-9_*.-]{4,}|github_pat_[A-Za-z0-9_*.-]{4,})/g;
 
 export function createAgentEnvironment(source, allowedNames, knownSecrets = []) {
   return Object.fromEntries(

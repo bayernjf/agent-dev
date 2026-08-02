@@ -27,7 +27,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 实施计划和路线图 | 已完成 |
 | 现有项目流程复盘/SOP | 已完成 |
 | 六项目能力矩阵 | 已完成 |
-| 技术 Spike | Workflow Resume、macOS Secret Boundary 已通过；Codex 部分通过；Dual Preview、Supabase Auth 前置阻塞 |
+| 技术 Spike | Workflow Resume、macOS Secret Boundary 已通过；Codex 部分通过；Dual Preview 真实执行阻塞；Supabase Auth 前置阻塞 |
 | Git 仓库 | 已初始化；`main` 基线完成，当前开发分支为 `feature/phase-0-spikes` |
 | package.json / 代码骨架 | 正式骨架不存在；Workflow Spike 有独立实验 package |
 | 测试、构建和部署 | 两个本地 Spike 已通过；真实云端部署未运行 |
@@ -123,7 +123,9 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 
 Codex Runtime 已确认本机 `codex-cli 0.145.0` 提供非交互执行、JSONL 事件、最终输出 Schema、sandbox、超时终止和 resume 命令入口。真实只读请求因本机认证无效而失败；用户恢复认证前不要运行写入、恢复和取消 Probe。详见 [Codex Runtime Spike](docs/spikes/codex-runtime.md)。
 
-Workflow Resume 与 macOS Secret Boundary 已通过真实本地 Probe。Dual Preview 和 Supabase Auth 尚未取得云端 Evidence；当前 Vercel/GitHub CLI 已认证，Wrangler/Supabase CLI 未安装。完整状态见 [Phase 0 技术 Spike](docs/spikes/README.md)。
+Workflow Resume 与 macOS Secret Boundary 已通过真实本地 Probe。Dual Preview 和 Supabase Auth 尚未取得云端 Evidence；当前 Vercel/GitHub CLI 已认证，Wrangler/Supabase CLI 已局部安装，其中 Supabase CLI 会尝试写入 `~/.supabase`，不符合当前文件边界。完整状态见 [Phase 0 技术 Spike](docs/spikes/README.md)。
+
+Dual Preview 已真实验证到 Vercel 部署就绪，但公网 Preview 持续超时，所有临时项目已清理；Supabase 尚未进行平台写操作。两项降级都会改变 v0.1 验收范围，必须由用户在 [Phase 0 状态](docs/spikes/README.md) 给出的候选路径中确认后，才能进入正式工程骨架。
 
 OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`。不得基于未核实记忆固定 Codex CLI 参数；需要重新访问官方资料或把首版降级为生成任务包后由用户手动启动 Codex。
 

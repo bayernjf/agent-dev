@@ -140,6 +140,7 @@ async function main() {
     );
     assert.equal(redactedLog.includes(providerSecret), false);
     assert.equal(redactedLog.includes('masked-token'), false);
+    assert.equal(redactSecrets('--skip-domain'), '--skip-domain');
 
     process.stdout.write(
       `${JSON.stringify(

@@ -8,7 +8,13 @@ const tools = [
   { name: 'gh', versionArgs: ['--version'], authArgs: ['auth', 'status'] },
   { name: 'vercel', versionArgs: ['--version'], authArgs: ['whoami'] },
   { name: 'wrangler', versionArgs: ['--version'], authArgs: ['whoami'] },
-  { name: 'supabase', versionArgs: ['--version'], authArgs: ['projects', 'list'] },
+  {
+    name: 'supabase',
+    versionArgs: ['--version'],
+    authArgs: ['projects', 'list'],
+    boundarySafe: false,
+    blockedReason: 'requires-out-of-workspace-local-state',
+  },
 ];
 
 function run(command, args) {
@@ -16,6 +22,11 @@ function run(command, args) {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout,
+    env: {
+      ...process.env,
+      SUPABASE_UPDATE_CHECK: 'false',
+      WRANGLER_LOG: 'none',
+    },
   });
   return {
     available: !result.error || result.error.code === 'ETIMEDOUT',
@@ -25,13 +36,18 @@ function run(command, args) {
 }
 
 const results = tools.map(tool => {
-  const version = run(tool.name, tool.versionArgs);
-  const auth = online && version.available && tool.authArgs ? run(tool.name, tool.authArgs) : null;
+  const resolution = run('which', [tool.name]);
+  const installed = resolution.succeeded;
+  const version = installed && tool.boundarySafe !== false ? run(tool.name, tool.versionArgs) : null;
+  const usable = installed && Boolean(version?.succeeded);
+  const auth = online && usable && tool.authArgs ? run(tool.name, tool.authArgs) : null;
   return {
     tool: tool.name,
-    installed: version.available && version.succeeded,
+    installed,
+    usableWithinCurrentBoundary: usable,
     authenticated: auth ? auth.succeeded : null,
     authCheckTimedOut: auth ? auth.timedOut : false,
+    blockedReason: installed && tool.boundarySafe === false ? tool.blockedReason : null,
   };
 });
 

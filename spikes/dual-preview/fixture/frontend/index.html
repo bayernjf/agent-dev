@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent-Dev Dual Preview Spike</title>
+  </head>
+  <body>
+    <main>
+      <h1>Agent-Dev Dual Preview Spike</h1>
+      <output id="status">checking</output>
+    </main>
+    <script type="module">
+      const apiBaseUrl = '__API_BASE_URL__';
+      const response = await fetch(`${apiBaseUrl}/api/health`);
+      const result = await response.json();
+      document.querySelector('#status').textContent = result.ok ? 'connected' : 'failed';
+    </script>
+  </body>
+</html>
