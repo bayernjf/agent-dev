@@ -1,0 +1,13 @@
+{
+  "name": "@agent-dev/spike-platform-preflight",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe": "node probe.mjs",
+    "probe:online": "node probe.mjs --online"
+  },
+  "devDependencies": {
+    "supabase": "^2.0.0",
+    "wrangler": "^4.0.0"
+  }
+}

@@ -1,0 +1,40 @@
+# Dependencies and package manager state
+node_modules/
+.npm/
+
+# Build and test output
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+
+# Local runtime state
+.agent-dev/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.log
+
+# Local worktrees and spike output
+.worktrees/
+.vercel/
+.wrangler/
+.supabase/
+spikes/**/tmp/
+spikes/**/output/
+
+# Environment variables and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Editor and operating system files
+.DS_Store
+.idea/
+.vscode/
+*.swp
