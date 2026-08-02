@@ -45,10 +45,26 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 - [Phase 0 技术 Spike 状态](docs/spikes/README.md)：本机实测证据、阻塞项和进入工程阶段的 Gate。
 - [项目交接](handoff.md)：当前分支、硬约束、已完成工作和下一步。
-- [项目交接](handoff.md)：当前完成状态、硬约束、未决事项和下一步执行顺序。
 
 ## 当前状态
 
-当前仓库处于产品定义阶段。本文档中的 `v0.1` 是计划中的第一版，不代表相关代码、平台连接器或部署能力已经实现。
+当前仓库处于 `v0.1` 的 Phase 0 技术验证阶段，不是可用于生产的稳定版本。
 
-下一项工程工作应是验证本地 Codex Runtime 的官方非交互接入方式，并完成 Blueprint、状态机和 Cloudflare/Vercel 联合 Preview 的三个技术 Spike。
+已经取得本地 Evidence：
+
+- XState + SQLite 跨进程恢复人工 Gate 和失败步骤；
+- macOS Keychain、Secret 引用、Agent 环境白名单和日志脱敏；
+- GitHub、Vercel、Cloudflare 本地 CLI 的结构化 Preflight；
+- Dual Preview 的本地 API、精确 CORS 和 URL 注入契约。
+
+当前阻塞：
+
+- 本机 Codex 认证无效，Runtime 成功路径尚未验证；
+- Vercel Preview 公网访问超时，Cloudflare/Vercel 联合 Preview 尚未通过；
+- Supabase CLI 的本地状态目录与当前文件边界冲突，Auth Redirect 尚未进行真实平台验证。
+
+事实、降级候选和下一项 Gate 见 [Phase 0 技术 Spike 状态](docs/spikes/README.md)。文档中的 `v0.1` 是计划目标，不代表对应连接器和交付能力已经实现。
+
+## License
+
+当前仓库尚未选择开源许可证。公开可读不等于自动获得复制、分发或商用授权；许可证将在产品边界稳定后由维护者明确选择。

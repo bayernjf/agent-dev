@@ -20,6 +20,8 @@ test-results/
 # Local worktrees and spike output
 .worktrees/
 .vercel/
+.wrangler/
+.supabase/
 spikes/**/tmp/
 spikes/**/output/
 
@@ -36,4 +38,3 @@ spikes/**/output/
 .idea/
 .vscode/
 *.swp
-.vercel

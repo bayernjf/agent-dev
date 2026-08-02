@@ -2,7 +2,7 @@
 
 > 更新时间：2026-08-02  
 > 当前阶段：产品定义完成，Phase 0 技术 Spike 进行中
-> 工作目录：`/Users/jiangfeng/000mycodes/agent-dev`
+> 工作目录：仓库根目录
 
 ## 1. 项目摘要
 
@@ -28,7 +28,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 现有项目流程复盘/SOP | 已完成 |
 | 六项目能力矩阵 | 已完成 |
 | 技术 Spike | Workflow Resume、macOS Secret Boundary 已通过；Codex 部分通过；Dual Preview 真实执行阻塞；Supabase Auth 前置阻塞 |
-| Git 仓库 | 已初始化；`main` 基线完成，当前开发分支为 `feature/phase-0-spikes` |
+| Git 仓库 | 已初始化；Phase 0 提交已完成 |
 | package.json / 代码骨架 | 正式骨架不存在；Workflow Spike 有独立实验 package |
 | 测试、构建和部署 | 两个本地 Spike 已通过；真实云端部署未运行 |
 
