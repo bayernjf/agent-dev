@@ -1,7 +1,7 @@
 # Agent-Dev 项目交接
 
 > 更新时间：2026-08-02  
-> 当前阶段：产品定义完成，准备技术 Spike  
+> 当前阶段：产品定义完成，Phase 0 技术 Spike 进行中
 > 工作目录：`/Users/jiangfeng/000mycodes/agent-dev`
 
 ## 1. 项目摘要
@@ -26,8 +26,9 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 环境变量与平台连接方案 | 已完成 |
 | 实施计划和路线图 | 已完成 |
 | 现有项目流程复盘/SOP | 已完成 |
-| 技术 Spike | 未开始 |
-| Git 仓库 | 未初始化 |
+| 六项目能力矩阵 | 已完成 |
+| 技术 Spike | Codex CLI 协议已探测；实际执行因本机认证无效而阻塞；其余待开始 |
+| Git 仓库 | 已初始化；`main` 基线完成，当前开发分支为 `feature/phase-0-spikes` |
 | package.json / 代码骨架 | 不存在 |
 | 测试、构建和部署 | 未运行 |
 
@@ -105,13 +106,14 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 6. [Blueprint 规范](docs/blueprint-spec.md)
 7. [环境与连接方案](docs/environment-and-connectors.md)
 8. [对话决策记录](docs/decision-log.md)
-9. [通用开发 SOP](ai-agent-development-sop.md)
+9. [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)
+10. [通用开发 SOP](ai-agent-development-sop.md)
 
 市场判断和长期范围见 [市场分析](docs/market-analysis.md) 与 [路线图](docs/roadmap.md)。现有项目事实依据见 [项目组合复盘](portfolio-development-review.md)。
 
 ## 7. 阻塞性技术 Spike
 
-下一位执行 Agent 不应直接搭完整 UI，应先验证：
+下一位执行 Agent 不应直接搭完整 UI，应先完成或明确降级以下验证：
 
 1. **Codex Runtime**：官方非交互入口、结构化输出、取消和恢复；
 2. **Dual Preview**：Vercel API Preview URL 注入 Cloudflare Pages Build；
@@ -119,13 +121,15 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 4. **Secret Boundary**：Provider CLI/OAuth、系统 Keychain、GitHub Secrets 的最小复制路径；
 5. **Workflow Resume**：SQLite 持久化后从暂停 Gate 或失败 Step 恢复。
 
+Codex Runtime 已确认本机 `codex-cli 0.145.0` 提供非交互执行、JSONL 事件、最终输出 Schema、sandbox、超时终止和 resume 命令入口。真实只读请求因本机认证无效而失败；用户恢复认证前不要运行写入、恢复和取消 Probe。详见 [Codex Runtime Spike](docs/spikes/codex-runtime.md)。
+
 OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`。不得基于未核实记忆固定 Codex CLI 参数；需要重新访问官方资料或把首版降级为生成任务包后由用户手动启动 Codex。
 
 ## 8. 下一步执行顺序
 
-1. 为五个 Spike 分别建立最小实验和结果记录；
+1. 完成其余四个 Spike；Codex 认证恢复后补齐 Runtime 成功路径、写入、恢复和取消验证；
 2. 根据 Spike 结果冻结 Adapter 契约；
-3. 初始化 Git 仓库和 npm workspaces；
+3. 初始化 npm workspaces；
 4. 创建 Studio、Daemon、CLI 和 packages 骨架；
 5. 完成 SQLite + XState + SSE 最小恢复闭环；
 6. 实现 Blueprint v1alpha1 和文档生成；

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "observedFiles"],
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "observedFiles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
