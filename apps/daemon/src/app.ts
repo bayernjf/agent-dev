@@ -2,12 +2,17 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { createDefaultBlueprint } from '@agent-dev/blueprint';
+import { blueprintAnswersSchema, createBlueprint, getBlueprintDecisions } from '@agent-dev/blueprint';
 import { AgentDevStore } from '@agent-dev/storage';
 import { DaemonEventBus } from './events.js';
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(2).max(80),
+  answers: blueprintAnswersSchema.optional(),
+});
+
+const reviseBlueprintSchema = z.object({
+  answers: blueprintAnswersSchema,
 });
 
 export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus()) {
@@ -34,7 +39,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
     const project = await store.createProject({
       name: parsed.data.name,
-      blueprint: createDefaultBlueprint(parsed.data.name),
+      blueprint: createBlueprint(parsed.data.name, parsed.data.answers),
     });
     events.emit({
       type: 'project.created',
@@ -43,6 +48,27 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       occurredAt: new Date().toISOString(),
     });
     return context.json({ project }, 201);
+  });
+
+  app.put('/api/projects/:projectId/blueprint', async context => {
+    const projectId = context.req.param('projectId');
+    const existing = store.getProject(projectId);
+    if (!existing) return context.json({ error: 'Project not found.' }, 404);
+
+    const parsed = reviseBlueprintSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'The Blueprint answers are invalid.' }, 400);
+
+    const project = await store.reviseProjectBlueprint(
+      projectId,
+      createBlueprint(existing.name, parsed.data.answers, existing.blueprint.metadata.revision + 1),
+    );
+    events.emit({
+      type: 'blueprint.revised',
+      projectId,
+      projectName: project.name,
+      occurredAt: new Date().toISOString(),
+    });
+    return context.json({ project, decisions: getBlueprintDecisions(project.blueprint) });
   });
 
   app.get('/events', context =>

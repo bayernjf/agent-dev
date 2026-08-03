@@ -1,5 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { Activity, Boxes, CircleDot, FolderKanban, Plus, RefreshCw, Settings2 } from 'lucide-react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import {
+  Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, RefreshCw, Settings2, ShieldCheck, Sparkles,
+} from 'lucide-react';
+import { getBlueprintDecisions, type BlueprintAnswers, type ProductBlueprint } from '@agent-dev/blueprint';
 
 type Project = {
   id: string;
@@ -10,36 +13,51 @@ type Project = {
   updatedAt: string;
 };
 
-type ActivityEntry = {
-  id: string;
-  text: string;
-  time: string;
+type ProjectDetail = Project & { blueprint: ProductBlueprint };
+type ActivityEntry = { id: string; text: string; time: string };
+
+const defaultAnswers: BlueprintAnswers = {
+  mode: 'beginner',
+  productIntent: '',
+  dataSensitivity: 'standard',
+  previewStrategy: 'per-pull-request',
+  analyticsProviders: [],
+  customInstructions: '',
 };
 
-const defaultActivity: ActivityEntry[] = [
-  { id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' },
-];
-
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(
-    new Date(value),
-  );
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+}
+
+function answersFromBlueprint(blueprint: ProductBlueprint): BlueprintAnswers {
+  return {
+    mode: blueprint.metadata.mode,
+    productIntent: blueprint.metadata.productIntent,
+    dataSensitivity: blueprint.spec.product.dataSensitivity,
+    previewStrategy: blueprint.spec.deployment.previewStrategy,
+    analyticsProviders: blueprint.spec.analytics.providers,
+    customInstructions: blueprint.metadata.customInstructions,
+  };
 }
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [activity, setActivity] = useState<ActivityEntry[]>(defaultActivity);
+  const [selected, setSelected] = useState<ProjectDetail | null>(null);
+  const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
   const [name, setName] = useState('');
+  const [answers, setAnswers] = useState<BlueprintAnswers>(defaultAnswers);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  const decisions = useMemo(() => selected ? getBlueprintDecisions(selected.blueprint) : [], [selected]);
 
   const loadProjects = async () => {
     setLoading(true);
     try {
       const response = await fetch('/api/projects');
       if (!response.ok) throw new Error('The local daemon is unavailable.');
-      const payload = (await response.json()) as { projects: Project[] };
+      const payload = await response.json() as { projects: Project[] };
       setProjects(payload.projects);
       setError('');
     } catch (cause) {
@@ -49,43 +67,85 @@ export function App() {
     }
   };
 
+  const selectProject = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}`);
+      if (!response.ok) throw new Error('Unable to load this Blueprint.');
+      const payload = await response.json() as { project: ProjectDetail };
+      setSelected(payload.project);
+      setName(payload.project.name);
+      setAnswers(answersFromBlueprint(payload.project.blueprint));
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load this Blueprint.');
+    }
+  };
+
+  const startNewProject = () => {
+    setSelected(null);
+    setName('');
+    setAnswers(defaultAnswers);
+    setError('');
+  };
+
   useEffect(() => {
     void loadProjects();
     const source = new EventSource('/events');
-    source.addEventListener('project.created', event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as { projectName: string; occurredAt: string };
+    const onEvent = (event: Event) => {
+      const payload = JSON.parse((event as MessageEvent<string>).data) as { type: string; projectId: string; projectName: string; occurredAt: string };
       setActivity(current => [
-        { id: crypto.randomUUID(), text: `Project created: ${payload.projectName}`, time: formatDate(payload.occurredAt) },
+        { id: crypto.randomUUID(), text: `${payload.type === 'blueprint.revised' ? 'Blueprint revised' : 'Project created'}: ${payload.projectName}`, time: formatDate(payload.occurredAt) },
         ...current,
       ].slice(0, 5));
       void loadProjects();
-    });
+      if (selected?.id === payload.projectId) void selectProject(payload.projectId);
+    };
+    source.addEventListener('project.created', onEvent);
+    source.addEventListener('blueprint.revised', onEvent);
     return () => source.close();
-  }, []);
+  }, [selected?.id]);
 
-  async function createProject(event: FormEvent<HTMLFormElement>) {
+  const setAnswer = <Key extends keyof BlueprintAnswers>(key: Key, value: BlueprintAnswers[Key]) => {
+    setAnswers(current => ({ ...current, [key]: value }));
+  };
+
+  const toggleAnalytics = (provider: 'ga4' | 'clarity') => {
+    setAnswers(current => ({
+      ...current,
+      analyticsProviders: current.analyticsProviders.includes(provider)
+        ? current.analyticsProviders.filter(item => item !== provider)
+        : [...current.analyticsProviders, provider],
+    }));
+  };
+
+  async function saveBlueprint(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (name.trim().length < 2) {
       setError('Use a project name with at least two characters.');
       return;
     }
-    setCreating(true);
+    setSaving(true);
     try {
-      const response = await fetch('/api/projects', {
-        method: 'POST',
+      const url = selected ? `/api/projects/${selected.id}/blueprint` : '/api/projects';
+      const response = await fetch(url, {
+        method: selected ? 'PUT' : 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify(selected ? { answers } : { name: name.trim(), answers }),
       });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? 'Unable to create project.');
-      setName('');
+      const payload = await response.json() as { project?: ProjectDetail; error?: string };
+      if (!response.ok || !payload.project) throw new Error(payload.error ?? 'Unable to save the Blueprint.');
+      setSelected(payload.project);
+      setName(payload.project.name);
+      setAnswers(answersFromBlueprint(payload.project.blueprint));
       await loadProjects();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to create project.');
+      setError(cause instanceof Error ? cause.message : 'Unable to save the Blueprint.');
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   }
+
+  const isProfessional = answers.mode === 'professional';
 
   return (
     <main className="shell">
@@ -93,6 +153,7 @@ export function App() {
         <div className="brand"><Boxes size={20} aria-hidden="true" /><span>Agent-Dev</span></div>
         <nav aria-label="Studio navigation">
           <a className="nav-item active" href="#projects"><FolderKanban size={18} aria-hidden="true" />Projects</a>
+          <a className="nav-item" href="#decisions"><ShieldCheck size={18} aria-hidden="true" />Decisions</a>
           <a className="nav-item" href="#activity"><Activity size={18} aria-hidden="true" />Activity</a>
           <a className="nav-item" href="#standards"><Settings2 size={18} aria-hidden="true" />Standards</a>
         </nav>
@@ -101,31 +162,63 @@ export function App() {
 
       <section className="workspace" id="projects">
         <header className="topbar">
-          <div><p className="eyebrow">Delivery Control Plane</p><h1>Projects</h1></div>
+          <div><p className="eyebrow">Delivery Control Plane</p><h1>Blueprint Studio</h1></div>
           <button className="icon-button" type="button" onClick={() => void loadProjects()} aria-label="Refresh projects" title="Refresh projects"><RefreshCw size={18} /></button>
         </header>
 
-        <div className="content-grid">
+        <div className="studio-grid">
           <section className="project-area" aria-label="Projects">
-            <div className="section-heading"><div><h2>Active delivery runs</h2><p>Each project begins with the v0.1 Web SaaS baseline.</p></div><span className="count">{projects.length}</span></div>
+            <div className="section-heading"><div><h2>Projects</h2><p>Each Blueprint is the durable source of truth for a delivery run.</p></div><button className="quiet-button" type="button" onClick={startNewProject}>New Blueprint</button></div>
             {error && <p className="error" role="alert">{error}</p>}
             <div className="project-table" role="table" aria-label="Projects">
-              <div className="table-head" role="row"><span>Project</span><span>Blueprint</span><span>Delivery state</span><span>Updated</span></div>
-              {loading ? <p className="empty-state">Loading projects...</p> : projects.length === 0 ? <p className="empty-state">No projects yet. Create one to establish its delivery baseline.</p> : projects.map(project => (
-                <div className="table-row" role="row" key={project.id}>
+              <div className="table-head" role="row"><span>Project</span><span>Mode</span><span>Delivery state</span><span>Updated</span></div>
+              {loading ? <p className="empty-state">Loading projects...</p> : projects.length === 0 ? <p className="empty-state">No projects yet. Start a Blueprint to establish a delivery baseline.</p> : projects.map(project => (
+                <button className={`table-row project-row ${selected?.id === project.id ? 'selected' : ''}`} role="row" type="button" onClick={() => void selectProject(project.id)} key={project.id}>
                   <strong>{project.name}</strong><span>{project.productType}</span><span className="state">{project.state.replaceAll('_', ' ')}</span><time dateTime={project.updatedAt}>{formatDate(project.updatedAt)}</time>
-                </div>
+                </button>
               ))}
             </div>
+
+            {selected && <section className="decision-section" id="decisions">
+              <div className="section-heading"><div><p className="eyebrow">Revision {selected.blueprint.metadata.revision}</p><h2>Delivery decisions</h2></div><span className="mode-tag">{selected.blueprint.metadata.mode}</span></div>
+              <div className="decision-list">{decisions.map(decision => <article className="decision" key={decision.id}>
+                <div><h3>{decision.title}</h3><p>{decision.value}</p><small>{decision.reason}</small></div><span className={`decision-mode ${decision.mode}`}>{decision.mode === 'auto' ? 'Automatic' : decision.mode === 'ask' ? 'Needs approval' : 'Manual step'}</span>
+              </article>)}</div>
+            </section>}
           </section>
 
           <aside className="right-rail">
-            <form className="create-panel" onSubmit={createProject}>
-              <div className="panel-title"><div><p className="eyebrow">New baseline</p><h2>Create project</h2></div><Plus size={20} aria-hidden="true" /></div>
+            <form className="blueprint-panel" onSubmit={saveBlueprint}>
+              <div className="panel-title"><div><p className="eyebrow">{selected ? `Revision ${selected.blueprint.metadata.revision + 1}` : 'New baseline'}</p><h2>{selected ? 'Edit Blueprint' : 'Start a Blueprint'}</h2></div><Sparkles size={20} aria-hidden="true" /></div>
+              <div className="mode-switch" role="group" aria-label="Blueprint mode">
+                <button className={answers.mode === 'beginner' ? 'active' : ''} type="button" onClick={() => setAnswer('mode', 'beginner')}>Beginner</button>
+                <button className={answers.mode === 'professional' ? 'active' : ''} type="button" onClick={() => setAnswer('mode', 'professional')}>Professional</button>
+              </div>
               <label htmlFor="project-name">Project name</label>
-              <input id="project-name" value={name} onChange={event => setName(event.target.value)} placeholder="e.g. Receipt Desk" maxLength={80} />
-              <p className="form-note">React/Vite, Hono, Supabase, Cloudflare Pages and Vercel Functions are applied as the default baseline.</p>
-              <button className="primary-button" type="submit" disabled={creating}>{creating ? 'Creating...' : 'Create project'}</button>
+              <input id="project-name" value={name} onChange={event => setName(event.target.value)} placeholder="e.g. Receipt Desk" maxLength={80} disabled={Boolean(selected)} />
+              <label htmlFor="product-intent">What should this product do?</label>
+              <textarea id="product-intent" value={answers.productIntent} onChange={event => setAnswer('productIntent', event.target.value)} placeholder="Describe the user problem and desired outcome." maxLength={500} />
+
+              <fieldset className="choice-group"><legend>Data sensitivity</legend><div className="choice-grid">
+                <button className={answers.dataSensitivity === 'standard' ? 'selected' : ''} type="button" onClick={() => setAnswer('dataSensitivity', 'standard')}><CheckCircle2 size={15} />Standard</button>
+                <button className={answers.dataSensitivity === 'sensitive' ? 'selected' : ''} type="button" onClick={() => setAnswer('dataSensitivity', 'sensitive')}><ShieldCheck size={15} />Sensitive</button>
+              </div></fieldset>
+
+              {isProfessional && <>
+                <fieldset className="choice-group"><legend>Preview workflow</legend><div className="choice-stack">
+                  <label><input type="radio" name="preview" checked={answers.previewStrategy === 'per-pull-request'} onChange={() => setAnswer('previewStrategy', 'per-pull-request')} />Per pull request</label>
+                  <label><input type="radio" name="preview" checked={answers.previewStrategy === 'stable-dev-api'} onChange={() => setAnswer('previewStrategy', 'stable-dev-api')} />Stable dev API</label>
+                </div></fieldset>
+                <fieldset className="choice-group"><legend>Analytics</legend><div className="choice-stack">
+                  <label><input type="checkbox" checked={answers.analyticsProviders.includes('ga4')} onChange={() => toggleAnalytics('ga4')} />Google Analytics 4</label>
+                  <label><input type="checkbox" checked={answers.analyticsProviders.includes('clarity')} onChange={() => toggleAnalytics('clarity')} />Microsoft Clarity</label>
+                </div></fieldset>
+                <label htmlFor="custom-instructions">Custom implementation note</label>
+                <textarea id="custom-instructions" value={answers.customInstructions} onChange={event => setAnswer('customInstructions', event.target.value)} placeholder="A note to preserve as a manual action." maxLength={1000} />
+              </>}
+
+              <p className="form-note">The fixed baseline uses React/Vite, Hono, Supabase, Cloudflare Pages and Vercel Functions. Cloud accounts and production releases remain human-approved.</p>
+              <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving...' : selected ? 'Save new revision' : 'Create Blueprint'}<ArrowRight size={16} aria-hidden="true" /></button>
             </form>
             <section className="activity-panel" id="activity"><div className="panel-title"><h2>Activity</h2><Activity size={18} aria-hidden="true" /></div><ol>{activity.map(item => <li key={item.id}><span>{item.text}</span><time>{item.time}</time></li>)}</ol></section>
           </aside>

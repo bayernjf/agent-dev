@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 
 export type DaemonEvent = {
-  type: 'project.created';
+  type: 'project.created' | 'blueprint.revised';
   projectId: string;
   projectName: string;
   occurredAt: string;

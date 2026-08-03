@@ -48,7 +48,17 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 ## 当前状态
 
-当前仓库处于 `v0.1` 的 Phase 0 技术验证阶段，不是可用于生产的稳定版本。
+当前仓库处于 `v0.1` 的本地实验阶段，不是可用于生产的稳定版本。
+
+本地可运行能力：
+
+- 创建 Web SaaS 项目并保存结构化 Product Blueprint；
+- 新手模式使用推荐答案，专业模式可配置数据敏感度、Preview、埋点和受控自定义说明；
+- 每次修改生成新的 Blueprint Revision，不覆盖历史；
+- 显示哪些决策会自动处理、必须获得批准，或只能由用户手动完成；
+- 通过本地 SQLite 保存项目、交付状态和 Blueprint 历史。
+
+尚未实现：Provider 资源创建、Secret 连接、模板代码生成、Codex 执行、PR/Preview 编排与交付报告。它们仍受下方 Phase 0 技术验证结论约束。
 
 已经取得本地 Evidence：
 

@@ -14,6 +14,18 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
   const store = await AgentDevStore.open(databasePath);
   const { app, events } = createDaemonApp(store);
   const server = serve({ fetch: app.fetch, port });
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off('error', onError);
+      resolve();
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+  });
 
   return {
     app,

@@ -121,6 +121,47 @@ export class AgentDevStore {
     };
   }
 
+  async reviseProjectBlueprint(projectId: string, blueprint: ProductBlueprint): Promise<StoredProject> {
+    const project = this.orm.select().from(projects).where(eq(projects.id, projectId)).get();
+    if (!project) throw new Error(`Project ${projectId} was not found.`);
+
+    const latest = this.orm
+      .select()
+      .from(blueprintRevisions)
+      .where(eq(blueprintRevisions.projectId, projectId))
+      .orderBy(desc(blueprintRevisions.revision))
+      .get();
+    if (!latest) throw new Error(`Project ${projectId} has no Blueprint revision.`);
+    if (blueprint.metadata.revision !== latest.revision + 1) {
+      throw new Error(`Blueprint revision must be ${latest.revision + 1}.`);
+    }
+
+    const now = new Date().toISOString();
+    try {
+      this.sqlite.run('BEGIN IMMEDIATE;');
+      this.orm.insert(blueprintRevisions).values({
+        id: randomUUID(),
+        projectId,
+        revision: blueprint.metadata.revision,
+        blueprintJson: JSON.stringify(blueprint),
+        createdAt: now,
+      }).run();
+      this.orm.update(projects).set({
+        productType: blueprint.spec.product.type,
+        updatedAt: now,
+      }).where(eq(projects.id, projectId)).run();
+      this.sqlite.run('COMMIT;');
+    } catch (error) {
+      this.sqlite.run('ROLLBACK;');
+      throw error;
+    }
+
+    await this.persist();
+    const updated = this.getProject(projectId);
+    if (!updated) throw new Error(`Project ${projectId} was not found after revision.`);
+    return updated;
+  }
+
   listProjects(): ProjectSummary[] {
     const rows = this.orm
       .select({
