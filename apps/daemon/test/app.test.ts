@@ -31,6 +31,15 @@ describe('daemon API', () => {
     const createdPayload = await created.json() as { project: { id: string; blueprint: { metadata: { revision: number } } } };
     expect(createdPayload.project.blueprint.metadata.revision).toBe(1);
 
+    const dryRun = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/dry-run`);
+    expect(dryRun.status).toBe(200);
+    await expect(dryRun.json()).resolves.toMatchObject({
+      plan: {
+        noExternalChanges: true,
+        artifacts: expect.arrayContaining([expect.objectContaining({ path: 'config/env.contract.yaml' })]),
+      },
+    });
+
     const revised = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/blueprint`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },

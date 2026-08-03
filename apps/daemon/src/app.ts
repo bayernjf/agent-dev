@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { blueprintAnswersSchema, createBlueprint, getBlueprintDecisions } from '@agent-dev/blueprint';
+import { blueprintAnswersSchema, createBlueprint, createDryRunPlan, getBlueprintDecisions } from '@agent-dev/blueprint';
 import { AgentDevStore } from '@agent-dev/storage';
 import { DaemonEventBus } from './events.js';
 
@@ -29,6 +29,13 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.get('/api/projects/:projectId', context => {
     const project = store.getProject(context.req.param('projectId'));
     return project ? context.json({ project }) : context.json({ error: 'Project not found.' }, 404);
+  });
+
+  app.get('/api/projects/:projectId/dry-run', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    return project
+      ? context.json({ projectId: project.id, plan: createDryRunPlan(project.blueprint) })
+      : context.json({ error: 'Project not found.' }, 404);
   });
 
   app.post('/api/projects', async context => {

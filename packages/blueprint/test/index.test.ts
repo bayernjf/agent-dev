@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createBlueprint, createDefaultBlueprint, getBlueprintDecisions, productBlueprintSchema } from '../src/index.js';
+import { createBlueprint, createDefaultBlueprint, createDryRunPlan, getBlueprintDecisions, productBlueprintSchema } from '../src/index.js';
 
 describe('ProductBlueprint', () => {
   it('creates the fixed v0.1 Web SaaS Golden Path', () => {
@@ -24,6 +24,19 @@ describe('ProductBlueprint', () => {
     expect(getBlueprintDecisions(blueprint)).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'privacy', mode: 'ask' }),
       expect.objectContaining({ id: 'custom', mode: 'manual' }),
+    ]));
+  });
+
+  it('generates stable artifacts and a no-side-effect dry run', () => {
+    const blueprint = createBlueprint('Receipt Desk', { analyticsProviders: ['ga4'] }, 3);
+    const first = createDryRunPlan(blueprint);
+    const second = createDryRunPlan(blueprint);
+
+    expect(first).toEqual(second);
+    expect(first.noExternalChanges).toBe(true);
+    expect(first.artifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'config/env.contract.yaml', content: expect.stringContaining('VITE_GA4_MEASUREMENT_ID') }),
+      expect.objectContaining({ path: 'generated/DELIVERY_HANDOFF.md' }),
     ]));
   });
 });

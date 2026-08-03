@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, RefreshCw, Settings2, ShieldCheck, Sparkles,
 } from 'lucide-react';
-import { getBlueprintDecisions, type BlueprintAnswers, type ProductBlueprint } from '@agent-dev/blueprint';
+import { getBlueprintDecisions, type BlueprintAnswers, type DryRunPlan, type ProductBlueprint } from '@agent-dev/blueprint';
 
 type Project = {
   id: string;
@@ -43,6 +43,8 @@ function answersFromBlueprint(blueprint: ProductBlueprint): BlueprintAnswers {
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
+  const [dryRun, setDryRun] = useState<DryRunPlan | null>(null);
+  const [selectedArtifactId, setSelectedArtifactId] = useState<DryRunPlan['artifacts'][number]['id'] | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
   const [name, setName] = useState('');
   const [answers, setAnswers] = useState<BlueprintAnswers>(defaultAnswers);
@@ -51,6 +53,10 @@ export function App() {
   const [error, setError] = useState('');
 
   const decisions = useMemo(() => selected ? getBlueprintDecisions(selected.blueprint) : [], [selected]);
+  const selectedArtifact = useMemo(
+    () => dryRun?.artifacts.find(artifact => artifact.id === selectedArtifactId) ?? null,
+    [dryRun, selectedArtifactId],
+  );
 
   const loadProjects = async () => {
     setLoading(true);
@@ -75,14 +81,31 @@ export function App() {
       setSelected(payload.project);
       setName(payload.project.name);
       setAnswers(answersFromBlueprint(payload.project.blueprint));
+      void loadDryRun(projectId);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load this Blueprint.');
     }
   };
 
+  const loadDryRun = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/dry-run`);
+      if (!response.ok) throw new Error('Unable to prepare the delivery plan.');
+      const payload = await response.json() as { plan: DryRunPlan };
+      setDryRun(payload.plan);
+      setSelectedArtifactId(current => current && payload.plan.artifacts.some(artifact => artifact.id === current)
+        ? current
+        : payload.plan.artifacts[0]?.id ?? null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to prepare the delivery plan.');
+    }
+  };
+
   const startNewProject = () => {
     setSelected(null);
+    setDryRun(null);
+    setSelectedArtifactId(null);
     setName('');
     setAnswers(defaultAnswers);
     setError('');
@@ -137,6 +160,7 @@ export function App() {
       setSelected(payload.project);
       setName(payload.project.name);
       setAnswers(answersFromBlueprint(payload.project.blueprint));
+      await loadDryRun(payload.project.id);
       await loadProjects();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to save the Blueprint.');
@@ -184,6 +208,17 @@ export function App() {
               <div className="decision-list">{decisions.map(decision => <article className="decision" key={decision.id}>
                 <div><h3>{decision.title}</h3><p>{decision.value}</p><small>{decision.reason}</small></div><span className={`decision-mode ${decision.mode}`}>{decision.mode === 'auto' ? 'Automatic' : decision.mode === 'ask' ? 'Needs approval' : 'Manual step'}</span>
               </article>)}</div>
+            </section>}
+
+            {selected && dryRun && <section className="plan-section" id="standards">
+              <div className="section-heading"><div><p className="eyebrow">Dry run · Revision {dryRun.blueprintRevision}</p><h2>Delivery plan</h2><p>{dryRun.summary}</p></div><span className="dry-run-tag">No external writes</span></div>
+              <div className="plan-grid">
+                <article className="plan-card"><h3>Prepared automatically</h3><ol>{dryRun.automaticPreparation.map(step => <li key={step}>{step}</li>)}</ol></article>
+                <article className="plan-card"><h3>Required from you</h3><ol>{dryRun.manualActions.map(action => <li key={action.id}><strong>{action.title}</strong><span>{action.reason}</span><small>Verify: {action.verification}</small></li>)}</ol></article>
+              </div>
+              <div className="artifact-heading"><div><h3>Generated delivery package</h3><p>Preview only. Files are not yet written to a product repository.</p></div><button className="icon-button" type="button" onClick={() => void loadDryRun(selected.id)} aria-label="Refresh delivery plan" title="Refresh delivery plan"><RefreshCw size={17} /></button></div>
+              <div className="artifact-list">{dryRun.artifacts.map(artifact => <button className={`artifact-button ${selectedArtifact?.id === artifact.id ? 'selected' : ''}`} type="button" key={artifact.id} onClick={() => setSelectedArtifactId(artifact.id)}><strong>{artifact.title}</strong><span>{artifact.path}</span></button>)}</div>
+              {selectedArtifact && <article className="artifact-preview"><div><h3>{selectedArtifact.title}</h3><p>{selectedArtifact.path}</p></div><pre>{selectedArtifact.content}</pre></article>}
             </section>}
           </section>
 

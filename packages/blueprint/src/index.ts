@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export { createDryRunPlan, generateArtifacts, getManualActions, type DryRunPlan, type GeneratedArtifact, type ManualAction } from './generate.js';
 
 export const productTypeSchema = z.literal('web-saas');
 export const blueprintModeSchema = z.enum(['beginner', 'professional']);
