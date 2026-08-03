@@ -1,3 +1,14 @@
+export {
+  runConnectorPreflight,
+  runLocalCommand,
+  type CommandResult,
+  type CommandRunner,
+  type ConnectorId,
+  type ConnectorPreflight,
+  type ConnectorPreflightReport,
+  type ConnectorStatus,
+} from './connectors.js';
+
 export type AutomationMode = 'auto' | 'ask' | 'forbid';
 export type ActionRisk = 'low' | 'medium' | 'high' | 'production' | 'secret';
 

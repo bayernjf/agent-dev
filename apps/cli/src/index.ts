@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { runConnectorPreflight } from '@agent-dev/policy';
 import { startDaemon } from '@agent-dev/daemon';
 
 type Check = {
@@ -23,7 +24,12 @@ async function main() {
   const command = process.argv[2];
   if (command === 'doctor') {
     const checks = commands.map(checkCommand);
-    console.log(JSON.stringify({ checks, ready: checks.every(check => check.available) }, null, 2));
+    const connectors = await runConnectorPreflight();
+    console.log(JSON.stringify({
+      checks,
+      connectors,
+      ready: checks.every(check => check.available) && connectors.readyForAccountDiscovery,
+    }, null, 2));
     return;
   }
 

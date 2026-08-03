@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@agent-dev/daemon": "file:../daemon"
+    "@agent-dev/daemon": "file:../daemon",
+    "@agent-dev/policy": "file:../../packages/policy"
   }
 }

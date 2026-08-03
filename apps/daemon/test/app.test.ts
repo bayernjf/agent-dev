@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentDevStore } from '@agent-dev/storage';
+import type { ConnectorPreflightReport } from '@agent-dev/policy';
 import { createDaemonApp } from '../src/app.js';
 
 const directories: string[] = [];
@@ -16,7 +17,25 @@ describe('daemon API', () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
     directories.push(directory);
     const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
-    const { app } = createDaemonApp(store);
+    const report: ConnectorPreflightReport = {
+      checkedAt: '2026-08-03T00:00:00.000Z',
+      localOnly: true,
+      readyForAccountDiscovery: false,
+      connectors: [{
+        id: 'github',
+        title: 'GitHub',
+        command: 'gh',
+        status: 'available',
+        version: 'gh 1.0.0',
+        detail: 'Local command detected. Account authorization has not been checked.',
+        nextAction: 'Authorize GitHub for account discovery.',
+      }],
+    };
+    const { app } = createDaemonApp(store, undefined, { runPreflight: async () => report });
+
+    const preflight = await app.request('http://localhost/api/connectors/preflight');
+    expect(preflight.status).toBe(200);
+    await expect(preflight.json()).resolves.toEqual(report);
 
     const created = await app.request('http://localhost/api/projects', {
       method: 'POST',

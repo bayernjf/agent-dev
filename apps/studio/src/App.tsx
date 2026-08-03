@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, RefreshCw, Settings2, ShieldCheck, Sparkles,
+  Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles,
 } from 'lucide-react';
 import { getBlueprintDecisions, type BlueprintAnswers, type DryRunPlan, type ProductBlueprint } from '@agent-dev/blueprint';
+import type { ConnectorPreflightReport } from '@agent-dev/policy';
 
 type Project = {
   id: string;
@@ -45,6 +46,8 @@ export function App() {
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
   const [dryRun, setDryRun] = useState<DryRunPlan | null>(null);
   const [selectedArtifactId, setSelectedArtifactId] = useState<DryRunPlan['artifacts'][number]['id'] | null>(null);
+  const [preflight, setPreflight] = useState<ConnectorPreflightReport | null>(null);
+  const [checkingPreflight, setCheckingPreflight] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
   const [name, setName] = useState('');
   const [answers, setAnswers] = useState<BlueprintAnswers>(defaultAnswers);
@@ -109,6 +112,20 @@ export function App() {
     setName('');
     setAnswers(defaultAnswers);
     setError('');
+  };
+
+  const runPreflight = async () => {
+    setCheckingPreflight(true);
+    try {
+      const response = await fetch('/api/connectors/preflight');
+      if (!response.ok) throw new Error('Unable to run local connector preflight.');
+      setPreflight(await response.json() as ConnectorPreflightReport);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to run local connector preflight.');
+    } finally {
+      setCheckingPreflight(false);
+    }
   };
 
   useEffect(() => {
@@ -178,6 +195,7 @@ export function App() {
         <nav aria-label="Studio navigation">
           <a className="nav-item active" href="#projects"><FolderKanban size={18} aria-hidden="true" />Projects</a>
           <a className="nav-item" href="#decisions"><ShieldCheck size={18} aria-hidden="true" />Decisions</a>
+          <a className="nav-item" href="#connections"><PlugZap size={18} aria-hidden="true" />Connections</a>
           <a className="nav-item" href="#activity"><Activity size={18} aria-hidden="true" />Activity</a>
           <a className="nav-item" href="#standards"><Settings2 size={18} aria-hidden="true" />Standards</a>
         </nav>
@@ -255,6 +273,17 @@ export function App() {
               <p className="form-note">The fixed baseline uses React/Vite, Hono, Supabase, Cloudflare Pages and Vercel Functions. Cloud accounts and production releases remain human-approved.</p>
               <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving...' : selected ? 'Save new revision' : 'Create Blueprint'}<ArrowRight size={16} aria-hidden="true" /></button>
             </form>
+            <section className="connector-panel" id="connections">
+              <div className="panel-title"><div><p className="eyebrow">Local only</p><h2>Connector readiness</h2></div><PlugZap size={19} aria-hidden="true" /></div>
+              <p className="form-note">Checks installed command-line tools only. It does not authenticate, access accounts or create resources.</p>
+              <button className="secondary-button" type="button" onClick={() => void runPreflight()} disabled={checkingPreflight}>{checkingPreflight ? 'Checking...' : 'Run local preflight'}<RefreshCw size={15} aria-hidden="true" /></button>
+              {preflight && <>
+                <p className="preflight-summary">{preflight.readyForAccountDiscovery ? 'All local tools are ready for account discovery.' : 'Some local tools need attention before account discovery.'}</p>
+                <div className="connector-list">{preflight.connectors.map(connector => <article className="connector" key={connector.id}>
+                  <div><h3>{connector.title}</h3><p>{connector.version ?? connector.command}</p><small>{connector.detail}</small><em>{connector.nextAction}</em></div><span className={`connector-status ${connector.status}`}>{connector.status === 'available' ? 'Available' : connector.status === 'missing' ? 'Install required' : 'Needs attention'}</span>
+                </article>)}</div>
+              </>}
+            </section>
             <section className="activity-panel" id="activity"><div className="panel-title"><h2>Activity</h2><Activity size={18} aria-hidden="true" /></div><ol>{activity.map(item => <li key={item.id}><span>{item.text}</span><time>{item.time}</time></li>)}</ol></section>
           </aside>
         </div>

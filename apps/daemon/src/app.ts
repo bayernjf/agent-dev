@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { blueprintAnswersSchema, createBlueprint, createDryRunPlan, getBlueprintDecisions } from '@agent-dev/blueprint';
+import { runConnectorPreflight, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { DaemonEventBus } from './events.js';
 
@@ -15,13 +16,21 @@ const reviseBlueprintSchema = z.object({
   answers: blueprintAnswersSchema,
 });
 
-export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus()) {
+export type DaemonDependencies = {
+  runPreflight?: () => Promise<ConnectorPreflightReport>;
+};
+
+export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}) {
   const app = new Hono();
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
 
   app.get('/api/health', context =>
     context.json({ service: 'agent-dev-daemon', status: 'ok', version: '0.1.0-alpha.0' }),
+  );
+
+  app.get('/api/connectors/preflight', async context =>
+    context.json(await (dependencies.runPreflight ?? runConnectorPreflight)()),
   );
 
   app.get('/api/projects', context => context.json({ projects: store.listProjects() }));
