@@ -48,6 +48,9 @@ describe('ProductBlueprint', () => {
     expect(first.artifacts).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: 'config/env.contract.yaml', content: expect.stringContaining('VITE_GA4_MEASUREMENT_ID') }),
       expect.objectContaining({ path: 'generated/DELIVERY_HANDOFF.md' }),
+      expect.objectContaining({ path: 'apps/web/src/main.tsx' }),
+      expect.objectContaining({ path: 'apps/api/src/index.ts', content: expect.stringContaining('/api/health') }),
+      expect.objectContaining({ path: '.github/workflows/quality.yml' }),
     ]));
   });
 });

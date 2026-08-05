@@ -155,7 +155,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const approval = store.getBaselineApproval(projectId, project.blueprint.metadata.revision);
     if (!approval) return context.json({ error: 'Approve the baseline before applying Fake Providers.' }, 409);
     const plans = await fakeProviders.plan(projectId, providerSpecsFromBlueprint(project.blueprint));
-    const results = await fakeProviders.apply(projectId, plans, approval);
+    const results = await fakeProviders.apply(projectId, plans, { id: `${approval.projectId}:${approval.blueprintRevision}`, status: approval.status, approvedAt: approval.approvedAt });
     return context.json({ projectId, noExternalChanges: true, results });
   });
 

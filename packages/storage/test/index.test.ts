@@ -106,6 +106,8 @@ describe('AgentDevStore', () => {
       await expect(readFile(join(completed.workspacePath, 'apply-manifest.json'), 'utf8')).resolves.toContain('No provider resource was created');
       await expect(readFile(join(completed.workspacePath, 'DELIVERY_REPORT.md'), 'utf8')).resolves.toContain('External writes: none');
       await expect(readFile(join(completed.workspacePath, 'generated', 'AGENTS.md'), 'utf8')).resolves.toContain('Agent Execution Constraints');
+      await expect(readFile(join(completed.workspacePath, 'apps', 'web', 'src', 'main.tsx'), 'utf8')).resolves.toContain('createRoot');
+      await expect(readFile(join(completed.workspacePath, 'apps', 'api', 'src', 'index.ts'), 'utf8')).resolves.toContain('/api/health');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true });

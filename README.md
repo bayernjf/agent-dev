@@ -66,6 +66,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 在专业模式保存 GitHub Owner、Supabase Organization、Vercel Team 与 Cloudflare Account，并生成不执行创建操作的资源基线计划；
 - 对已完整选择归属的基线计划记录显式、本地且按 Blueprint Revision 绑定的审批；
 - 在审批后运行本地 Apply Simulator，将生成物、无 Secret 的执行清单和 `DELIVERY_REPORT.md` 写入忽略的 `.agent-dev/apply/` 工作区，并保留逐步骤结果；
+- Local Apply 同时生成固定 Web SaaS 工程基线：Vite/React 前端、Hono API、Cloudflare Pages、Vercel Functions 和 GitHub Actions 质量门禁；
 - Apply 步骤按状态持久化，支持失败后显式重试（最多 3 次）并对已完成 Run 保持幂等；
 - 通过本地 SQLite 保存项目、交付状态和 Blueprint 历史。
 
