@@ -180,6 +180,18 @@ describe('daemon API', () => {
     await expect(quality.json()).resolves.toMatchObject({ result: { status: 'failed', command: 'npm run quality' } });
     const latestQuality = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/quality-gate`);
     await expect(latestQuality.json()).resolves.toMatchObject({ result: { status: 'failed' } });
+    const task = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/feature-task`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintRevision: 1, title: 'Add receipt list', objective: 'Show saved receipts to the user.', acceptanceCriteria: ['The list renders saved receipts.'] }),
+    });
+    expect(task.status).toBe(201);
+    await expect(task.json()).resolves.toMatchObject({ task: { status: 'draft', title: 'Add receipt list' } });
+    const approvedTask = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/feature-task/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_FEATURE_TASK', approvedBy: 'test-user' }),
+    });
+    expect(approvedTask.status).toBe(200);
+    await expect(approvedTask.json()).resolves.toMatchObject({ task: { status: 'approved', approvedBy: 'test-user' } });
     const invalidRetry = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply/retry`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -187,5 +199,5 @@ describe('daemon API', () => {
     });
     expect(invalidRetry.status).toBe(409);
     await store.close();
-  });
+  }, 10_000);
 });

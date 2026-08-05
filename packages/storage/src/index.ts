@@ -106,6 +106,20 @@ export type DependencyInstallResult = {
   workspacePath: string;
 };
 
+export type FeatureTask = {
+  id: string;
+  projectId: string;
+  blueprintRevision: number;
+  title: string;
+  objective: string;
+  acceptanceCriteria: string[];
+  status: 'draft' | 'approved';
+  approvedBy?: string;
+  approvedAt?: string;
+  workspacePath: string;
+  createdAt: string;
+};
+
 export class AgentDevStore {
   private readonly orm: ReturnType<typeof createOrm>;
 
@@ -539,6 +553,43 @@ export class AgentDevStore {
     return result;
   }
 
+  async createFeatureTask(input: Omit<FeatureTask, 'id' | 'status' | 'workspacePath' | 'createdAt' | 'approvedBy' | 'approvedAt'>): Promise<FeatureTask> {
+    const run = this.getLatestApplyRun(input.projectId, input.blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before creating a feature task.');
+    const existing = await this.getFeatureTask(input.projectId, input.blueprintRevision);
+    if (existing) return existing;
+    const task: FeatureTask = { ...input, id: randomUUID(), status: 'draft', workspacePath: run.workspacePath, createdAt: new Date().toISOString() };
+    await writeFile(join(run.workspacePath, 'feature-task.json'), JSON.stringify(task, null, 2) + '\n', 'utf8');
+    await writeFile(join(run.workspacePath, 'FEATURE_TASK.md'), this.buildFeatureTask(task), 'utf8');
+    await execFileAsync('git', ['add', 'feature-task.json', 'FEATURE_TASK.md'], { cwd: run.workspacePath });
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `task: define ${task.title}`], { cwd: run.workspacePath });
+    return task;
+  }
+
+  async getFeatureTask(projectId: string, blueprintRevision: number): Promise<FeatureTask | null> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run) return null;
+    try {
+      return JSON.parse(await readFile(join(run.workspacePath, 'feature-task.json'), 'utf8')) as FeatureTask;
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  async approveFeatureTask(projectId: string, blueprintRevision: number, approvedBy: string): Promise<FeatureTask> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task) throw new Error('Create a feature task before approving it.');
+    if (task.status === 'approved') return task;
+    const approved: FeatureTask = { ...task, status: 'approved', approvedBy, approvedAt: new Date().toISOString() };
+    await writeFile(join(task.workspacePath, 'feature-task.json'), JSON.stringify(approved, null, 2) + '\n', 'utf8');
+    await writeFile(join(task.workspacePath, 'FEATURE_TASK.md'), this.buildFeatureTask(approved), 'utf8');
+    await writeFile(join(task.workspacePath, 'TASK_APPROVAL.md'), `# Feature Task Approval\n\n- Task: ${approved.title}\n- Approved by: ${approved.approvedBy}\n- Approved at: ${approved.approvedAt}\n- Blueprint revision: ${approved.blueprintRevision}\n\nThe acceptance criteria in FEATURE_TASK.md are the governing human approval boundary for this task.\n`, 'utf8');
+    await execFileAsync('git', ['add', 'feature-task.json', 'FEATURE_TASK.md', 'TASK_APPROVAL.md'], { cwd: task.workspacePath });
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `task: approve ${approved.title}`], { cwd: task.workspacePath });
+    return approved;
+  }
+
   async close() {
     await this.persist();
     this.sqlite.close();
@@ -632,6 +683,10 @@ export class AgentDevStore {
 
   private buildDependencyInstallReport(result: DependencyInstallResult) {
     return `# Dependency Installation Report\n\n- Status: ${result.status}\n- Command: \`${result.command}\`\n- Exit code: ${result.exitCode}\n- Blueprint revision: ${result.blueprintRevision}\n- Started: ${result.startedAt}\n- Completed: ${result.completedAt}\n\n## Output\n\n\`\`\`text\n${result.output || '(no output)'}\n\`\`\`\n\n## Boundary\n\nThis installation was explicitly requested and ran only inside the local Agent-Dev workspace. No provider or production resource was changed.\n`;
+  }
+
+  private buildFeatureTask(task: FeatureTask) {
+    return `# ${task.title}\n\n- Task ID: ${task.id}\n- Blueprint revision: ${task.blueprintRevision}\n- Status: ${task.status}\n- Created: ${task.createdAt}\n${task.approvedBy ? `- Approved by: ${task.approvedBy}\n- Approved at: ${task.approvedAt}\n` : ''}\n## Objective\n\n${task.objective}\n\n## Acceptance criteria\n\n${task.acceptanceCriteria.map((criterion, index) => `${index + 1}. [ ] ${criterion}`).join('\n')}\n\n## Agent boundary\n\nImplement only this task on the existing local feature branch. Run the configured quality gate and report evidence before requesting human acceptance.\n`;
   }
 
   private async persist() {

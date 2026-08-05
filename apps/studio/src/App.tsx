@@ -22,6 +22,7 @@ type ApplyRun = { id: string; projectId: string; blueprintRevision: number; stat
 type DependencyReadiness = { status: 'not-applied' | 'missing-dependencies' | 'ready'; workspacePath: string | null; packageLockPresent: boolean; nodeModulesPresent: boolean; qualityCommandPresent: boolean; nextAction: string };
 type QualityGateResult = { status: 'passed' | 'failed'; command: string; exitCode: number; output: string; completedAt: string };
 type DependencyInstallResult = { status: 'installed' | 'failed'; exitCode: number; output: string; completedAt: string };
+type FeatureTask = { id: string; blueprintRevision: number; title: string; objective: string; acceptanceCriteria: string[]; status: 'draft' | 'approved'; approvedBy?: string; approvedAt?: string };
 type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
 type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
 
@@ -66,6 +67,7 @@ export function App() {
   const [applyRun, setApplyRun] = useState<ApplyRun | null>(null);
   const [dependencyReadiness, setDependencyReadiness] = useState<DependencyReadiness | null>(null);
   const [qualityGateResult, setQualityGateResult] = useState<QualityGateResult | null>(null);
+  const [featureTask, setFeatureTask] = useState<FeatureTask | null>(null);
   const [providerPlans, setProviderPlans] = useState<ProviderPlan[]>([]);
   const [providerVerification, setProviderVerification] = useState<ProviderVerification[] | null>(null);
   const [providerReport, setProviderReport] = useState('');
@@ -77,6 +79,7 @@ export function App() {
   const [approvingBaseline, setApprovingBaseline] = useState(false);
   const [applyingBaseline, setApplyingBaseline] = useState(false);
   const [installingDependencies, setInstallingDependencies] = useState(false);
+  const [savingFeatureTask, setSavingFeatureTask] = useState(false);
   const [applyingFakeProviders, setApplyingFakeProviders] = useState(false);
   const [verifyingProviders, setVerifyingProviders] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
@@ -85,6 +88,9 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [featureTitle, setFeatureTitle] = useState('');
+  const [featureObjective, setFeatureObjective] = useState('');
+  const [featureCriteria, setFeatureCriteria] = useState('');
 
   const decisions = useMemo(() => selected ? getBlueprintDecisions(selected.blueprint) : [], [selected]);
   const selectedArtifact = useMemo(
@@ -120,6 +126,7 @@ export function App() {
       void loadApplyRun(projectId);
       void loadDependencyReadiness(projectId);
       void loadQualityGate(projectId);
+      void loadFeatureTask(projectId);
       void loadProviderPlan(projectId);
       setError('');
     } catch (cause) {
@@ -186,6 +193,17 @@ export function App() {
     }
   };
 
+  const loadFeatureTask = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/feature-task`);
+      if (!response.ok) throw new Error('Unable to load the feature task.');
+      const payload = await response.json() as { task: FeatureTask | null };
+      setFeatureTask(payload.task);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load the feature task.');
+    }
+  };
+
   const loadProviderPlan = async (projectId: string) => {
     try {
       const response = await fetch(`/api/projects/${projectId}/provider-plan`);
@@ -207,6 +225,7 @@ export function App() {
     setApplyRun(null);
     setDependencyReadiness(null);
     setQualityGateResult(null);
+    setFeatureTask(null);
     setProviderPlans([]);
     setProviderVerification(null);
     setProviderReport('');
@@ -214,6 +233,9 @@ export function App() {
     setName('');
     setAnswers(defaultAnswers);
     setError('');
+    setFeatureTitle('');
+    setFeatureObjective('');
+    setFeatureCriteria('');
   };
 
   const runPreflight = async () => {
@@ -348,6 +370,50 @@ export function App() {
       setError(cause instanceof Error ? cause.message : 'Unable to install dependencies.');
     } finally {
       setInstallingDependencies(false);
+    }
+  };
+
+  const createFeatureTask = async () => {
+    if (!selected || !applyRun || applyRun.status !== 'completed' || savingFeatureTask) return;
+    const acceptanceCriteria = featureCriteria.split('\n').map(value => value.trim()).filter(Boolean);
+    if (featureTitle.trim().length < 3 || featureObjective.trim().length < 10 || acceptanceCriteria.length === 0) {
+      setError('Provide a task title, objective, and at least one acceptance criterion.');
+      return;
+    }
+    setSavingFeatureTask(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/feature-task`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ blueprintRevision: applyRun.blueprintRevision, title: featureTitle, objective: featureObjective, acceptanceCriteria }),
+      });
+      const payload = await response.json() as { task?: FeatureTask; error?: string };
+      if (!response.ok || !payload.task) throw new Error(payload.error ?? 'Unable to create the feature task.');
+      setFeatureTask(payload.task);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to create the feature task.');
+    } finally {
+      setSavingFeatureTask(false);
+    }
+  };
+
+  const approveFeatureTask = async () => {
+    if (!selected || !featureTask || featureTask.status !== 'draft' || savingFeatureTask) return;
+    if (!window.confirm('Approve this task and its acceptance criteria for Agent execution?')) return;
+    setSavingFeatureTask(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/feature-task/approve`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ blueprintRevision: featureTask.blueprintRevision, confirmation: 'APPROVE_FEATURE_TASK' }),
+      });
+      const payload = await response.json() as { task?: FeatureTask; error?: string };
+      if (!response.ok || !payload.task) throw new Error(payload.error ?? 'Unable to approve the feature task.');
+      setFeatureTask(payload.task);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to approve the feature task.');
+    } finally {
+      setSavingFeatureTask(false);
     }
   };
 
@@ -512,6 +578,7 @@ export function App() {
               {baselineApproval && !applyRun && <div className="approval-action"><p>Run the local simulator to create the delivery package in the ignored `.agent-dev` workspace.</p><button className="primary-button" type="button" onClick={() => void applyBaseline()} disabled={applyingBaseline}>{applyingBaseline ? 'Applying locally...' : 'Run local Apply'}<ArrowRight size={16} aria-hidden="true" /></button></div>}
               {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>Attempt {applyRun.attempts} of 3 · {applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? 'Retrying...' : 'Retry local Apply'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}
               {applyRun?.status === 'completed' && dependencyReadiness && <div className={`quality-gate ${dependencyReadiness.status}`}><div><p className="eyebrow">Local quality gate</p><h3>{qualityGateResult ? `Last run: ${qualityGateResult.status}` : dependencyReadiness.status === 'ready' ? 'Ready to run' : 'Dependencies required'}</h3><p>{dependencyReadiness.nextAction}</p></div>{dependencyReadiness.status === 'missing-dependencies' && <button className="secondary-button" type="button" onClick={() => void installDependencies()} disabled={installingDependencies}>{installingDependencies ? 'Installing...' : 'Install dependencies'}<ArrowRight size={15} aria-hidden="true" /></button>}{dependencyReadiness.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void runQualityGate()} disabled={applyingBaseline}>{applyingBaseline ? 'Running...' : 'Run quality gate'}<CheckCircle2 size={15} aria-hidden="true" /></button>}</div>}
+              {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">Feature delivery</p><h3>{featureTask ? featureTask.title : 'Define the next feature'}</h3><p>{featureTask ? `Task is ${featureTask.status}. Acceptance criteria are the Agent boundary.` : 'Create a focused task package before asking an Agent to change code.'}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{featureTask.status}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">Task title</label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder="e.g. Add receipt list" maxLength={120} /><label htmlFor="feature-objective">Objective</label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder="What user outcome should this feature deliver?" maxLength={2000} /><label htmlFor="feature-criteria">Acceptance criteria <small>one per line</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder="The list renders saved receipts.\nEmpty state is visible." maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Creating task...' : 'Create feature task'}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.status === 'draft' ? <button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Approving...' : 'Approve task for Agent'}<ShieldCheck size={15} aria-hidden="true" /></button> : <small>Approved by {featureTask.approvedBy} · {featureTask.approvedAt && formatDate(featureTask.approvedAt)}</small>}</div>}</div>}
               <p className="baseline-note">No remote resource has been created. The simulator writes only local generated artifacts and an execution manifest.</p>
               <div className="provider-simulation"><div className="provider-simulation-heading"><div><p className="eyebrow">Simulation only</p><h3>Provider lifecycle</h3><p>Plans and verification use in-memory Fake Providers. No GitHub, Supabase, Vercel or Cloudflare API is called.</p></div><span className="dry-run-tag">No external writes</span></div><div className="provider-plan-list">{providerPlans.map(plan => <article className="provider-plan" key={plan.providerId}><div><strong>{plan.providerId}</strong><small>{plan.idempotencyKey}</small></div><ol>{plan.resources.map(resource => <li key={resource.spec.id}><span>{resource.spec.id}</span><em>{resource.action}</em><small>{resource.reason}</small></li>)}</ol></article>)}</div><div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void verifyProviders()} disabled={verifyingProviders}>{verifyingProviders ? 'Verifying...' : 'Verify simulation state'}<RefreshCw size={15} aria-hidden="true" /></button>{baselineApproval && <button className="secondary-button" type="button" onClick={() => void applyFakeProviders()} disabled={applyingFakeProviders}>{applyingFakeProviders ? 'Applying simulation...' : 'Apply Fake Providers'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{providerVerification && <div className="provider-verification">{providerVerification.map(item => <span className={item.verified ? 'verified' : 'unverified'} key={item.providerId}>{item.providerId}: {item.verified ? 'verified' : `missing ${item.missing.length}, drift ${item.mismatched.length}`}</span>)}</div>}{providerReport && <pre className="provider-report">{providerReport}</pre>}</div>
             </section>}

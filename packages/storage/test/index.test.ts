@@ -119,6 +119,12 @@ describe('AgentDevStore', () => {
       await expect(store.getQualityGateResult(created.id, 1)).resolves.toMatchObject({ status: 'failed', command: 'npm run quality' });
       await expect(readFile(join(completed.workspacePath, 'quality-gate.json'), 'utf8')).resolves.toContain('"status": "failed"');
       await expect(readFile(join(completed.workspacePath, 'QUALITY_REPORT.md'), 'utf8')).resolves.toContain('# Quality Gate Report');
+      const task = await store.createFeatureTask({ projectId: created.id, blueprintRevision: 1, title: 'Add receipt list', objective: 'Show the user a list of saved receipts.', acceptanceCriteria: ['The list renders saved receipts.', 'Empty state is visible when there are no receipts.'] });
+      expect(task.status).toBe('draft');
+      const approvedTask = await store.approveFeatureTask(created.id, 1, 'test-user');
+      expect(approvedTask).toMatchObject({ status: 'approved', approvedBy: 'test-user' });
+      await expect(readFile(join(completed.workspacePath, 'FEATURE_TASK.md'), 'utf8')).resolves.toContain('The list renders saved receipts.');
+      await expect(readFile(join(completed.workspacePath, 'TASK_APPROVAL.md'), 'utf8')).resolves.toContain('Approved by: test-user');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true });

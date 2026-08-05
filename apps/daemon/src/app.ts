@@ -43,6 +43,19 @@ const dependencyInstallSchema = z.object({
   confirmation: z.literal('INSTALL_DEPENDENCIES'),
 });
 
+const featureTaskSchema = z.object({
+  blueprintRevision: z.number().int().positive(),
+  title: z.string().trim().min(3).max(120),
+  objective: z.string().trim().min(10).max(2000),
+  acceptanceCriteria: z.array(z.string().trim().min(3).max(500)).min(1).max(20),
+});
+
+const featureTaskApprovalSchema = z.object({
+  blueprintRevision: z.number().int().positive(),
+  confirmation: z.literal('APPROVE_FEATURE_TASK'),
+  approvedBy: z.string().trim().min(1).max(120).default('local-user'),
+});
+
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
@@ -190,6 +203,42 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     return context.json({ result: await store.getQualityGateResult(project.id, project.blueprint.metadata.revision) });
+  });
+
+  app.get('/api/projects/:projectId/feature-task', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    return context.json({ task: await store.getFeatureTask(project.id, project.blueprint.metadata.revision) });
+  });
+
+  app.post('/api/projects/:projectId/feature-task', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = featureTaskSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'A feature task requires a current revision, objective and at least one acceptance criterion.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    if (project.blueprint.metadata.revision !== parsed.data.blueprintRevision) return context.json({ error: 'The feature task must target the current Blueprint revision.' }, 409);
+    try {
+      const task = await store.createFeatureTask({ projectId, ...parsed.data });
+      return context.json({ task }, 201);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to create the feature task.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/feature-task/approve', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = featureTaskApprovalSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Feature task approval requires confirmation APPROVE_FEATURE_TASK.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    if (project.blueprint.metadata.revision !== parsed.data.blueprintRevision) return context.json({ error: 'The feature task approval must target the current Blueprint revision.' }, 409);
+    try {
+      const task = await store.approveFeatureTask(projectId, parsed.data.blueprintRevision, parsed.data.approvedBy);
+      return context.json({ task });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to approve the feature task.' }, 409);
+    }
   });
 
   app.get('/api/projects/:projectId/provider-plan', async context => {
