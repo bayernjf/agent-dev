@@ -49,7 +49,7 @@ export type BaselineApproval = {
 };
 
 export type ApplyStep = {
-  id: 'validate-blueprint' | 'create-workspace' | 'write-artifacts' | 'write-manifest' | 'write-report' | 'initialize-git';
+  id: 'validate-blueprint' | 'create-workspace' | 'write-artifacts' | 'write-manifest' | 'initialize-git' | 'create-feature-branch' | 'write-report';
   title: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   detail?: string;
@@ -324,6 +324,7 @@ export class AgentDevStore {
       { id: 'write-artifacts', title: 'Write generated delivery artifacts', status: 'pending' },
       { id: 'write-manifest', title: 'Write execution manifest', status: 'pending' },
       { id: 'initialize-git', title: 'Initialize local Git baseline', status: 'pending' },
+      { id: 'create-feature-branch', title: 'Create local feature branch', status: 'pending' },
       { id: 'write-report', title: 'Write delivery report', status: 'pending' },
     ];
     this.orm.insert(applyRuns).values({ id, projectId, blueprintRevision, status: 'queued', attempts: 0, workspacePath, stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now }).run();
@@ -365,9 +366,26 @@ export class AgentDevStore {
       await this.executePendingStep(run, steps[4], attempts, options, async () => {
         await execFileAsync('git', ['init', '-q'], { cwd: run.workspacePath });
         await execFileAsync('git', ['add', '-A'], { cwd: run.workspacePath });
-        await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `chore: establish ${project.blueprint.metadata.name} baseline`], { cwd: run.workspacePath });
+        try {
+          await execFileAsync('git', ['rev-parse', '--verify', 'HEAD'], { cwd: run.workspacePath });
+        } catch {
+          await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `chore: establish ${project.blueprint.metadata.name} baseline`], { cwd: run.workspacePath });
+        }
       });
       await this.executePendingStep(run, steps[5], attempts, options, async () => {
+        const featureBranch = `feature/agent-dev/revision-${run.blueprintRevision}`;
+        const branches = await execFileAsync('git', ['branch', '--list', featureBranch], { cwd: run.workspacePath });
+        if (branches.stdout.trim()) await execFileAsync('git', ['switch', featureBranch], { cwd: run.workspacePath });
+        else await execFileAsync('git', ['switch', '-c', featureBranch], { cwd: run.workspacePath });
+        const baselineCommit = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: run.workspacePath })).stdout.trim();
+        const manifestPath = join(run.workspacePath, 'apply-manifest.json');
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+        manifest.git = { baselineCommit, featureBranch };
+        await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+        await execFileAsync('git', ['add', 'apply-manifest.json'], { cwd: run.workspacePath });
+        await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '--amend', '--no-edit', '-q'], { cwd: run.workspacePath });
+      });
+      await this.executePendingStep(run, steps[6], attempts, options, async () => {
         await writeFile(join(run.workspacePath, 'DELIVERY_REPORT.md'), this.buildDeliveryReport(run, project.blueprint.metadata.name, steps, 'completed'), 'utf8');
         await execFileAsync('git', ['add', 'DELIVERY_REPORT.md'], { cwd: run.workspacePath });
         await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '--amend', '--no-edit', '-q'], { cwd: run.workspacePath });
@@ -474,7 +492,8 @@ export class AgentDevStore {
 
   private buildDeliveryReport(run: ApplyRun, projectName: string, steps: ApplyStep[], status: 'completed' | 'failed') {
     const stepRows = steps.map(step => `| ${step.title} | ${step.status} | ${step.detail ?? ''} |`).join('\n');
-    return `# ${projectName} Delivery Report\n\n- Blueprint revision: ${run.blueprintRevision}\n- Apply run: ${run.id}\n- Status: ${status}\n- Workspace: ${run.workspacePath}\n- External writes: none\n\n## Local evidence\n\n| Step | Result | Detail |\n| --- | --- | --- |\n${stepRows}\n\n## External actions not executed\n\n- No GitHub repository or branch was created.\n- No Supabase project, schema, or Auth configuration was changed.\n- No Vercel deployment was created.\n- No Cloudflare Pages project or deployment was created.\n\n## Recovery and rollback\n\nThis report describes the Local Apply Simulator only. Delete the ignored workspace directory to remove its generated files. A future provider Apply must provide idempotency keys, a provider diff, and an explicit rollback plan before executing remote writes.\n`;
+    const featureBranch = `feature/agent-dev/revision-${run.blueprintRevision}`;
+    return `# ${projectName} Delivery Report\n\n- Blueprint revision: ${run.blueprintRevision}\n- Apply run: ${run.id}\n- Status: ${status}\n- Workspace: ${run.workspacePath}\n- Local feature branch: ${featureBranch}\n- External writes: none\n\n## Local evidence\n\n| Step | Result | Detail |\n| --- | --- | --- |\n${stepRows}\n\n## External actions not executed\n\n- No GitHub repository or remote branch was created.\n- No Supabase project, schema, or Auth configuration was changed.\n- No Vercel deployment was created.\n- No Cloudflare Pages project or deployment was created.\n\n## Recovery and rollback\n\nThis report describes the Local Apply Simulator only. Delete the ignored workspace directory to remove its generated files. A future provider Apply must provide idempotency keys, a provider diff, and an explicit rollback plan before executing remote writes.\n`;
   }
 
   private async persist() {
