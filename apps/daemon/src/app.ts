@@ -8,7 +8,7 @@ import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { buildCodexExecutionPlan, probeCodexRuntime } from '@agent-dev/agent-runtime';
 import { DaemonEventBus } from './events.js';
-import { buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint } from './providers.js';
+import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint } from './providers.js';
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -271,6 +271,19 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     return context.json({ acceptance: await store.getAcceptance(project.id, project.blueprint.metadata.revision) });
+  });
+
+  app.get('/api/projects/:projectId/delivery-report', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const revision = project.blueprint.metadata.revision;
+    const localApply = store.getLatestApplyRun(project.id, revision);
+    const task = await store.getFeatureTask(project.id, revision);
+    const runtime = await store.getRuntimeRun(project.id, revision);
+    const quality = await store.getQualityGateResult(project.id, revision);
+    const acceptance = await store.getAcceptance(project.id, revision);
+    const git = localApply?.status === 'completed' ? await store.getGitEvidence(project.id, revision) : null;
+    return context.json({ report: buildFinalDeliveryReport(project.name, { localApply, task, runtime: runtime ? { status: runtime.status, mode: runtime.plan.mode, executionAllowed: runtime.plan.executionAllowed } : null, quality, acceptance, git }) });
   });
 
   app.post('/api/projects/:projectId/acceptance', async context => {

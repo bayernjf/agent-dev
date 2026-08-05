@@ -78,6 +78,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期、Git branch/HEAD/diff evidence 和 `RUNTIME_RUN_REPORT.md`；它不会把计划状态标记为代码已完成。
 - Studio 已展示 Runtime Run 状态、取消动作和 Git evidence；当前界面不会提供绕过 Gate 的 Codex 写入按钮。
 - Acceptance Gate 已接入 Studio：提交验收总结和标准确认后，根据 Quality Gate/Git evidence 生成 `ACCEPTANCE_REPORT.md`；blocked 状态不能批准交付。
+- `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
 - 模板基线带有根 TypeScript/Vite 配置，可执行 `npm run quality` 和 `npm run build` 作为生成工程的质量入口；
 - Apply 步骤按状态持久化，支持失败后显式重试（最多 3 次）并对已完成 Run 保持幂等；

@@ -20,3 +20,15 @@ export function buildUnifiedDeliveryReport(projectName: string, localApply: { st
   const localRows = localApply?.steps.map(step => `| ${step.title} | ${step.status} | ${step.detail ?? ''} |`).join('\n') || '| Local Apply | not started | No local Apply run exists for this revision. |';
   return `# ${projectName} Delivery Report\n\n> Local-first report. Provider state is simulated in memory; no external API or CLI was called.\n\n## Local Apply\n\n- Status: ${localApply?.status ?? 'not-started'}\n- Attempts: ${localApply?.attempts ?? 0}\n- Workspace: ${localApply?.workspacePath ?? 'not created'}\n\n| Step | Result | Detail |\n| --- | --- | --- |\n${localRows}\n\n## Provider Simulation\n\n${providerReport.replace(/^# .*\n\n/, '')}\n\n## Delivery boundary\n\nA real Provider Apply remains unimplemented. Before any external write, Agent-Dev must add provider-specific credentials, idempotency, read-back verification, approval evidence and rollback instructions.\n`;
 }
+
+export function buildFinalDeliveryReport(projectName: string, evidence: {
+  localApply: { status: string; workspacePath: string; attempts: number } | null;
+  task: { title: string; status: string; acceptanceCriteria: string[] } | null;
+  runtime: { status: string; mode: string; executionAllowed: boolean } | null;
+  quality: { status: string; exitCode: number } | null;
+  acceptance: { status: string; criteriaConfirmed: boolean; summary: string; approvedBy?: string } | null;
+  git: { branch: string; head: string; status: string; diffStat: string } | null;
+}) {
+  const criteria = evidence.task?.acceptanceCriteria.map(item => `- ${item}`).join('\n') || '- No approved Feature Task.';
+  return `# ${projectName} Final Delivery Report\n\n> Local-first evidence report. No external provider write is claimed.\n\n## Delivery status\n\n- Local Apply: ${evidence.localApply?.status ?? 'not-started'}\n- Feature Task: ${evidence.task?.status ?? 'not-created'}${evidence.task ? ` (${evidence.task.title})` : ''}\n- Runtime: ${evidence.runtime?.status ?? 'not-prepared'}${evidence.runtime ? ` / ${evidence.runtime.mode}` : ''}\n- Quality Gate: ${evidence.quality?.status ?? 'missing'}${evidence.quality ? ` (exit ${evidence.quality.exitCode})` : ''}\n- Acceptance: ${evidence.acceptance?.status ?? 'missing'}\n\n## Acceptance criteria\n\n${criteria}\n\n## Git evidence\n\n${evidence.git ? `- Branch: ${evidence.git.branch}\n- HEAD: ${evidence.git.head}\n- Working tree: ${evidence.git.status || 'clean'}\n- Diff: ${evidence.git.diffStat || 'no changes'}` : '- Git evidence unavailable.'}\n\n## Human acceptance\n\n${evidence.acceptance ? `- Criteria confirmed: ${evidence.acceptance.criteriaConfirmed}\n- Summary: ${evidence.acceptance.summary}\n- Approved by: ${evidence.acceptance.approvedBy ?? 'not approved'}` : 'No acceptance record submitted.'}\n\n## Boundary\n\nProduction deployment, real GitHub PR/Actions, Vercel, Cloudflare and Supabase writes remain outside this report until their provider-specific evidence and approvals exist.\n`;
+}

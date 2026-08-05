@@ -212,6 +212,9 @@ describe('daemon API', () => {
     });
     expect(acceptance.status).toBe(422);
     await expect(acceptance.json()).resolves.toMatchObject({ acceptance: { status: 'blocked', qualityStatus: 'failed' } });
+    const finalReport = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/delivery-report`);
+    expect(finalReport.status).toBe(200);
+    await expect(finalReport.json()).resolves.toMatchObject({ report: expect.stringContaining('# Ready Baseline Final Delivery Report') });
     const blockedApproval = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/acceptance/approve`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ confirmation: 'APPROVE_DELIVERY', approvedBy: 'test-user' }),
