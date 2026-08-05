@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/sql-js';
 import initSqlJs, { type Database } from 'sql.js';
 import type { ProductBlueprint } from '@agent-dev/blueprint';
 import { createBaselinePlan, createDryRunPlan, productBlueprintSchema } from '@agent-dev/blueprint';
-import { createNeedsInputRun, type DeliveryState } from '@agent-dev/workflow';
+import { createNeedsInputRun, restoreDeliveryActor, type DeliveryEvent, type DeliverySnapshot, type DeliveryState } from '@agent-dev/workflow';
 import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects } from './schema.js';
 import { migrations } from './migrations.js';
 
@@ -282,6 +282,7 @@ export class AgentDevStore {
       approvedAt,
     }).run();
     await this.persist();
+    await this.advanceDelivery(projectId, [{ type: 'PLAN_COMPLETE' }, { type: 'APPROVE_PROVISIONING' }]);
     return approval;
   }
 
@@ -356,7 +357,9 @@ export class AgentDevStore {
       await this.executePendingStep(run, steps[4], attempts, async () => {
         await writeFile(join(run.workspacePath, 'DELIVERY_REPORT.md'), this.buildDeliveryReport(run, project.blueprint.metadata.name, steps, 'completed'), 'utf8');
       });
-      return await this.updateApplyRun(run, 'completed', steps, attempts);
+      const completed = await this.updateApplyRun(run, 'completed', steps, attempts);
+      await this.advanceDelivery(run.projectId, [{ type: 'BASELINE_CREATED' }]);
+      return completed;
     } catch (error) {
       const failed = steps.find(step => step.status === 'running');
       if (failed) failed.status = 'failed';
@@ -376,6 +379,26 @@ export class AgentDevStore {
   async close() {
     await this.persist();
     this.sqlite.close();
+  }
+
+  async advanceDelivery(projectId: string, events: DeliveryEvent[]): Promise<StoredProject> {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error(`Project ${projectId} was not found.`);
+    const actor = restoreDeliveryActor({ projectId: project.id, runId: project.runId }, project.snapshot as DeliverySnapshot);
+    try {
+      for (const event of events) actor.send(event);
+      const snapshot = actor.getPersistedSnapshot();
+      const state = actor.getSnapshot().value as DeliveryState;
+      const updatedAt = new Date().toISOString();
+      this.orm.update(deliveryRuns).set({ state, snapshotJson: JSON.stringify(snapshot), updatedAt }).where(eq(deliveryRuns.id, project.runId)).run();
+      this.orm.update(projects).set({ status: state, updatedAt }).where(eq(projects.id, projectId)).run();
+      await this.persist();
+    } finally {
+      actor.stop();
+    }
+    const updated = this.getProject(projectId);
+    if (!updated) throw new Error(`Project ${projectId} was not found after state transition.`);
+    return updated;
   }
 
   private runMigrations() {

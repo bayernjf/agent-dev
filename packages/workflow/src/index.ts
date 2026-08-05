@@ -81,6 +81,12 @@ export function createDeliveryActor(input: Pick<DeliveryContext, 'projectId' | '
   return createActor(deliveryMachine, { input }).start();
 }
 
+export type DeliverySnapshot = ReturnType<ReturnType<typeof createDeliveryActor>['getPersistedSnapshot']>;
+
+export function restoreDeliveryActor(input: Pick<DeliveryContext, 'projectId' | 'runId'>, snapshot: DeliverySnapshot) {
+  return createActor(deliveryMachine, { input, snapshot }).start();
+}
+
 export function createNeedsInputRun(input: Pick<DeliveryContext, 'projectId' | 'runId'>) {
   const actor = createDeliveryActor(input);
   actor.send({ type: 'REQUEST_INPUT' });

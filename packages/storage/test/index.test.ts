@@ -68,6 +68,7 @@ describe('AgentDevStore', () => {
       const approval = await store.approveBaseline(created.id, 1, 'test-user');
       expect(approval).toMatchObject({ projectId: created.id, blueprintRevision: 1, status: 'approved', approvedBy: 'test-user' });
       expect(store.getBaselineApproval(created.id, 1)).toEqual(approval);
+      expect(store.getProject(created.id)?.state).toBe('PROVISIONING');
 
       await store.close();
       const reopened = await AgentDevStore.open(databasePath);
@@ -100,6 +101,7 @@ describe('AgentDevStore', () => {
       expect(completed.status).toBe('completed');
       expect(completed.attempts).toBe(1);
       expect(completed.steps.every(step => step.status === 'completed')).toBe(true);
+      expect(store.getProject(created.id)?.state).toBe('BASELINE_READY');
       await expect(store.executeApplyRun(queued.id)).resolves.toMatchObject({ id: queued.id, status: 'completed', attempts: 1 });
       await expect(readFile(join(completed.workspacePath, 'apply-manifest.json'), 'utf8')).resolves.toContain('No provider resource was created');
       await expect(readFile(join(completed.workspacePath, 'DELIVERY_REPORT.md'), 'utf8')).resolves.toContain('External writes: none');
