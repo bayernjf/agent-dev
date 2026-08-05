@@ -50,9 +50,10 @@ describe('ProductBlueprint', () => {
       expect.objectContaining({ path: 'generated/DELIVERY_HANDOFF.md' }),
       expect.objectContaining({ path: 'apps/web/src/main.tsx' }),
       expect.objectContaining({ path: 'tsconfig.json', content: expect.stringContaining('react-jsx') }),
+      expect.objectContaining({ path: 'package.json', content: expect.stringContaining('"name": "receipt-desk"') }),
       expect.objectContaining({ path: 'vite.config.ts', content: expect.stringContaining('@vitejs/plugin-react') }),
       expect.objectContaining({ path: 'apps/api/src/index.ts', content: expect.stringContaining('/api/health') }),
-      expect.objectContaining({ path: '.github/workflows/quality.yml' }),
+      expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('npm install') }),
     ]));
   });
 });
