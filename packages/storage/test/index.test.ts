@@ -109,6 +109,7 @@ describe('AgentDevStore', () => {
       await expect(readFile(join(completed.workspacePath, 'apps', 'web', 'src', 'main.tsx'), 'utf8')).resolves.toContain('createRoot');
       await expect(readFile(join(completed.workspacePath, 'apps', 'api', 'src', 'index.ts'), 'utf8')).resolves.toContain('/api/health');
       await expect(readFile(join(completed.workspacePath, 'tsconfig.json'), 'utf8')).resolves.toContain('react-jsx');
+      await expect(readFile(join(completed.workspacePath, '.git', 'HEAD'), 'utf8')).resolves.toContain('refs/heads/');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true });

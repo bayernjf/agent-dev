@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -12,6 +14,7 @@ import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, project
 import { migrations } from './migrations.js';
 
 const require = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 
 function createOrm(database: Database) {
   return drizzle(database, { schema: { applyRuns, baselineApprovals, projects, blueprintRevisions, deliveryRuns } });
@@ -46,7 +49,7 @@ export type BaselineApproval = {
 };
 
 export type ApplyStep = {
-  id: 'validate-blueprint' | 'create-workspace' | 'write-artifacts' | 'write-manifest' | 'write-report';
+  id: 'validate-blueprint' | 'create-workspace' | 'write-artifacts' | 'write-manifest' | 'write-report' | 'initialize-git';
   title: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   detail?: string;
@@ -320,6 +323,7 @@ export class AgentDevStore {
       { id: 'create-workspace', title: 'Create isolated local workspace', status: 'pending' },
       { id: 'write-artifacts', title: 'Write generated delivery artifacts', status: 'pending' },
       { id: 'write-manifest', title: 'Write execution manifest', status: 'pending' },
+      { id: 'initialize-git', title: 'Initialize local Git baseline', status: 'pending' },
       { id: 'write-report', title: 'Write delivery report', status: 'pending' },
     ];
     this.orm.insert(applyRuns).values({ id, projectId, blueprintRevision, status: 'queued', attempts: 0, workspacePath, stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now }).run();
@@ -359,7 +363,14 @@ export class AgentDevStore {
         }, null, 2) + '\n', 'utf8');
       });
       await this.executePendingStep(run, steps[4], attempts, options, async () => {
+        await execFileAsync('git', ['init', '-q'], { cwd: run.workspacePath });
+        await execFileAsync('git', ['add', '-A'], { cwd: run.workspacePath });
+        await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `chore: establish ${project.blueprint.metadata.name} baseline`], { cwd: run.workspacePath });
+      });
+      await this.executePendingStep(run, steps[5], attempts, options, async () => {
         await writeFile(join(run.workspacePath, 'DELIVERY_REPORT.md'), this.buildDeliveryReport(run, project.blueprint.metadata.name, steps, 'completed'), 'utf8');
+        await execFileAsync('git', ['add', 'DELIVERY_REPORT.md'], { cwd: run.workspacePath });
+        await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '--amend', '--no-edit', '-q'], { cwd: run.workspacePath });
       });
       const completed = await this.updateApplyRun(run, 'completed', steps, attempts);
       await this.advanceDelivery(run.projectId, [{ type: 'BASELINE_CREATED' }]);
