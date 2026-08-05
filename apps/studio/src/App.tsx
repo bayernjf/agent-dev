@@ -304,9 +304,9 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/provider-plan/verify`);
       if (!response.ok) throw new Error('Unable to verify provider simulation state.');
-      const payload = await response.json() as { verification: ProviderVerification[]; deliveryReport: string };
+      const payload = await response.json() as { verification: ProviderVerification[]; deliveryReport: string; unifiedDeliveryReport: string };
       setProviderVerification(payload.verification);
-      setProviderReport(payload.deliveryReport);
+      setProviderReport(payload.unifiedDeliveryReport);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to verify provider simulation state.');

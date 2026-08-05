@@ -7,7 +7,7 @@ import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { DaemonEventBus } from './events.js';
-import { buildProviderSimulationReport, providerSpecsFromBlueprint } from './providers.js';
+import { buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint } from './providers.js';
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -164,7 +164,9 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     const verification = await fakeProviders.verify(project.id, providerSpecsFromBlueprint(project.blueprint));
     const plans = await fakeProviders.plan(project.id, providerSpecsFromBlueprint(project.blueprint));
-    return context.json({ projectId: project.id, verification, verified: verification.every(item => item.verified), deliveryReport: buildProviderSimulationReport(project.name, plans, verification) });
+    const providerReport = buildProviderSimulationReport(project.name, plans, verification);
+    const localApply = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    return context.json({ projectId: project.id, verification, verified: verification.every(item => item.verified), deliveryReport: providerReport, unifiedDeliveryReport: buildUnifiedDeliveryReport(project.name, localApply, providerReport) });
   });
 
   app.post('/api/projects', async context => {
