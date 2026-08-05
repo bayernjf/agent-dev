@@ -10,10 +10,10 @@
 
 ## 2. 本机能力探测
 
-当前实际安装版本：
+最近探测到的实际安装版本：
 
 ```text
-codex-cli 0.145.0
+codex-cli 0.142.3
 ```
 
 当前 CLI 明确提供：
@@ -117,7 +117,9 @@ Probe 创建独立临时 Git 仓库并执行两种模式：
 
 ## 7. 后续验证
 
-已完成的只读 Probe 成功启动 CLI 并观察到 `thread.started`、`turn.started`、重试/错误和 `turn.failed` 事件，证明非交互入口与 JSONL 事件通道可用。请求随后因本机认证无效而失败，尚未产生符合 Schema 的最终输出。
+已完成的只读 Probe 曾成功启动 CLI 并观察到 `thread.started`、`turn.started`、重试/错误和 `turn.failed` 事件，证明非交互入口与 JSONL 事件通道可用。请求随后因本机认证无效而失败，尚未产生符合 Schema 的最终输出。
+
+2026-08-06 的追加只读 Probe 使用 `--ephemeral --sandbox read-only --json --cd <agent-dev>`。CLI 在发起模型请求前尝试打开 `~/.codex/state_5.sqlite`，但当前受限执行环境禁止写入该目录，因此以 `Operation not permitted` 停止。该结果不代表认证失败，也不代表任务代码失败；它只证明 Agent-Dev 不能通过受限运行环境验证 Codex 自身状态目录的写权限。Probe 未修改项目文件，也没有执行模型请求。
 
 认证恢复后按以下顺序继续：
 

@@ -122,7 +122,7 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 4. **Secret Boundary**：Provider CLI/OAuth、系统 Keychain、GitHub Secrets 的最小复制路径；
 5. **Workflow Resume**：SQLite 持久化后从暂停 Gate 或失败 Step 恢复。
 
-Codex Runtime 已确认本机 `codex-cli 0.145.0` 提供非交互执行、JSONL 事件、最终输出 Schema、sandbox、超时终止和 resume 命令入口。真实只读请求因本机认证无效而失败；用户恢复认证前不要运行写入、恢复和取消 Probe。详见 [Codex Runtime Spike](docs/spikes/codex-runtime.md)。
+Codex Runtime 已确认本机 `codex-cli 0.142.3` 提供非交互执行、JSONL 事件、最终输出 Schema、sandbox、超时终止和 resume 命令入口。2026-08-06 的只读请求在模型调用前因当前受限环境禁止 Codex 写入 `~/.codex/state_5.sqlite` 而停止，未能验证认证；不要通过 Agent-Dev 绕过该状态目录边界。详见 [Codex Runtime Spike](docs/spikes/codex-runtime.md)。
 
 Workflow Resume 与 macOS Secret Boundary 已通过真实本地 Probe。Dual Preview 和 Supabase Auth 尚未取得云端 Evidence；当前 Vercel/GitHub CLI 已认证，Wrangler/Supabase CLI 已局部安装，其中 Supabase CLI 会尝试写入 `~/.supabase`，不符合当前文件边界。完整状态见 [Phase 0 技术 Spike](docs/spikes/README.md)。
 
