@@ -49,6 +49,8 @@ describe('ProductBlueprint', () => {
       expect.objectContaining({ path: 'config/env.contract.yaml', content: expect.stringContaining('VITE_GA4_MEASUREMENT_ID') }),
       expect.objectContaining({ path: 'generated/DELIVERY_HANDOFF.md' }),
       expect.objectContaining({ path: 'apps/web/src/main.tsx' }),
+      expect.objectContaining({ path: 'tsconfig.json', content: expect.stringContaining('react-jsx') }),
+      expect.objectContaining({ path: 'vite.config.ts', content: expect.stringContaining('@vitejs/plugin-react') }),
       expect.objectContaining({ path: 'apps/api/src/index.ts', content: expect.stringContaining('/api/health') }),
       expect.objectContaining({ path: '.github/workflows/quality.yml' }),
     ]));
