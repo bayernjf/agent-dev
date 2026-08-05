@@ -163,6 +163,13 @@ describe('daemon API', () => {
     });
     expect(applied.status).toBe(200);
     await expect(applied.json()).resolves.toMatchObject({ run: { status: 'completed', steps: expect.arrayContaining([expect.objectContaining({ status: 'completed' })]) } });
+    const quality = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/quality-gate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintRevision: 1, confirmation: 'RUN_QUALITY_GATE' }),
+    });
+    expect(quality.status).toBe(422);
+    await expect(quality.json()).resolves.toMatchObject({ result: { status: 'failed', command: 'npm run quality' } });
     const invalidRetry = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply/retry`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

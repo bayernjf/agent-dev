@@ -33,6 +33,11 @@ const retryApplySchema = z.object({
   confirmation: z.literal('RETRY_APPLY'),
 });
 
+const qualityGateSchema = z.object({
+  blueprintRevision: z.number().int().positive(),
+  confirmation: z.literal('RUN_QUALITY_GATE'),
+});
+
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
@@ -137,6 +142,21 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const run = await store.executeApplyRun(existing.id);
     events.emit({ type: run.status === 'completed' ? 'apply.completed' : 'apply.failed', projectId, projectName: project.name, occurredAt: run.updatedAt });
     return context.json({ run }, run.status === 'completed' ? 200 : 422);
+  });
+
+  app.post('/api/projects/:projectId/quality-gate', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = qualityGateSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Quality Gate requires the current revision and confirmation RUN_QUALITY_GATE.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    if (project.blueprint.metadata.revision !== parsed.data.blueprintRevision) return context.json({ error: 'The quality gate must target the current Blueprint revision.' }, 409);
+    try {
+      const result = await store.runQualityGate(projectId, parsed.data.blueprintRevision);
+      return context.json({ result }, result.status === 'passed' ? 200 : 422);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to run the quality gate.' }, 409);
+    }
   });
 
   app.get('/api/projects/:projectId/provider-plan', async context => {

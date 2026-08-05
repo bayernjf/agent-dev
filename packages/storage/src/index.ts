@@ -73,6 +73,18 @@ export type ApplyExecutionOptions = {
   failStep?: ApplyStep['id'];
 };
 
+export type QualityGateResult = {
+  projectId: string;
+  blueprintRevision: number;
+  status: 'passed' | 'failed';
+  command: string;
+  exitCode: number;
+  startedAt: string;
+  completedAt: string;
+  output: string;
+  workspacePath: string;
+};
+
 export class AgentDevStore {
   private readonly orm: ReturnType<typeof createOrm>;
 
@@ -409,6 +421,46 @@ export class AgentDevStore {
     }
   }
 
+  async runQualityGate(projectId: string, blueprintRevision: number): Promise<QualityGateResult> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before running the quality gate.');
+    const command = 'npm run quality';
+    const startedAt = new Date().toISOString();
+    let status: QualityGateResult['status'] = 'passed';
+    let exitCode = 0;
+    let output = '';
+    try {
+      const result = await execFileAsync('npm', ['run', 'quality'], { cwd: run.workspacePath, timeout: 120_000, maxBuffer: 1_000_000 });
+      output = `${result.stdout}${result.stderr}`.trim();
+    } catch (error) {
+      const cause = error as { code?: number | string; stdout?: string; stderr?: string; message?: string };
+      status = 'failed';
+      exitCode = typeof cause.code === 'number' ? cause.code : 1;
+      output = `${cause.stdout ?? ''}${cause.stderr ?? ''}${cause.message ?? ''}`.trim();
+    }
+    const completedAt = new Date().toISOString();
+    const result: QualityGateResult = {
+      projectId,
+      blueprintRevision,
+      status,
+      command,
+      exitCode,
+      startedAt,
+      completedAt,
+      output,
+      workspacePath: run.workspacePath,
+    };
+    await writeFile(join(run.workspacePath, 'quality-gate.json'), JSON.stringify(result, null, 2) + '\n', 'utf8');
+    await writeFile(join(run.workspacePath, 'QUALITY_REPORT.md'), this.buildQualityReport(result), 'utf8');
+    try {
+      await execFileAsync('git', ['add', 'quality-gate.json', 'QUALITY_REPORT.md'], { cwd: run.workspacePath });
+      await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `chore: record quality gate ${status}`], { cwd: run.workspacePath });
+    } catch {
+      // The report remains available even if the local Git evidence commit cannot be created.
+    }
+    return result;
+  }
+
   async close() {
     await this.persist();
     this.sqlite.close();
@@ -494,6 +546,10 @@ export class AgentDevStore {
     const stepRows = steps.map(step => `| ${step.title} | ${step.status} | ${step.detail ?? ''} |`).join('\n');
     const featureBranch = `feature/agent-dev/revision-${run.blueprintRevision}`;
     return `# ${projectName} Delivery Report\n\n- Blueprint revision: ${run.blueprintRevision}\n- Apply run: ${run.id}\n- Status: ${status}\n- Workspace: ${run.workspacePath}\n- Local feature branch: ${featureBranch}\n- External writes: none\n\n## Local evidence\n\n| Step | Result | Detail |\n| --- | --- | --- |\n${stepRows}\n\n## External actions not executed\n\n- No GitHub repository or remote branch was created.\n- No Supabase project, schema, or Auth configuration was changed.\n- No Vercel deployment was created.\n- No Cloudflare Pages project or deployment was created.\n\n## Recovery and rollback\n\nThis report describes the Local Apply Simulator only. Delete the ignored workspace directory to remove its generated files. A future provider Apply must provide idempotency keys, a provider diff, and an explicit rollback plan before executing remote writes.\n`;
+  }
+
+  private buildQualityReport(result: QualityGateResult) {
+    return `# Quality Gate Report\n\n- Status: ${result.status}\n- Command: \`${result.command}\`\n- Exit code: ${result.exitCode}\n- Blueprint revision: ${result.blueprintRevision}\n- Started: ${result.startedAt}\n- Completed: ${result.completedAt}\n\n## Output\n\n\`\`\`text\n${result.output || '(no output)'}\n\`\`\`\n\n## Boundary\n\nThis report was produced by the local Agent-Dev quality gate. A passed local gate does not replace GitHub Actions or human acceptance testing.\n`;
   }
 
   private async persist() {

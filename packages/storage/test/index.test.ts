@@ -112,6 +112,11 @@ describe('AgentDevStore', () => {
       await expect(readFile(join(completed.workspacePath, '.git', 'HEAD'), 'utf8')).resolves.toContain('refs/heads/feature/agent-dev/revision-1');
       await expect(readFile(join(completed.workspacePath, 'apply-manifest.json'), 'utf8')).resolves.toMatch(/"featureBranch": "feature\/agent-dev\/revision-1"/);
       await expect(readFile(join(completed.workspacePath, 'DELIVERY_REPORT.md'), 'utf8')).resolves.toContain('Local feature branch: feature/agent-dev/revision-1');
+      const quality = await store.runQualityGate(created.id, 1);
+      expect(quality.status).toBe('failed');
+      expect(quality.command).toBe('npm run quality');
+      await expect(readFile(join(completed.workspacePath, 'quality-gate.json'), 'utf8')).resolves.toContain('"status": "failed"');
+      await expect(readFile(join(completed.workspacePath, 'QUALITY_REPORT.md'), 'utf8')).resolves.toContain('# Quality Gate Report');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true });
