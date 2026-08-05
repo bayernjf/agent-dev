@@ -76,6 +76,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；当前 Runtime 执行器仍未接入真实 Codex 写入，先保留任务证据和边界。
 - Runtime Adapter 已能生成受 sandbox、workspace 和禁止路径约束的 Codex dry-run 命令计划，并探测 CLI 是否存在；认证和真实写入验证未通过前不会执行命令。
 - Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期、Git branch/HEAD/diff evidence 和 `RUNTIME_RUN_REPORT.md`；它不会把计划状态标记为代码已完成。
+- Studio 已展示 Runtime Run 状态、取消动作和 Git evidence；当前界面不会提供绕过 Gate 的 Codex 写入按钮。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
 - 模板基线带有根 TypeScript/Vite 配置，可执行 `npm run quality` 和 `npm run build` 作为生成工程的质量入口；
 - Apply 步骤按状态持久化，支持失败后显式重试（最多 3 次）并对已完成 Run 保持幂等；

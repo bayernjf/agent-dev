@@ -23,6 +23,8 @@ type DependencyReadiness = { status: 'not-applied' | 'missing-dependencies' | 'r
 type QualityGateResult = { status: 'passed' | 'failed'; command: string; exitCode: number; output: string; completedAt: string };
 type DependencyInstallResult = { status: 'installed' | 'failed'; exitCode: number; output: string; completedAt: string };
 type FeatureTask = { id: string; blueprintRevision: number; title: string; objective: string; acceptanceCriteria: string[]; status: 'draft' | 'approved'; approvedBy?: string; approvedAt?: string };
+type RuntimeRun = { id: string; status: 'planned' | 'cancelled'; taskId: string; blueprintRevision: number; plan: { mode: 'dry-run'; executionAllowed: false; noExternalChanges: true; command: string[] } };
+type GitEvidence = { branch: string; head: string; status: string; diffStat: string };
 type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
 type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
 
@@ -68,6 +70,8 @@ export function App() {
   const [dependencyReadiness, setDependencyReadiness] = useState<DependencyReadiness | null>(null);
   const [qualityGateResult, setQualityGateResult] = useState<QualityGateResult | null>(null);
   const [featureTask, setFeatureTask] = useState<FeatureTask | null>(null);
+  const [runtimeRun, setRuntimeRun] = useState<RuntimeRun | null>(null);
+  const [gitEvidence, setGitEvidence] = useState<GitEvidence | null>(null);
   const [providerPlans, setProviderPlans] = useState<ProviderPlan[]>([]);
   const [providerVerification, setProviderVerification] = useState<ProviderVerification[] | null>(null);
   const [providerReport, setProviderReport] = useState('');
@@ -80,6 +84,7 @@ export function App() {
   const [applyingBaseline, setApplyingBaseline] = useState(false);
   const [installingDependencies, setInstallingDependencies] = useState(false);
   const [savingFeatureTask, setSavingFeatureTask] = useState(false);
+  const [preparingRuntime, setPreparingRuntime] = useState(false);
   const [applyingFakeProviders, setApplyingFakeProviders] = useState(false);
   const [verifyingProviders, setVerifyingProviders] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
@@ -127,6 +132,7 @@ export function App() {
       void loadDependencyReadiness(projectId);
       void loadQualityGate(projectId);
       void loadFeatureTask(projectId);
+      void loadRuntimePlan(projectId);
       void loadProviderPlan(projectId);
       setError('');
     } catch (cause) {
@@ -204,6 +210,30 @@ export function App() {
     }
   };
 
+  const loadRuntimePlan = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/runtime/plan`);
+      if (response.status === 409) { setRuntimeRun(null); return; }
+      if (!response.ok) throw new Error('Unable to load the Runtime plan.');
+      const payload = await response.json() as { run: RuntimeRun | null };
+      setRuntimeRun(payload.run);
+      if (payload.run) await loadGitEvidence(projectId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load the Runtime plan.');
+    }
+  };
+
+  const loadGitEvidence = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/runtime/evidence`);
+      if (!response.ok) throw new Error('Unable to load Git evidence.');
+      const payload = await response.json() as { evidence: GitEvidence };
+      setGitEvidence(payload.evidence);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load Git evidence.');
+    }
+  };
+
   const loadProviderPlan = async (projectId: string) => {
     try {
       const response = await fetch(`/api/projects/${projectId}/provider-plan`);
@@ -226,6 +256,8 @@ export function App() {
     setDependencyReadiness(null);
     setQualityGateResult(null);
     setFeatureTask(null);
+    setRuntimeRun(null);
+    setGitEvidence(null);
     setProviderPlans([]);
     setProviderVerification(null);
     setProviderReport('');
@@ -409,11 +441,51 @@ export function App() {
       const payload = await response.json() as { task?: FeatureTask; error?: string };
       if (!response.ok || !payload.task) throw new Error(payload.error ?? 'Unable to approve the feature task.');
       setFeatureTask(payload.task);
+      void loadRuntimePlan(selected.id);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to approve the feature task.');
     } finally {
       setSavingFeatureTask(false);
+    }
+  };
+
+  const prepareRuntime = async () => {
+    if (!selected || !featureTask || featureTask.status !== 'approved' || preparingRuntime) return;
+    if (!window.confirm('Prepare a guarded Runtime dry-run? No Codex process will start and no files will be changed.')) return;
+    setPreparingRuntime(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/runtime/run`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'PREPARE_RUNTIME_RUN' }),
+      });
+      const payload = await response.json() as { run?: RuntimeRun; error?: string };
+      if (!response.ok || !payload.run) throw new Error(payload.error ?? 'Unable to prepare the Runtime run.');
+      setRuntimeRun(payload.run);
+      await loadGitEvidence(selected.id);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to prepare the Runtime run.');
+    } finally {
+      setPreparingRuntime(false);
+    }
+  };
+
+  const cancelRuntime = async () => {
+    if (!selected || !runtimeRun || runtimeRun.status !== 'planned' || preparingRuntime) return;
+    setPreparingRuntime(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/runtime/cancel`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'CANCEL_RUNTIME_RUN' }),
+      });
+      const payload = await response.json() as { run?: RuntimeRun; error?: string };
+      if (!response.ok || !payload.run) throw new Error(payload.error ?? 'Unable to cancel the Runtime run.');
+      setRuntimeRun(payload.run);
+      await loadGitEvidence(selected.id);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to cancel the Runtime run.');
+    } finally {
+      setPreparingRuntime(false);
     }
   };
 
@@ -579,6 +651,7 @@ export function App() {
               {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>Attempt {applyRun.attempts} of 3 · {applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? 'Retrying...' : 'Retry local Apply'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}
               {applyRun?.status === 'completed' && dependencyReadiness && <div className={`quality-gate ${dependencyReadiness.status}`}><div><p className="eyebrow">Local quality gate</p><h3>{qualityGateResult ? `Last run: ${qualityGateResult.status}` : dependencyReadiness.status === 'ready' ? 'Ready to run' : 'Dependencies required'}</h3><p>{dependencyReadiness.nextAction}</p></div>{dependencyReadiness.status === 'missing-dependencies' && <button className="secondary-button" type="button" onClick={() => void installDependencies()} disabled={installingDependencies}>{installingDependencies ? 'Installing...' : 'Install dependencies'}<ArrowRight size={15} aria-hidden="true" /></button>}{dependencyReadiness.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void runQualityGate()} disabled={applyingBaseline}>{applyingBaseline ? 'Running...' : 'Run quality gate'}<CheckCircle2 size={15} aria-hidden="true" /></button>}</div>}
               {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">Feature delivery</p><h3>{featureTask ? featureTask.title : 'Define the next feature'}</h3><p>{featureTask ? `Task is ${featureTask.status}. Acceptance criteria are the Agent boundary.` : 'Create a focused task package before asking an Agent to change code.'}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{featureTask.status}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">Task title</label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder="e.g. Add receipt list" maxLength={120} /><label htmlFor="feature-objective">Objective</label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder="What user outcome should this feature deliver?" maxLength={2000} /><label htmlFor="feature-criteria">Acceptance criteria <small>one per line</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder="The list renders saved receipts.\nEmpty state is visible." maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Creating task...' : 'Create feature task'}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.status === 'draft' ? <button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Approving...' : 'Approve task for Agent'}<ShieldCheck size={15} aria-hidden="true" /></button> : <small>Approved by {featureTask.approvedBy} · {featureTask.approvedAt && formatDate(featureTask.approvedAt)}</small>}</div>}</div>}
+              {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">Agent runtime</p><h3>{runtimeRun ? `Dry-run ${runtimeRun.status}` : 'Runtime not prepared'}</h3><p>{runtimeRun ? 'No Codex process has started. Review the local evidence before any future execution.' : 'Prepare a guarded Runtime plan from the approved task.'}</p></div>{runtimeRun?.status === 'planned' ? <button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Cancelling...' : 'Cancel dry-run'}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Preparing...' : 'Prepare Runtime'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{gitEvidence && <div className="git-evidence"><span>Branch <strong>{gitEvidence.branch}</strong></span><span>HEAD <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>Working tree <strong>{gitEvidence.status || 'clean'}</strong></span><span>Diff <strong>{gitEvidence.diffStat || 'no changes'}</strong></span></div>}</div>}
               <p className="baseline-note">No remote resource has been created. The simulator writes only local generated artifacts and an execution manifest.</p>
               <div className="provider-simulation"><div className="provider-simulation-heading"><div><p className="eyebrow">Simulation only</p><h3>Provider lifecycle</h3><p>Plans and verification use in-memory Fake Providers. No GitHub, Supabase, Vercel or Cloudflare API is called.</p></div><span className="dry-run-tag">No external writes</span></div><div className="provider-plan-list">{providerPlans.map(plan => <article className="provider-plan" key={plan.providerId}><div><strong>{plan.providerId}</strong><small>{plan.idempotencyKey}</small></div><ol>{plan.resources.map(resource => <li key={resource.spec.id}><span>{resource.spec.id}</span><em>{resource.action}</em><small>{resource.reason}</small></li>)}</ol></article>)}</div><div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void verifyProviders()} disabled={verifyingProviders}>{verifyingProviders ? 'Verifying...' : 'Verify simulation state'}<RefreshCw size={15} aria-hidden="true" /></button>{baselineApproval && <button className="secondary-button" type="button" onClick={() => void applyFakeProviders()} disabled={applyingFakeProviders}>{applyingFakeProviders ? 'Applying simulation...' : 'Apply Fake Providers'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{providerVerification && <div className="provider-verification">{providerVerification.map(item => <span className={item.verified ? 'verified' : 'unverified'} key={item.providerId}>{item.providerId}: {item.verified ? 'verified' : `missing ${item.missing.length}, drift ${item.mismatched.length}`}</span>)}</div>}{providerReport && <pre className="provider-report">{providerReport}</pre>}</div>
             </section>}
