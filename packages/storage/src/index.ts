@@ -46,7 +46,7 @@ export type BaselineApproval = {
 };
 
 export type ApplyStep = {
-  id: 'validate-blueprint' | 'create-workspace' | 'write-artifacts' | 'write-manifest';
+  id: 'validate-blueprint' | 'create-workspace' | 'write-artifacts' | 'write-manifest' | 'write-report';
   title: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   detail?: string;
@@ -314,6 +314,7 @@ export class AgentDevStore {
       { id: 'create-workspace', title: 'Create isolated local workspace', status: 'pending' },
       { id: 'write-artifacts', title: 'Write generated delivery artifacts', status: 'pending' },
       { id: 'write-manifest', title: 'Write execution manifest', status: 'pending' },
+      { id: 'write-report', title: 'Write delivery report', status: 'pending' },
     ];
     this.orm.insert(applyRuns).values({ id, projectId, blueprintRevision, status: 'queued', workspacePath, stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now }).run();
     await this.persist();
@@ -348,11 +349,22 @@ export class AgentDevStore {
           note: 'Local Apply Simulator only. No provider resource was created.',
         }, null, 2) + '\n', 'utf8');
       });
+      await this.runApplyStep(steps[4], async () => {
+        await writeFile(join(run.workspacePath, 'DELIVERY_REPORT.md'), this.buildDeliveryReport(run, project.blueprint.metadata.name, steps, 'completed'), 'utf8');
+      });
       return await this.updateApplyRun(run, 'completed', steps);
     } catch (error) {
       const failed = steps.find(step => step.status === 'running');
       if (failed) failed.status = 'failed';
       if (failed) failed.detail = error instanceof Error ? error.message : String(error);
+      if (run.workspacePath) {
+        try {
+          await mkdir(run.workspacePath, { recursive: true });
+          await writeFile(join(run.workspacePath, 'DELIVERY_REPORT.md'), this.buildDeliveryReport(run, project.blueprint.metadata.name, steps, 'failed'), 'utf8');
+        } catch {
+          // Preserve the original step failure if the report itself cannot be written.
+        }
+      }
       return await this.updateApplyRun(run, 'failed', steps);
     }
   }
@@ -403,6 +415,11 @@ export class AgentDevStore {
     this.orm.update(applyRuns).set({ status, stepsJson: JSON.stringify(steps), updatedAt }).where(eq(applyRuns.id, run.id)).run();
     await this.persist();
     return { ...run, status, steps, updatedAt };
+  }
+
+  private buildDeliveryReport(run: ApplyRun, projectName: string, steps: ApplyStep[], status: 'completed' | 'failed') {
+    const stepRows = steps.map(step => `| ${step.title} | ${step.status} | ${step.detail ?? ''} |`).join('\n');
+    return `# ${projectName} Delivery Report\n\n- Blueprint revision: ${run.blueprintRevision}\n- Apply run: ${run.id}\n- Status: ${status}\n- Workspace: ${run.workspacePath}\n- External writes: none\n\n## Local evidence\n\n| Step | Result | Detail |\n| --- | --- | --- |\n${stepRows}\n\n## External actions not executed\n\n- No GitHub repository or branch was created.\n- No Supabase project, schema, or Auth configuration was changed.\n- No Vercel deployment was created.\n- No Cloudflare Pages project or deployment was created.\n\n## Recovery and rollback\n\nThis report describes the Local Apply Simulator only. Delete the ignored workspace directory to remove its generated files. A future provider Apply must provide idempotency keys, a provider diff, and an explicit rollback plan before executing remote writes.\n`;
   }
 
   private async persist() {
