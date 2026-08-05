@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@agent-dev/blueprint": "file:../blueprint",
+    "@agent-dev/agent-runtime": "file:../agent-runtime",
     "@agent-dev/workflow": "file:../workflow",
     "drizzle-orm": "^0.41.0",
     "sql.js": "^1.13.0"

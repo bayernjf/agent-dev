@@ -9,6 +9,7 @@ import { drizzle } from 'drizzle-orm/sql-js';
 import initSqlJs, { type Database } from 'sql.js';
 import type { ProductBlueprint } from '@agent-dev/blueprint';
 import { createBaselinePlan, createDryRunPlan, productBlueprintSchema } from '@agent-dev/blueprint';
+import { buildCodexExecutionPlan, type CodexExecutionPlan } from '@agent-dev/agent-runtime';
 import { createNeedsInputRun, restoreDeliveryActor, type DeliveryEvent, type DeliverySnapshot, type DeliveryState } from '@agent-dev/workflow';
 import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects } from './schema.js';
 import { migrations } from './migrations.js';
@@ -118,6 +119,24 @@ export type FeatureTask = {
   approvedAt?: string;
   workspacePath: string;
   createdAt: string;
+};
+
+export type RuntimeRun = {
+  id: string;
+  taskId: string;
+  projectId: string;
+  blueprintRevision: number;
+  status: 'planned' | 'cancelled';
+  plan: CodexExecutionPlan;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GitEvidence = {
+  branch: string;
+  head: string;
+  status: string;
+  diffStat: string;
 };
 
 export class AgentDevStore {
@@ -590,6 +609,50 @@ export class AgentDevStore {
     return approved;
   }
 
+  async prepareRuntimeRun(projectId: string, blueprintRevision: number): Promise<RuntimeRun> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task || task.status !== 'approved') throw new Error('Approve a Feature Task before preparing a Runtime run.');
+    const existing = await this.getRuntimeRun(projectId, blueprintRevision);
+    if (existing) return existing;
+    const now = new Date().toISOString();
+    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, status: 'planned', plan: buildCodexExecutionPlan(task, task.workspacePath), createdAt: now, updatedAt: now };
+    await writeFile(join(task.workspacePath, 'runtime-run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8');
+    await writeFile(join(task.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(run, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
+    await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: task.workspacePath });
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `runtime: prepare ${task.title}`], { cwd: task.workspacePath });
+    return run;
+  }
+
+  async getRuntimeRun(projectId: string, blueprintRevision: number): Promise<RuntimeRun | null> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task) return null;
+    try {
+      return JSON.parse(await readFile(join(task.workspacePath, 'runtime-run.json'), 'utf8')) as RuntimeRun;
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  async cancelRuntimeRun(projectId: string, blueprintRevision: number): Promise<RuntimeRun> {
+    const run = await this.getRuntimeRun(projectId, blueprintRevision);
+    if (!run) throw new Error('No Runtime run is prepared.');
+    if (run.status === 'cancelled') return run;
+    const cancelled: RuntimeRun = { ...run, status: 'cancelled', updatedAt: new Date().toISOString() };
+    await writeFile(join(run.plan.workspacePath, 'runtime-run.json'), JSON.stringify(cancelled, null, 2) + '\n', 'utf8');
+    await writeFile(join(run.plan.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(cancelled, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
+    await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: run.plan.workspacePath });
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', 'runtime: cancel dry-run'], { cwd: run.plan.workspacePath });
+    return cancelled;
+  }
+
+  async getGitEvidence(projectId: string, blueprintRevision: number): Promise<GitEvidence> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before collecting Git evidence.');
+    const execute = async (args: string[]) => (await execFileAsync('git', args, { cwd: run.workspacePath })).stdout.trim();
+    return { branch: await execute(['branch', '--show-current']), head: await execute(['rev-parse', 'HEAD']), status: await execute(['status', '--short']), diffStat: await execute(['diff', '--stat']) };
+  }
+
   async close() {
     await this.persist();
     this.sqlite.close();
@@ -687,6 +750,10 @@ export class AgentDevStore {
 
   private buildFeatureTask(task: FeatureTask) {
     return `# ${task.title}\n\n- Task ID: ${task.id}\n- Blueprint revision: ${task.blueprintRevision}\n- Status: ${task.status}\n- Created: ${task.createdAt}\n${task.approvedBy ? `- Approved by: ${task.approvedBy}\n- Approved at: ${task.approvedAt}\n` : ''}\n## Objective\n\n${task.objective}\n\n## Acceptance criteria\n\n${task.acceptanceCriteria.map((criterion, index) => `${index + 1}. [ ] ${criterion}`).join('\n')}\n\n## Agent boundary\n\nImplement only this task on the existing local feature branch. Run the configured quality gate and report evidence before requesting human acceptance.\n`;
+  }
+
+  private buildRuntimeRunReport(run: RuntimeRun, evidence: GitEvidence) {
+    return `# Runtime Run Report\n\n- Run: ${run.id}\n- Task: ${run.taskId}\n- Status: ${run.status}\n- Mode: ${run.plan.mode}\n- Execution allowed: ${run.plan.executionAllowed}\n- No external changes: ${run.plan.noExternalChanges}\n\n## Planned command\n\n\`\`\`text\n${run.plan.command.join(' ')}\n\`\`\`\n\n## Git evidence\n\n- Branch: ${evidence.branch}\n- HEAD: ${evidence.head}\n- Working tree: ${evidence.status || 'clean'}\n- Diff stat: ${evidence.diffStat || 'no changes'}\n\n## Boundary\n\nThis run records a guarded dry-run plan only. No Codex process was started and no feature code was changed.\n`;
   }
 
   private async persist() {

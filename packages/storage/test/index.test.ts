@@ -125,6 +125,13 @@ describe('AgentDevStore', () => {
       expect(approvedTask).toMatchObject({ status: 'approved', approvedBy: 'test-user' });
       await expect(readFile(join(completed.workspacePath, 'FEATURE_TASK.md'), 'utf8')).resolves.toContain('The list renders saved receipts.');
       await expect(readFile(join(completed.workspacePath, 'TASK_APPROVAL.md'), 'utf8')).resolves.toContain('Approved by: test-user');
+      const runtimeRun = await store.prepareRuntimeRun(created.id, 1);
+      expect(runtimeRun).toMatchObject({ status: 'planned', plan: { mode: 'dry-run', executionAllowed: false } });
+      await expect(readFile(join(completed.workspacePath, 'RUNTIME_RUN_REPORT.md'), 'utf8')).resolves.toContain('No Codex process was started');
+      const evidence = await store.getGitEvidence(created.id, 1);
+      expect(evidence.branch).toBe('feature/agent-dev/revision-1');
+      const cancelled = await store.cancelRuntimeRun(created.id, 1);
+      expect(cancelled.status).toBe('cancelled');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true });

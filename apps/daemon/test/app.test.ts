@@ -195,6 +195,17 @@ describe('daemon API', () => {
     const runtimePlan = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/plan`);
     expect(runtimePlan.status).toBe(200);
     await expect(runtimePlan.json()).resolves.toMatchObject({ plan: { mode: 'dry-run', executionAllowed: false, noExternalChanges: true }, probe: { executionVerified: false } });
+    const runtimeRun = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/run`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'PREPARE_RUNTIME_RUN' }),
+    });
+    expect(runtimeRun.status).toBe(201);
+    await expect(runtimeRun.json()).resolves.toMatchObject({ run: { status: 'planned' } });
+    const runtimeEvidence = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/evidence`);
+    await expect(runtimeEvidence.json()).resolves.toMatchObject({ evidence: { branch: 'feature/agent-dev/revision-1' } });
+    const runtimeCancel = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/cancel`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'CANCEL_RUNTIME_RUN' }),
+    });
+    await expect(runtimeCancel.json()).resolves.toMatchObject({ run: { status: 'cancelled' } });
     const invalidRetry = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply/retry`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

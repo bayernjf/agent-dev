@@ -219,7 +219,42 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     const task = await store.getFeatureTask(project.id, project.blueprint.metadata.revision);
     if (!task || task.status !== 'approved') return context.json({ error: 'Approve a Feature Task before preparing a Runtime plan.' }, 409);
-    return context.json({ probe: probeCodexRuntime(), plan: buildCodexExecutionPlan(task, task.workspacePath) });
+    return context.json({ probe: probeCodexRuntime(), plan: buildCodexExecutionPlan(task, task.workspacePath), run: await store.getRuntimeRun(project.id, project.blueprint.metadata.revision) });
+  });
+
+  app.post('/api/projects/:projectId/runtime/run', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const body = await context.req.json().catch(() => null) as { confirmation?: string } | null;
+    if (body?.confirmation !== 'PREPARE_RUNTIME_RUN') return context.json({ error: 'Runtime preparation requires confirmation PREPARE_RUNTIME_RUN.' }, 400);
+    try {
+      const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision);
+      return context.json({ run, probe: probeCodexRuntime() }, 201);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to prepare the Runtime run.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/runtime/cancel', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const body = await context.req.json().catch(() => null) as { confirmation?: string } | null;
+    if (body?.confirmation !== 'CANCEL_RUNTIME_RUN') return context.json({ error: 'Runtime cancellation requires confirmation CANCEL_RUNTIME_RUN.' }, 400);
+    try {
+      return context.json({ run: await store.cancelRuntimeRun(project.id, project.blueprint.metadata.revision) });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to cancel the Runtime run.' }, 409);
+    }
+  });
+
+  app.get('/api/projects/:projectId/runtime/evidence', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      return context.json({ evidence: await store.getGitEvidence(project.id, project.blueprint.metadata.revision) });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to collect Git evidence.' }, 409);
+    }
   });
 
   app.post('/api/projects/:projectId/feature-task', async context => {
