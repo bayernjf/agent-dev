@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentDevStore } from '@agent-dev/storage';
-import type { ConnectorPreflightReport } from '@agent-dev/policy';
+import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
 import { createDaemonApp } from '../src/app.js';
 
 const directories: string[] = [];
@@ -31,11 +31,26 @@ describe('daemon API', () => {
         nextAction: 'Authorize GitHub for account discovery.',
       }],
     };
-    const { app } = createDaemonApp(store, undefined, { runPreflight: async () => report });
+    const accountReport: AccountDiscoveryReport = {
+      checkedAt: '2026-08-05T00:00:00.000Z',
+      readOnly: true,
+      accounts: [{
+        id: 'github', title: 'GitHub', status: 'authenticated', identity: 'octocat',
+        detail: 'Read only.', nextAction: 'Choose an owner.',
+      }],
+    };
+    const { app } = createDaemonApp(store, undefined, {
+      runPreflight: async () => report,
+      runAccountDiscovery: async () => accountReport,
+    });
 
     const preflight = await app.request('http://localhost/api/connectors/preflight');
     expect(preflight.status).toBe(200);
     await expect(preflight.json()).resolves.toEqual(report);
+
+    const discovery = await app.request('http://localhost/api/connectors/discovery');
+    expect(discovery.status).toBe(200);
+    await expect(discovery.json()).resolves.toEqual(accountReport);
 
     const created = await app.request('http://localhost/api/projects', {
       method: 'POST',
@@ -49,6 +64,10 @@ describe('daemon API', () => {
 
     const createdPayload = await created.json() as { project: { id: string; blueprint: { metadata: { revision: number } } } };
     expect(createdPayload.project.blueprint.metadata.revision).toBe(1);
+
+    const baseline = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan`);
+    expect(baseline.status).toBe(200);
+    await expect(baseline.json()).resolves.toMatchObject({ plan: { readyForApproval: false, noExternalChanges: true } });
 
     const dryRun = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/dry-run`);
     expect(dryRun.status).toBe(200);

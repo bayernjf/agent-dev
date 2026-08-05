@@ -1,5 +1,15 @@
 import { z } from 'zod';
-export { createDryRunPlan, generateArtifacts, getManualActions, type DryRunPlan, type GeneratedArtifact, type ManualAction } from './generate.js';
+export {
+  createBaselinePlan,
+  createDryRunPlan,
+  generateArtifacts,
+  getManualActions,
+  type BaselinePlan,
+  type BaselinePlanResource,
+  type DryRunPlan,
+  type GeneratedArtifact,
+  type ManualAction,
+} from './generate.js';
 
 export const productTypeSchema = z.literal('web-saas');
 export const blueprintModeSchema = z.enum(['beginner', 'professional']);
@@ -12,6 +22,10 @@ export const blueprintAnswersSchema = z.object({
   previewStrategy: z.enum(['per-pull-request', 'stable-dev-api']).default('per-pull-request'),
   analyticsProviders: z.array(analyticsProviderSchema).default([]),
   customInstructions: z.string().trim().max(1000).default(''),
+  githubOwner: z.string().trim().max(120).default(''),
+  vercelTeam: z.string().trim().max(120).default(''),
+  cloudflareAccount: z.string().trim().max(120).default(''),
+  supabaseOrganization: z.string().trim().max(120).default(''),
 });
 
 export type BlueprintAnswers = z.infer<typeof blueprintAnswersSchema>;
@@ -38,6 +52,7 @@ export const productBlueprintSchema = z.object({
     }),
     sourceControl: z.object({
       provider: z.literal('github'),
+      owner: z.string().max(120).default(''),
       integrationBranch: z.string().min(1),
       productionBranch: z.string().min(1),
       requirePullRequest: z.boolean(),
@@ -45,10 +60,11 @@ export const productBlueprintSchema = z.object({
     data: z.object({
       provider: z.literal('supabase'),
       auth: z.literal('supabase-auth'),
+      organization: z.string().max(120).default(''),
     }),
     deployment: z.object({
-      web: z.object({ provider: z.literal('cloudflare-pages') }),
-      api: z.object({ provider: z.literal('vercel-functions') }),
+      web: z.object({ provider: z.literal('cloudflare-pages'), account: z.string().max(120).default('') }),
+      api: z.object({ provider: z.literal('vercel-functions'), team: z.string().max(120).default('') }),
       previewStrategy: z.enum(['per-pull-request', 'stable-dev-api']),
     }),
     analytics: z.object({ providers: z.array(analyticsProviderSchema) }),
@@ -91,14 +107,15 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
       stack: { frontend: 'react-vite', api: 'hono', packageManager: 'npm' },
       sourceControl: {
         provider: 'github',
+        owner: answers.githubOwner,
         integrationBranch: 'dev',
         productionBranch: 'main',
         requirePullRequest: true,
       },
-      data: { provider: 'supabase', auth: 'supabase-auth' },
+      data: { provider: 'supabase', auth: 'supabase-auth', organization: answers.supabaseOrganization },
       deployment: {
-        web: { provider: 'cloudflare-pages' },
-        api: { provider: 'vercel-functions' },
+        web: { provider: 'cloudflare-pages', account: answers.cloudflareAccount },
+        api: { provider: 'vercel-functions', team: answers.vercelTeam },
         previewStrategy: answers.previewStrategy,
       },
       analytics: { providers: answers.analyticsProviders },

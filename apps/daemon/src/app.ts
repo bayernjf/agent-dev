@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { blueprintAnswersSchema, createBlueprint, createDryRunPlan, getBlueprintDecisions } from '@agent-dev/blueprint';
-import { runConnectorPreflight, type ConnectorPreflightReport } from '@agent-dev/policy';
+import { blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryRunPlan, getBlueprintDecisions } from '@agent-dev/blueprint';
+import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { DaemonEventBus } from './events.js';
 
@@ -18,6 +18,7 @@ const reviseBlueprintSchema = z.object({
 
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
+  runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
 };
 
 export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}) {
@@ -33,6 +34,10 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     context.json(await (dependencies.runPreflight ?? runConnectorPreflight)()),
   );
 
+  app.get('/api/connectors/discovery', async context =>
+    context.json(await (dependencies.runAccountDiscovery ?? runAccountDiscovery)()),
+  );
+
   app.get('/api/projects', context => context.json({ projects: store.listProjects() }));
 
   app.get('/api/projects/:projectId', context => {
@@ -44,6 +49,13 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const project = store.getProject(context.req.param('projectId'));
     return project
       ? context.json({ projectId: project.id, plan: createDryRunPlan(project.blueprint) })
+      : context.json({ error: 'Project not found.' }, 404);
+  });
+
+  app.get('/api/projects/:projectId/baseline-plan', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    return project
+      ? context.json({ projectId: project.id, plan: createBaselinePlan(project.blueprint) })
       : context.json({ error: 'Project not found.' }, 404);
   });
 

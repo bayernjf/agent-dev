@@ -24,6 +24,22 @@ export type DryRunPlan = {
   artifacts: GeneratedArtifact[];
 };
 
+export type BaselinePlanResource = {
+  id: 'github-repository' | 'supabase-project' | 'vercel-api' | 'cloudflare-pages';
+  title: string;
+  owner: string | null;
+  status: 'blocked' | 'requires-approval';
+  reason: string;
+};
+
+export type BaselinePlan = {
+  blueprintRevision: number;
+  noExternalChanges: true;
+  readyForApproval: boolean;
+  summary: string;
+  resources: BaselinePlanResource[];
+};
+
 function markdown(value: string) {
   return value.replaceAll('```', "'''");
 }
@@ -220,5 +236,33 @@ export function createDryRunPlan(blueprint: ProductBlueprint): DryRunPlan {
     ],
     manualActions: getManualActions(blueprint),
     artifacts,
+  };
+}
+
+export function createBaselinePlan(blueprint: ProductBlueprint): BaselinePlan {
+  const selections = [
+    ['github-repository', 'GitHub repository', blueprint.spec.sourceControl.owner, 'Choose the GitHub owner or organization that will own the repository.'],
+    ['supabase-project', 'Supabase project', blueprint.spec.data.organization, 'Choose the Supabase organization and later confirm region and plan.'],
+    ['vercel-api', 'Vercel API project', blueprint.spec.deployment.api.team, 'Choose the Vercel team that will own the API project.'],
+    ['cloudflare-pages', 'Cloudflare Pages project', blueprint.spec.deployment.web.account, 'Choose the Cloudflare account that will own the Pages project.'],
+  ] as const;
+  const resources: BaselinePlanResource[] = selections.map(([id, title, owner, missingReason]) => ({
+    id,
+    title,
+    owner: owner || null,
+    status: owner ? 'requires-approval' : 'blocked',
+    reason: owner
+      ? `After approval, Agent-Dev may create the ${title.toLowerCase()} in ${owner}.`
+      : missingReason,
+  }));
+  const blocked = resources.filter(resource => resource.status === 'blocked');
+  return {
+    blueprintRevision: blueprint.metadata.revision,
+    noExternalChanges: true,
+    readyForApproval: blocked.length === 0,
+    summary: blocked.length === 0
+      ? 'All ownership targets are selected. Resource creation still requires one explicit approval and has not started.'
+      : `${blocked.length} ownership target${blocked.length === 1 ? ' is' : 's are'} still required before a baseline can be approved.`,
+    resources,
   };
 }

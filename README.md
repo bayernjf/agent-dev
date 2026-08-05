@@ -59,7 +59,11 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 为任一 Blueprint Revision 生成 Product Standard、Agent 约束、交付流程、环境变量 Contract 和交接文档预览；
 - 显示无外部写入的 Dry Run，以及每个 Provider 的最小人工操作和验证条件；
 - 运行本机 Connector Preflight，区分命令可用性与尚未进行的账号授权；
+- 读取本机 GitHub、Vercel 与 Cloudflare CLI 的当前身份状态；Supabase 仍明确要求人工确认；
+- 在专业模式保存 GitHub Owner、Supabase Organization、Vercel Team 与 Cloudflare Account，并生成不执行创建操作的资源基线计划；
 - 通过本地 SQLite 保存项目、交付状态和 Blueprint 历史。
+
+身份发现只读取本机 CLI 已有登录状态；资源基线计划只显示阻塞项和待批准的创建意图，绝不写入 GitHub、Supabase、Vercel 或 Cloudflare。
 
 尚未实现：将生成物写入目标产品仓库、Provider 资源创建、Secret 连接、模板代码生成、Codex 执行、PR/Preview 编排与交付报告。它们仍受下方 Phase 0 技术验证结论约束。
 

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles,
 } from 'lucide-react';
-import { getBlueprintDecisions, type BlueprintAnswers, type DryRunPlan, type ProductBlueprint } from '@agent-dev/blueprint';
-import type { ConnectorPreflightReport } from '@agent-dev/policy';
+import { getBlueprintDecisions, type BaselinePlan, type BlueprintAnswers, type DryRunPlan, type ProductBlueprint } from '@agent-dev/blueprint';
+import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
 
 type Project = {
   id: string;
@@ -24,6 +24,10 @@ const defaultAnswers: BlueprintAnswers = {
   previewStrategy: 'per-pull-request',
   analyticsProviders: [],
   customInstructions: '',
+  githubOwner: '',
+  vercelTeam: '',
+  cloudflareAccount: '',
+  supabaseOrganization: '',
 };
 
 function formatDate(value: string) {
@@ -38,6 +42,10 @@ function answersFromBlueprint(blueprint: ProductBlueprint): BlueprintAnswers {
     previewStrategy: blueprint.spec.deployment.previewStrategy,
     analyticsProviders: blueprint.spec.analytics.providers,
     customInstructions: blueprint.metadata.customInstructions,
+    githubOwner: blueprint.spec.sourceControl.owner,
+    vercelTeam: blueprint.spec.deployment.api.team,
+    cloudflareAccount: blueprint.spec.deployment.web.account,
+    supabaseOrganization: blueprint.spec.data.organization,
   };
 }
 
@@ -45,9 +53,12 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
   const [dryRun, setDryRun] = useState<DryRunPlan | null>(null);
+  const [baselinePlan, setBaselinePlan] = useState<BaselinePlan | null>(null);
   const [selectedArtifactId, setSelectedArtifactId] = useState<DryRunPlan['artifacts'][number]['id'] | null>(null);
   const [preflight, setPreflight] = useState<ConnectorPreflightReport | null>(null);
+  const [accountDiscovery, setAccountDiscovery] = useState<AccountDiscoveryReport | null>(null);
   const [checkingPreflight, setCheckingPreflight] = useState(false);
+  const [discoveringAccounts, setDiscoveringAccounts] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
   const [name, setName] = useState('');
   const [answers, setAnswers] = useState<BlueprintAnswers>(defaultAnswers);
@@ -85,9 +96,21 @@ export function App() {
       setName(payload.project.name);
       setAnswers(answersFromBlueprint(payload.project.blueprint));
       void loadDryRun(projectId);
+      void loadBaselinePlan(projectId);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load this Blueprint.');
+    }
+  };
+
+  const loadBaselinePlan = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/baseline-plan`);
+      if (!response.ok) throw new Error('Unable to prepare the baseline plan.');
+      const payload = await response.json() as { plan: BaselinePlan };
+      setBaselinePlan(payload.plan);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to prepare the baseline plan.');
     }
   };
 
@@ -108,6 +131,7 @@ export function App() {
   const startNewProject = () => {
     setSelected(null);
     setDryRun(null);
+    setBaselinePlan(null);
     setSelectedArtifactId(null);
     setName('');
     setAnswers(defaultAnswers);
@@ -125,6 +149,20 @@ export function App() {
       setError(cause instanceof Error ? cause.message : 'Unable to run local connector preflight.');
     } finally {
       setCheckingPreflight(false);
+    }
+  };
+
+  const discoverAccounts = async () => {
+    setDiscoveringAccounts(true);
+    try {
+      const response = await fetch('/api/connectors/discovery');
+      if (!response.ok) throw new Error('Unable to discover local connector identities.');
+      setAccountDiscovery(await response.json() as AccountDiscoveryReport);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to discover local connector identities.');
+    } finally {
+      setDiscoveringAccounts(false);
     }
   };
 
@@ -178,6 +216,7 @@ export function App() {
       setName(payload.project.name);
       setAnswers(answersFromBlueprint(payload.project.blueprint));
       await loadDryRun(payload.project.id);
+      await loadBaselinePlan(payload.project.id);
       await loadProjects();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to save the Blueprint.');
@@ -238,6 +277,14 @@ export function App() {
               <div className="artifact-list">{dryRun.artifacts.map(artifact => <button className={`artifact-button ${selectedArtifact?.id === artifact.id ? 'selected' : ''}`} type="button" key={artifact.id} onClick={() => setSelectedArtifactId(artifact.id)}><strong>{artifact.title}</strong><span>{artifact.path}</span></button>)}</div>
               {selectedArtifact && <article className="artifact-preview"><div><h3>{selectedArtifact.title}</h3><p>{selectedArtifact.path}</p></div><pre>{selectedArtifact.content}</pre></article>}
             </section>}
+
+            {selected && baselinePlan && <section className="baseline-section">
+              <div className="section-heading"><div><p className="eyebrow">Resource plan · Revision {baselinePlan.blueprintRevision}</p><h2>Baseline resources</h2><p>{baselinePlan.summary}</p></div><span className={`baseline-tag ${baselinePlan.readyForApproval ? 'ready' : 'blocked'}`}>{baselinePlan.readyForApproval ? 'Ready for approval' : 'Ownership required'}</span></div>
+              <div className="baseline-list">{baselinePlan.resources.map(resource => <article className="baseline-resource" key={resource.id}>
+                <div><h3>{resource.title}</h3><p>{resource.owner ?? 'Not selected'}</p><small>{resource.reason}</small></div><span className={`resource-status ${resource.status}`}>{resource.status === 'blocked' ? 'Blocked' : 'Awaiting approval'}</span>
+              </article>)}</div>
+              <p className="baseline-note">This is a plan only. No remote resource has been created. The future Apply action will require a separate explicit approval.</p>
+            </section>}
           </section>
 
           <aside className="right-rail">
@@ -258,6 +305,16 @@ export function App() {
               </div></fieldset>
 
               {isProfessional && <>
+                <fieldset className="choice-group ownership-group"><legend>Resource ownership</legend><p>These names are saved in the next Blueprint revision. Discovery confirms only the current CLI identity; select the final target yourself.</p>
+                  <label htmlFor="github-owner">GitHub owner or organization</label>
+                  <input id="github-owner" value={answers.githubOwner} onChange={event => setAnswer('githubOwner', event.target.value)} placeholder="e.g. acme" maxLength={120} />
+                  <label htmlFor="supabase-organization">Supabase organization</label>
+                  <input id="supabase-organization" value={answers.supabaseOrganization} onChange={event => setAnswer('supabaseOrganization', event.target.value)} placeholder="e.g. acme" maxLength={120} />
+                  <label htmlFor="vercel-team">Vercel team</label>
+                  <input id="vercel-team" value={answers.vercelTeam} onChange={event => setAnswer('vercelTeam', event.target.value)} placeholder="e.g. acme" maxLength={120} />
+                  <label htmlFor="cloudflare-account">Cloudflare account</label>
+                  <input id="cloudflare-account" value={answers.cloudflareAccount} onChange={event => setAnswer('cloudflareAccount', event.target.value)} placeholder="e.g. acme" maxLength={120} />
+                </fieldset>
                 <fieldset className="choice-group"><legend>Preview workflow</legend><div className="choice-stack">
                   <label><input type="radio" name="preview" checked={answers.previewStrategy === 'per-pull-request'} onChange={() => setAnswer('previewStrategy', 'per-pull-request')} />Per pull request</label>
                   <label><input type="radio" name="preview" checked={answers.previewStrategy === 'stable-dev-api'} onChange={() => setAnswer('previewStrategy', 'stable-dev-api')} />Stable dev API</label>
@@ -277,12 +334,16 @@ export function App() {
               <div className="panel-title"><div><p className="eyebrow">Local only</p><h2>Connector readiness</h2></div><PlugZap size={19} aria-hidden="true" /></div>
               <p className="form-note">Checks installed command-line tools only. It does not authenticate, access accounts or create resources.</p>
               <button className="secondary-button" type="button" onClick={() => void runPreflight()} disabled={checkingPreflight}>{checkingPreflight ? 'Checking...' : 'Run local preflight'}<RefreshCw size={15} aria-hidden="true" /></button>
+              <button className="secondary-button discovery-button" type="button" onClick={() => void discoverAccounts()} disabled={discoveringAccounts}>{discoveringAccounts ? 'Discovering...' : 'Discover active identities'}<PlugZap size={15} aria-hidden="true" /></button>
               {preflight && <>
                 <p className="preflight-summary">{preflight.readyForAccountDiscovery ? 'All local tools are ready for account discovery.' : 'Some local tools need attention before account discovery.'}</p>
                 <div className="connector-list">{preflight.connectors.map(connector => <article className="connector" key={connector.id}>
                   <div><h3>{connector.title}</h3><p>{connector.version ?? connector.command}</p><small>{connector.detail}</small><em>{connector.nextAction}</em></div><span className={`connector-status ${connector.status}`}>{connector.status === 'available' ? 'Available' : connector.status === 'missing' ? 'Install required' : 'Needs attention'}</span>
                 </article>)}</div>
               </>}
+              {accountDiscovery && <div className="discovery-list">{accountDiscovery.accounts.map(account => <article className="connector" key={account.id}>
+                <div><h3>{account.title}</h3><p>{account.identity ?? 'No identity returned'}</p><small>{account.detail}</small><em>{account.nextAction}</em></div><span className={`connector-status ${account.status}`}>{account.status === 'authenticated' ? 'Authenticated' : account.status === 'manual' ? 'Manual' : account.status === 'missing' ? 'Install required' : 'Sign in required'}</span>
+              </article>)}</div>}
             </section>
             <section className="activity-panel" id="activity"><div className="panel-title"><h2>Activity</h2><Activity size={18} aria-hidden="true" /></div><ol>{activity.map(item => <li key={item.id}><span>{item.text}</span><time>{item.time}</time></li>)}</ol></section>
           </aside>

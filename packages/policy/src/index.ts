@@ -8,6 +8,12 @@ export {
   type ConnectorPreflightReport,
   type ConnectorStatus,
 } from './connectors.js';
+export {
+  runAccountDiscovery,
+  type AccountDiscovery,
+  type AccountDiscoveryReport,
+  type AccountDiscoveryStatus,
+} from './account-discovery.js';
 
 export type AutomationMode = 'auto' | 'ask' | 'forbid';
 export type ActionRisk = 'low' | 'medium' | 'high' | 'production' | 'secret';

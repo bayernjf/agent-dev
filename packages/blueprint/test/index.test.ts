@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createBlueprint, createDefaultBlueprint, createDryRunPlan, getBlueprintDecisions, productBlueprintSchema } from '../src/index.js';
+import { createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, getBlueprintDecisions, productBlueprintSchema } from '../src/index.js';
 
 describe('ProductBlueprint', () => {
   it('creates the fixed v0.1 Web SaaS Golden Path', () => {
@@ -8,6 +8,17 @@ describe('ProductBlueprint', () => {
     expect(blueprint.spec.deployment.web.provider).toBe('cloudflare-pages');
     expect(blueprint.spec.deployment.api.provider).toBe('vercel-functions');
     expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
+  });
+
+  it('blocks baseline approval until every ownership target is selected', () => {
+    const incomplete = createBaselinePlan(createDefaultBlueprint('Receipt Desk'));
+    const complete = createBaselinePlan(createBlueprint('Receipt Desk', {
+      githubOwner: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme', supabaseOrganization: 'acme',
+    }));
+
+    expect(incomplete.readyForApproval).toBe(false);
+    expect(incomplete.resources).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'blocked' })]));
+    expect(complete.readyForApproval).toBe(true);
   });
 
   it('preserves professional answers and surfaces their approval boundaries', () => {
