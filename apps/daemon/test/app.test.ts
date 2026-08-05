@@ -192,6 +192,9 @@ describe('daemon API', () => {
     });
     expect(approvedTask.status).toBe(200);
     await expect(approvedTask.json()).resolves.toMatchObject({ task: { status: 'approved', approvedBy: 'test-user' } });
+    const runtimePlan = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/plan`);
+    expect(runtimePlan.status).toBe(200);
+    await expect(runtimePlan.json()).resolves.toMatchObject({ plan: { mode: 'dry-run', executionAllowed: false, noExternalChanges: true }, probe: { executionVerified: false } });
     const invalidRetry = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply/retry`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

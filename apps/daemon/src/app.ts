@@ -6,6 +6,7 @@ import { blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryR
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
+import { buildCodexExecutionPlan, probeCodexRuntime } from '@agent-dev/agent-runtime';
 import { DaemonEventBus } from './events.js';
 import { buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint } from './providers.js';
 
@@ -209,6 +210,16 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     return context.json({ task: await store.getFeatureTask(project.id, project.blueprint.metadata.revision) });
+  });
+
+  app.get('/api/runtime/probe', context => context.json({ probe: probeCodexRuntime() }));
+
+  app.get('/api/projects/:projectId/runtime/plan', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const task = await store.getFeatureTask(project.id, project.blueprint.metadata.revision);
+    if (!task || task.status !== 'approved') return context.json({ error: 'Approve a Feature Task before preparing a Runtime plan.' }, 409);
+    return context.json({ probe: probeCodexRuntime(), plan: buildCodexExecutionPlan(task, task.workspacePath) });
   });
 
   app.post('/api/projects/:projectId/feature-task', async context => {

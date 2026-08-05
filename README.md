@@ -74,6 +74,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 依赖安装是独立的显式动作（`INSTALL_DEPENDENCIES`）：只在用户确认后运行 `npm install`，并生成 `dependency-install.json` 与 `DEPENDENCY_INSTALL_REPORT.md`；
 - Local Apply 完成后可在 Studio 创建 Feature Task，提交目标、验收标准和任务边界；人工批准后生成 `TASK_APPROVAL.md` 并提交到本地 feature 分支；
 - 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；当前 Runtime 执行器仍未接入真实 Codex 写入，先保留任务证据和边界。
+- Runtime Adapter 已能生成受 sandbox、workspace 和禁止路径约束的 Codex dry-run 命令计划，并探测 CLI 是否存在；认证和真实写入验证未通过前不会执行命令。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
 - 模板基线带有根 TypeScript/Vite 配置，可执行 `npm run quality` 和 `npm run build` 作为生成工程的质量入口；
 - Apply 步骤按状态持久化，支持失败后显式重试（最多 3 次）并对已完成 Run 保持幂等；
