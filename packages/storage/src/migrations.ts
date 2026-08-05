@@ -32,4 +32,19 @@ export const migrations = [
       );
     `,
   },
+  {
+    id: '0002_baseline_approvals',
+    sql: `
+      CREATE TABLE IF NOT EXISTS baseline_approvals (
+        id TEXT PRIMARY KEY NOT NULL,
+        project_id TEXT NOT NULL,
+        blueprint_revision INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        approved_by TEXT NOT NULL,
+        approved_at TEXT NOT NULL,
+        UNIQUE(project_id, blueprint_revision),
+        FOREIGN KEY(project_id) REFERENCES projects(id)
+      );
+    `,
+  },
 ] as const;

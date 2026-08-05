@@ -95,4 +95,45 @@ describe('daemon API', () => {
     });
     await store.close();
   });
+
+  it('requires explicit confirmation before recording a ready baseline approval', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const { app } = createDaemonApp(store);
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Ready Baseline',
+        answers: {
+          mode: 'professional',
+          githubOwner: 'acme',
+          supabaseOrganization: 'acme',
+          vercelTeam: 'acme',
+          cloudflareAccount: 'acme',
+        },
+      }),
+    });
+    const createdPayload = await created.json() as { project: { id: string } };
+
+    const missingConfirmation = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintRevision: 1 }),
+    });
+    expect(missingConfirmation.status).toBe(400);
+
+    const approved = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+    });
+    expect(approved.status).toBe(200);
+    await expect(approved.json()).resolves.toMatchObject({ approval: { status: 'approved', blueprintRevision: 1 }, plan: { noExternalChanges: true } });
+
+    const plan = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan`);
+    await expect(plan.json()).resolves.toMatchObject({ approval: { status: 'approved' } });
+    await store.close();
+  });
 });

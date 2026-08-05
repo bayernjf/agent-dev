@@ -48,4 +48,33 @@ describe('AgentDevStore', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it('records a baseline approval for the exact Blueprint revision', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    const databasePath = join(directory, 'agent-dev.sqlite');
+    try {
+      const store = await AgentDevStore.open(databasePath);
+      const created = await store.createProject({
+        name: 'Approved Baseline',
+        blueprint: createBlueprint('approved-baseline', {
+          mode: 'professional',
+          githubOwner: 'acme',
+          supabaseOrganization: 'acme',
+          vercelTeam: 'acme',
+          cloudflareAccount: 'acme',
+        }),
+      });
+
+      const approval = await store.approveBaseline(created.id, 1, 'test-user');
+      expect(approval).toMatchObject({ projectId: created.id, blueprintRevision: 1, status: 'approved', approvedBy: 'test-user' });
+      expect(store.getBaselineApproval(created.id, 1)).toEqual(approval);
+
+      await store.close();
+      const reopened = await AgentDevStore.open(databasePath);
+      expect(reopened.getBaselineApproval(created.id, 1)).toEqual(approval);
+      await reopened.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

@@ -16,6 +16,7 @@ type Project = {
 
 type ProjectDetail = Project & { blueprint: ProductBlueprint };
 type ActivityEntry = { id: string; text: string; time: string };
+type BaselineApproval = { projectId: string; blueprintRevision: number; status: 'approved'; approvedBy: string; approvedAt: string };
 
 const defaultAnswers: BlueprintAnswers = {
   mode: 'beginner',
@@ -54,11 +55,13 @@ export function App() {
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
   const [dryRun, setDryRun] = useState<DryRunPlan | null>(null);
   const [baselinePlan, setBaselinePlan] = useState<BaselinePlan | null>(null);
+  const [baselineApproval, setBaselineApproval] = useState<BaselineApproval | null>(null);
   const [selectedArtifactId, setSelectedArtifactId] = useState<DryRunPlan['artifacts'][number]['id'] | null>(null);
   const [preflight, setPreflight] = useState<ConnectorPreflightReport | null>(null);
   const [accountDiscovery, setAccountDiscovery] = useState<AccountDiscoveryReport | null>(null);
   const [checkingPreflight, setCheckingPreflight] = useState(false);
   const [discoveringAccounts, setDiscoveringAccounts] = useState(false);
+  const [approvingBaseline, setApprovingBaseline] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
   const [name, setName] = useState('');
   const [answers, setAnswers] = useState<BlueprintAnswers>(defaultAnswers);
@@ -107,8 +110,9 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${projectId}/baseline-plan`);
       if (!response.ok) throw new Error('Unable to prepare the baseline plan.');
-      const payload = await response.json() as { plan: BaselinePlan };
+      const payload = await response.json() as { plan: BaselinePlan; approval: BaselineApproval | null };
       setBaselinePlan(payload.plan);
+      setBaselineApproval(payload.approval);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to prepare the baseline plan.');
     }
@@ -132,6 +136,7 @@ export function App() {
     setSelected(null);
     setDryRun(null);
     setBaselinePlan(null);
+    setBaselineApproval(null);
     setSelectedArtifactId(null);
     setName('');
     setAnswers(defaultAnswers);
@@ -166,13 +171,36 @@ export function App() {
     }
   };
 
+  const approveBaseline = async () => {
+    if (!selected || !baselinePlan?.readyForApproval || baselineApproval) return;
+    const confirmed = window.confirm('Record approval for this baseline? No remote resource will be created.');
+    if (!confirmed) return;
+    setApprovingBaseline(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/baseline-plan/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ blueprintRevision: baselinePlan.blueprintRevision, confirmation: 'APPROVE_BASELINE' }),
+      });
+      const payload = await response.json() as { approval?: BaselineApproval; error?: string };
+      if (!response.ok || !payload.approval) throw new Error(payload.error ?? 'Unable to approve the baseline.');
+      setBaselineApproval(payload.approval);
+      setActivity(current => [{ id: crypto.randomUUID(), text: 'Baseline approval recorded', time: 'Now' }, ...current].slice(0, 5));
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to approve the baseline.');
+    } finally {
+      setApprovingBaseline(false);
+    }
+  };
+
   useEffect(() => {
     void loadProjects();
     const source = new EventSource('/events');
     const onEvent = (event: Event) => {
       const payload = JSON.parse((event as MessageEvent<string>).data) as { type: string; projectId: string; projectName: string; occurredAt: string };
       setActivity(current => [
-        { id: crypto.randomUUID(), text: `${payload.type === 'blueprint.revised' ? 'Blueprint revised' : 'Project created'}: ${payload.projectName}`, time: formatDate(payload.occurredAt) },
+        { id: crypto.randomUUID(), text: `${payload.type === 'blueprint.revised' ? 'Blueprint revised' : payload.type === 'baseline.approved' ? 'Baseline approved' : 'Project created'}: ${payload.projectName}`, time: formatDate(payload.occurredAt) },
         ...current,
       ].slice(0, 5));
       void loadProjects();
@@ -283,7 +311,8 @@ export function App() {
               <div className="baseline-list">{baselinePlan.resources.map(resource => <article className="baseline-resource" key={resource.id}>
                 <div><h3>{resource.title}</h3><p>{resource.owner ?? 'Not selected'}</p><small>{resource.reason}</small></div><span className={`resource-status ${resource.status}`}>{resource.status === 'blocked' ? 'Blocked' : 'Awaiting approval'}</span>
               </article>)}</div>
-              <p className="baseline-note">This is a plan only. No remote resource has been created. The future Apply action will require a separate explicit approval.</p>
+              {baselineApproval ? <div className="approval-record"><CheckCircle2 size={17} aria-hidden="true" /><div><strong>Baseline approval recorded</strong><small>Revision {baselineApproval.blueprintRevision} · {baselineApproval.approvedBy} · {formatDate(baselineApproval.approvedAt)}</small></div></div> : baselinePlan.readyForApproval ? <div className="approval-action"><p>This records intent only. It does not create remote resources or reveal secrets.</p><button className="primary-button" type="button" onClick={() => void approveBaseline()} disabled={approvingBaseline}>{approvingBaseline ? 'Recording approval...' : 'Approve baseline plan'}<ShieldCheck size={16} aria-hidden="true" /></button></div> : null}
+              <p className="baseline-note">No remote resource has been created. Applying this approved plan is a separate future capability.</p>
             </section>}
           </section>
 

@@ -6,15 +6,15 @@ import { desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/sql-js';
 import initSqlJs, { type Database } from 'sql.js';
 import type { ProductBlueprint } from '@agent-dev/blueprint';
-import { productBlueprintSchema } from '@agent-dev/blueprint';
+import { createBaselinePlan, productBlueprintSchema } from '@agent-dev/blueprint';
 import { createNeedsInputRun, type DeliveryState } from '@agent-dev/workflow';
-import { blueprintRevisions, deliveryRuns, projects } from './schema.js';
+import { baselineApprovals, blueprintRevisions, deliveryRuns, projects } from './schema.js';
 import { migrations } from './migrations.js';
 
 const require = createRequire(import.meta.url);
 
 function createOrm(database: Database) {
-  return drizzle(database, { schema: { projects, blueprintRevisions, deliveryRuns } });
+  return drizzle(database, { schema: { baselineApprovals, projects, blueprintRevisions, deliveryRuns } });
 }
 
 export type CreateProjectInput = {
@@ -35,6 +35,14 @@ export type StoredProject = ProjectSummary & {
   blueprint: ProductBlueprint;
   runId: string;
   snapshot: unknown;
+};
+
+export type BaselineApproval = {
+  projectId: string;
+  blueprintRevision: number;
+  status: 'approved';
+  approvedBy: string;
+  approvedAt: string;
 };
 
 export class AgentDevStore {
@@ -208,6 +216,52 @@ export class AgentDevStore {
       runId: run.id,
       snapshot: JSON.parse(run.snapshotJson),
     };
+  }
+
+  getBaselineApproval(projectId: string, blueprintRevision: number): BaselineApproval | null {
+    const approval = this.orm.select().from(baselineApprovals)
+      .where(eq(baselineApprovals.projectId, projectId))
+      .all()
+      .find(row => row.blueprintRevision === blueprintRevision && row.status === 'approved');
+    return approval ? {
+      projectId: approval.projectId,
+      blueprintRevision: approval.blueprintRevision,
+      status: 'approved',
+      approvedBy: approval.approvedBy,
+      approvedAt: approval.approvedAt,
+    } : null;
+  }
+
+  async approveBaseline(projectId: string, blueprintRevision: number, approvedBy: string): Promise<BaselineApproval> {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error(`Project ${projectId} was not found.`);
+    if (project.blueprint.metadata.revision !== blueprintRevision) {
+      throw new Error('The approval must target the latest Blueprint revision.');
+    }
+    const plan = createBaselinePlan(project.blueprint);
+    if (!plan.readyForApproval) throw new Error('Select every resource owner before approving the baseline.');
+
+    const existing = this.getBaselineApproval(projectId, blueprintRevision);
+    if (existing) return existing;
+
+    const approvedAt = new Date().toISOString();
+    const approval: BaselineApproval = {
+      projectId,
+      blueprintRevision,
+      status: 'approved',
+      approvedBy,
+      approvedAt,
+    };
+    this.orm.insert(baselineApprovals).values({
+      id: randomUUID(),
+      projectId,
+      blueprintRevision,
+      status: approval.status,
+      approvedBy,
+      approvedAt,
+    }).run();
+    await this.persist();
+    return approval;
   }
 
   async close() {
