@@ -111,4 +111,33 @@ describe('AgentDevStore', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it('recovers the same Apply Run after an injected step failure', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    const databasePath = join(directory, 'agent-dev.sqlite');
+    try {
+      const store = await AgentDevStore.open(databasePath);
+      const created = await store.createProject({
+        name: 'Recoverable Apply',
+        blueprint: createBlueprint('recoverable-apply', {
+          mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme',
+        }),
+      });
+      await store.approveBaseline(created.id, 1, 'test-user');
+      const queued = await store.createApplyRun(created.id, 1);
+      const failed = await store.executeApplyRun(queued.id, { failStep: 'write-artifacts' });
+      expect(failed.status).toBe('failed');
+      expect(failed.attempts).toBe(1);
+      expect(failed.steps.find(step => step.id === 'validate-blueprint')?.status).toBe('completed');
+      expect(failed.steps.find(step => step.id === 'write-artifacts')?.status).toBe('failed');
+
+      const recovered = await store.executeApplyRun(queued.id);
+      expect(recovered.status).toBe('completed');
+      expect(recovered.attempts).toBe(2);
+      expect(store.getProject(created.id)?.state).toBe('BASELINE_READY');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

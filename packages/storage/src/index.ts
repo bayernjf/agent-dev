@@ -66,6 +66,10 @@ export type ApplyRun = {
   updatedAt: string;
 };
 
+export type ApplyExecutionOptions = {
+  failStep?: ApplyStep['id'];
+};
+
 export class AgentDevStore {
   private readonly orm: ReturnType<typeof createOrm>;
 
@@ -323,7 +327,7 @@ export class AgentDevStore {
     return { id, projectId, blueprintRevision, status: 'queued', attempts: 0, workspacePath, steps, createdAt: now, updatedAt: now };
   }
 
-  async executeApplyRun(runId: string): Promise<ApplyRun> {
+  async executeApplyRun(runId: string, options: ApplyExecutionOptions = {}): Promise<ApplyRun> {
     const run = this.getApplyRun(runId);
     if (!run) throw new Error(`Apply run ${runId} was not found.`);
     if (run.status === 'completed') return run;
@@ -335,16 +339,16 @@ export class AgentDevStore {
     const attempts = run.attempts + 1;
     await this.updateApplyRun(run, 'running', steps, attempts);
     try {
-      await this.executePendingStep(run, steps[0], attempts, async () => { productBlueprintSchema.parse(project.blueprint); });
-      await this.executePendingStep(run, steps[1], attempts, async () => { await mkdir(run.workspacePath, { recursive: true }); });
-      await this.executePendingStep(run, steps[2], attempts, async () => {
+      await this.executePendingStep(run, steps[0], attempts, options, async () => { productBlueprintSchema.parse(project.blueprint); });
+      await this.executePendingStep(run, steps[1], attempts, options, async () => { await mkdir(run.workspacePath, { recursive: true }); });
+      await this.executePendingStep(run, steps[2], attempts, options, async () => {
         for (const artifact of createDryRunPlan(project.blueprint).artifacts) {
           const target = join(run.workspacePath, artifact.path);
           await mkdir(dirname(target), { recursive: true });
           await writeFile(target, artifact.content, 'utf8');
         }
       });
-      await this.executePendingStep(run, steps[3], attempts, async () => {
+      await this.executePendingStep(run, steps[3], attempts, options, async () => {
         await writeFile(join(run.workspacePath, 'apply-manifest.json'), JSON.stringify({
           projectId: run.projectId,
           blueprintRevision: run.blueprintRevision,
@@ -354,7 +358,7 @@ export class AgentDevStore {
           note: 'Local Apply Simulator only. No provider resource was created.',
         }, null, 2) + '\n', 'utf8');
       });
-      await this.executePendingStep(run, steps[4], attempts, async () => {
+      await this.executePendingStep(run, steps[4], attempts, options, async () => {
         await writeFile(join(run.workspacePath, 'DELIVERY_REPORT.md'), this.buildDeliveryReport(run, project.blueprint.metadata.name, steps, 'completed'), 'utf8');
       });
       const completed = await this.updateApplyRun(run, 'completed', steps, attempts);
@@ -437,9 +441,13 @@ export class AgentDevStore {
     }
   }
 
-  private async executePendingStep(run: ApplyRun, step: ApplyStep, attempts: number, operation: () => Promise<void>) {
+  private async executePendingStep(run: ApplyRun, step: ApplyStep, attempts: number, options: ApplyExecutionOptions, operation: () => Promise<void>) {
     if (step.status === 'completed') return;
     await this.updateApplyRun(run, 'running', run.steps, attempts);
+    if (options.failStep === step.id) {
+      await this.runApplyStep(step, async () => { throw new Error(`Injected test failure at ${step.id}.`); });
+      return;
+    }
     await this.runApplyStep(step, operation);
     await this.updateApplyRun(run, 'running', run.steps, attempts);
   }
