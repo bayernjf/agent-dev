@@ -60,6 +60,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 显示无外部写入的 Dry Run，以及每个 Provider 的最小人工操作和验证条件；
 - 运行本机 Connector Preflight，区分命令可用性与尚未进行的账号授权；
 - 使用不联网的 Fake Provider Adapter 验证 `discover -> plan -> apply -> verify -> detectDrift` 契约、审批边界和幂等键；
+- Studio 展示四个平台的模拟 Plan、Verify 结果和 Provider Simulation Report；
 - 读取本机 GitHub、Vercel 与 Cloudflare CLI 的当前身份状态；Supabase 仍明确要求人工确认；
 - 在专业模式保存 GitHub Owner、Supabase Organization、Vercel Team 与 Cloudflare Account，并生成不执行创建操作的资源基线计划；
 - 对已完整选择归属的基线计划记录显式、本地且按 Blueprint Revision 绑定的审批；

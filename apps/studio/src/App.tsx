@@ -19,6 +19,8 @@ type ActivityEntry = { id: string; text: string; time: string };
 type BaselineApproval = { projectId: string; blueprintRevision: number; status: 'approved'; approvedBy: string; approvedAt: string };
 type ApplyStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed'; detail?: string };
 type ApplyRun = { id: string; projectId: string; blueprintRevision: number; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; workspacePath: string; steps: ApplyStep[]; createdAt: string; updatedAt: string };
+type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
+type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
 
 const defaultAnswers: BlueprintAnswers = {
   mode: 'beginner',
@@ -59,6 +61,9 @@ export function App() {
   const [baselinePlan, setBaselinePlan] = useState<BaselinePlan | null>(null);
   const [baselineApproval, setBaselineApproval] = useState<BaselineApproval | null>(null);
   const [applyRun, setApplyRun] = useState<ApplyRun | null>(null);
+  const [providerPlans, setProviderPlans] = useState<ProviderPlan[]>([]);
+  const [providerVerification, setProviderVerification] = useState<ProviderVerification[] | null>(null);
+  const [providerReport, setProviderReport] = useState('');
   const [selectedArtifactId, setSelectedArtifactId] = useState<DryRunPlan['artifacts'][number]['id'] | null>(null);
   const [preflight, setPreflight] = useState<ConnectorPreflightReport | null>(null);
   const [accountDiscovery, setAccountDiscovery] = useState<AccountDiscoveryReport | null>(null);
@@ -66,6 +71,8 @@ export function App() {
   const [discoveringAccounts, setDiscoveringAccounts] = useState(false);
   const [approvingBaseline, setApprovingBaseline] = useState(false);
   const [applyingBaseline, setApplyingBaseline] = useState(false);
+  const [applyingFakeProviders, setApplyingFakeProviders] = useState(false);
+  const [verifyingProviders, setVerifyingProviders] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
   const [name, setName] = useState('');
   const [answers, setAnswers] = useState<BlueprintAnswers>(defaultAnswers);
@@ -105,6 +112,7 @@ export function App() {
       void loadDryRun(projectId);
       void loadBaselinePlan(projectId);
       void loadApplyRun(projectId);
+      void loadProviderPlan(projectId);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load this Blueprint.');
@@ -148,12 +156,28 @@ export function App() {
     }
   };
 
+  const loadProviderPlan = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/provider-plan`);
+      if (!response.ok) throw new Error('Unable to load the provider simulation plan.');
+      const payload = await response.json() as { plans: ProviderPlan[] };
+      setProviderPlans(payload.plans);
+      setProviderVerification(null);
+      setProviderReport('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load the provider simulation plan.');
+    }
+  };
+
   const startNewProject = () => {
     setSelected(null);
     setDryRun(null);
     setBaselinePlan(null);
     setBaselineApproval(null);
     setApplyRun(null);
+    setProviderPlans([]);
+    setProviderVerification(null);
+    setProviderReport('');
     setSelectedArtifactId(null);
     setName('');
     setAnswers(defaultAnswers);
@@ -253,6 +277,44 @@ export function App() {
     }
   };
 
+  const applyFakeProviders = async () => {
+    if (!selected || !baselineApproval || applyingFakeProviders) return;
+    const confirmed = window.confirm('Run the Fake Provider simulation? It changes only in-memory simulation state and creates no cloud resources.');
+    if (!confirmed) return;
+    setApplyingFakeProviders(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/provider-plan/apply`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'APPLY_FAKE_PROVIDERS' }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? 'Unable to apply the provider simulation.');
+      await verifyProviders();
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to apply the provider simulation.');
+    } finally {
+      setApplyingFakeProviders(false);
+    }
+  };
+
+  const verifyProviders = async () => {
+    if (!selected || verifyingProviders) return;
+    setVerifyingProviders(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/provider-plan/verify`);
+      if (!response.ok) throw new Error('Unable to verify provider simulation state.');
+      const payload = await response.json() as { verification: ProviderVerification[]; deliveryReport: string };
+      setProviderVerification(payload.verification);
+      setProviderReport(payload.deliveryReport);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to verify provider simulation state.');
+    } finally {
+      setVerifyingProviders(false);
+    }
+  };
+
   useEffect(() => {
     void loadProjects();
     const source = new EventSource('/events');
@@ -305,6 +367,7 @@ export function App() {
       await loadDryRun(payload.project.id);
       await loadBaselinePlan(payload.project.id);
       await loadApplyRun(payload.project.id);
+      await loadProviderPlan(payload.project.id);
       await loadProjects();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to save the Blueprint.');
@@ -375,6 +438,7 @@ export function App() {
               {baselineApproval && !applyRun && <div className="approval-action"><p>Run the local simulator to create the delivery package in the ignored `.agent-dev` workspace.</p><button className="primary-button" type="button" onClick={() => void applyBaseline()} disabled={applyingBaseline}>{applyingBaseline ? 'Applying locally...' : 'Run local Apply'}<ArrowRight size={16} aria-hidden="true" /></button></div>}
               {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>Attempt {applyRun.attempts} of 3 · {applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? 'Retrying...' : 'Retry local Apply'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}
               <p className="baseline-note">No remote resource has been created. The simulator writes only local generated artifacts and an execution manifest.</p>
+              <div className="provider-simulation"><div className="provider-simulation-heading"><div><p className="eyebrow">Simulation only</p><h3>Provider lifecycle</h3><p>Plans and verification use in-memory Fake Providers. No GitHub, Supabase, Vercel or Cloudflare API is called.</p></div><span className="dry-run-tag">No external writes</span></div><div className="provider-plan-list">{providerPlans.map(plan => <article className="provider-plan" key={plan.providerId}><div><strong>{plan.providerId}</strong><small>{plan.idempotencyKey}</small></div><ol>{plan.resources.map(resource => <li key={resource.spec.id}><span>{resource.spec.id}</span><em>{resource.action}</em><small>{resource.reason}</small></li>)}</ol></article>)}</div><div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void verifyProviders()} disabled={verifyingProviders}>{verifyingProviders ? 'Verifying...' : 'Verify simulation state'}<RefreshCw size={15} aria-hidden="true" /></button>{baselineApproval && <button className="secondary-button" type="button" onClick={() => void applyFakeProviders()} disabled={applyingFakeProviders}>{applyingFakeProviders ? 'Applying simulation...' : 'Apply Fake Providers'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{providerVerification && <div className="provider-verification">{providerVerification.map(item => <span className={item.verified ? 'verified' : 'unverified'} key={item.providerId}>{item.providerId}: {item.verified ? 'verified' : `missing ${item.missing.length}, drift ${item.mismatched.length}`}</span>)}</div>}{providerReport && <pre className="provider-report">{providerReport}</pre>}</div>
             </section>}
           </section>
 

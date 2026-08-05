@@ -154,7 +154,7 @@ describe('daemon API', () => {
     expect(providerApply.status).toBe(200);
 
     const providerVerify = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/provider-plan/verify`);
-    await expect(providerVerify.json()).resolves.toMatchObject({ verified: true });
+    await expect(providerVerify.json()).resolves.toMatchObject({ verified: true, deliveryReport: expect.stringContaining('Provider Simulation Report') });
 
     const applied = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply`, {
       method: 'POST',
