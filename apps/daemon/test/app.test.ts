@@ -206,6 +206,17 @@ describe('daemon API', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'CANCEL_RUNTIME_RUN' }),
     });
     await expect(runtimeCancel.json()).resolves.toMatchObject({ run: { status: 'cancelled' } });
+    const acceptance = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/acceptance`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ summary: 'The task is ready for review.', criteriaConfirmed: true }),
+    });
+    expect(acceptance.status).toBe(422);
+    await expect(acceptance.json()).resolves.toMatchObject({ acceptance: { status: 'blocked', qualityStatus: 'failed' } });
+    const blockedApproval = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/acceptance/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'APPROVE_DELIVERY', approvedBy: 'test-user' }),
+    });
+    expect(blockedApproval.status).toBe(409);
     const invalidRetry = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply/retry`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

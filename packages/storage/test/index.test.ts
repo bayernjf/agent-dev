@@ -132,6 +132,10 @@ describe('AgentDevStore', () => {
       expect(evidence.branch).toBe('feature/agent-dev/revision-1');
       const cancelled = await store.cancelRuntimeRun(created.id, 1);
       expect(cancelled.status).toBe('cancelled');
+      const acceptance = await store.submitAcceptance(created.id, 1, 'The feature task is defined and ready for review.', true);
+      expect(acceptance).toMatchObject({ status: 'blocked', qualityStatus: 'failed', criteriaConfirmed: true });
+      await expect(store.approveAcceptance(created.id, 1, 'test-user')).rejects.toThrow('Acceptance is blocked');
+      await expect(readFile(join(completed.workspacePath, 'ACCEPTANCE_REPORT.md'), 'utf8')).resolves.toContain('Quality Gate status is failed.');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true });

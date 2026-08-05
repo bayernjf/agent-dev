@@ -139,6 +139,21 @@ export type GitEvidence = {
   diffStat: string;
 };
 
+export type AcceptanceRecord = {
+  id: string;
+  projectId: string;
+  blueprintRevision: number;
+  taskId: string;
+  status: 'blocked' | 'ready' | 'approved';
+  criteriaConfirmed: boolean;
+  summary: string;
+  qualityStatus: 'passed' | 'failed' | 'missing';
+  gitEvidence: GitEvidence;
+  submittedAt: string;
+  approvedBy?: string;
+  approvedAt?: string;
+};
+
 export class AgentDevStore {
   private readonly orm: ReturnType<typeof createOrm>;
 
@@ -653,6 +668,49 @@ export class AgentDevStore {
     return { branch: await execute(['branch', '--show-current']), head: await execute(['rev-parse', 'HEAD']), status: await execute(['status', '--short']), diffStat: await execute(['diff', '--stat']) };
   }
 
+  async submitAcceptance(projectId: string, blueprintRevision: number, summary: string, criteriaConfirmed: boolean): Promise<AcceptanceRecord> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task || task.status !== 'approved') throw new Error('Approve a Feature Task before submitting acceptance.');
+    const quality = await this.getQualityGateResult(projectId, blueprintRevision);
+    const gitEvidence = await this.getGitEvidence(projectId, blueprintRevision);
+    const submittedAt = new Date().toISOString();
+    const status: AcceptanceRecord['status'] = quality?.status === 'passed' && criteriaConfirmed ? 'ready' : 'blocked';
+    const record: AcceptanceRecord = { id: randomUUID(), projectId, blueprintRevision, taskId: task.id, status, criteriaConfirmed, summary, qualityStatus: quality?.status ?? 'missing', gitEvidence, submittedAt };
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run) throw new Error('A completed Local Apply run is required before submitting acceptance.');
+    await writeFile(join(run.workspacePath, 'acceptance.json'), JSON.stringify(record, null, 2) + '\n', 'utf8');
+    await writeFile(join(run.workspacePath, 'ACCEPTANCE_REPORT.md'), this.buildAcceptanceReport(record), 'utf8');
+    await execFileAsync('git', ['add', 'acceptance.json', 'ACCEPTANCE_REPORT.md'], { cwd: run.workspacePath });
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `acceptance: ${status}`], { cwd: run.workspacePath });
+    return record;
+  }
+
+  async getAcceptance(projectId: string, blueprintRevision: number): Promise<AcceptanceRecord | null> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run) return null;
+    try {
+      return JSON.parse(await readFile(join(run.workspacePath, 'acceptance.json'), 'utf8')) as AcceptanceRecord;
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  async approveAcceptance(projectId: string, blueprintRevision: number, approvedBy: string): Promise<AcceptanceRecord> {
+    const existing = await this.getAcceptance(projectId, blueprintRevision);
+    if (!existing) throw new Error('Submit an acceptance record before approving delivery.');
+    if (existing.status === 'blocked') throw new Error('Acceptance is blocked by missing quality or human evidence.');
+    if (existing.status === 'approved') return existing;
+    const record: AcceptanceRecord = { ...existing, status: 'approved', approvedBy, approvedAt: new Date().toISOString() };
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run) throw new Error('A completed Local Apply run is required before approving delivery.');
+    await writeFile(join(run.workspacePath, 'acceptance.json'), JSON.stringify(record, null, 2) + '\n', 'utf8');
+    await writeFile(join(run.workspacePath, 'ACCEPTANCE_REPORT.md'), this.buildAcceptanceReport(record), 'utf8');
+    await execFileAsync('git', ['add', 'acceptance.json', 'ACCEPTANCE_REPORT.md'], { cwd: run.workspacePath });
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `acceptance: approve delivery`], { cwd: run.workspacePath });
+    return record;
+  }
+
   async close() {
     await this.persist();
     this.sqlite.close();
@@ -754,6 +812,11 @@ export class AgentDevStore {
 
   private buildRuntimeRunReport(run: RuntimeRun, evidence: GitEvidence) {
     return `# Runtime Run Report\n\n- Run: ${run.id}\n- Task: ${run.taskId}\n- Status: ${run.status}\n- Mode: ${run.plan.mode}\n- Execution allowed: ${run.plan.executionAllowed}\n- No external changes: ${run.plan.noExternalChanges}\n\n## Planned command\n\n\`\`\`text\n${run.plan.command.join(' ')}\n\`\`\`\n\n## Git evidence\n\n- Branch: ${evidence.branch}\n- HEAD: ${evidence.head}\n- Working tree: ${evidence.status || 'clean'}\n- Diff stat: ${evidence.diffStat || 'no changes'}\n\n## Boundary\n\nThis run records a guarded dry-run plan only. No Codex process was started and no feature code was changed.\n`;
+  }
+
+  private buildAcceptanceReport(record: AcceptanceRecord) {
+    const blockers = [record.qualityStatus !== 'passed' ? `Quality Gate status is ${record.qualityStatus}.` : '', !record.criteriaConfirmed ? 'Human acceptance criteria confirmation is missing.' : ''].filter(Boolean);
+    return `# Acceptance Report\n\n- Status: ${record.status}\n- Task: ${record.taskId}\n- Blueprint revision: ${record.blueprintRevision}\n- Quality Gate: ${record.qualityStatus}\n- Criteria confirmed: ${record.criteriaConfirmed}\n- Submitted: ${record.submittedAt}\n${record.approvedBy ? `- Approved by: ${record.approvedBy}\n- Approved at: ${record.approvedAt}\n` : ''}\n## Summary\n\n${record.summary}\n\n## Git evidence\n\n- Branch: ${record.gitEvidence.branch}\n- HEAD: ${record.gitEvidence.head}\n- Working tree: ${record.gitEvidence.status || 'clean'}\n- Diff: ${record.gitEvidence.diffStat || 'no changes'}\n\n## Blockers\n\n${blockers.length ? blockers.map(item => `- ${item}`).join('\n') : '- None'}\n\nThis report is the local human acceptance boundary. It does not claim a production deployment.\n`;
   }
 
   private async persist() {

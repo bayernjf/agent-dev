@@ -57,6 +57,16 @@ const featureTaskApprovalSchema = z.object({
   approvedBy: z.string().trim().min(1).max(120).default('local-user'),
 });
 
+const acceptanceSchema = z.object({
+  summary: z.string().trim().min(10).max(2000),
+  criteriaConfirmed: z.boolean(),
+});
+
+const acceptanceApprovalSchema = z.object({
+  confirmation: z.literal('APPROVE_DELIVERY'),
+  approvedBy: z.string().trim().min(1).max(120).default('local-user'),
+});
+
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
@@ -254,6 +264,38 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       return context.json({ evidence: await store.getGitEvidence(project.id, project.blueprint.metadata.revision) });
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to collect Git evidence.' }, 409);
+    }
+  });
+
+  app.get('/api/projects/:projectId/acceptance', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    return context.json({ acceptance: await store.getAcceptance(project.id, project.blueprint.metadata.revision) });
+  });
+
+  app.post('/api/projects/:projectId/acceptance', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const parsed = acceptanceSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Acceptance requires a summary and criteriaConfirmed boolean.' }, 400);
+    try {
+      const acceptance = await store.submitAcceptance(project.id, project.blueprint.metadata.revision, parsed.data.summary, parsed.data.criteriaConfirmed);
+      return context.json({ acceptance }, acceptance.status === 'blocked' ? 422 : 200);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to submit acceptance.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/acceptance/approve', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const parsed = acceptanceApprovalSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Delivery approval requires confirmation APPROVE_DELIVERY.' }, 400);
+    try {
+      const acceptance = await store.approveAcceptance(project.id, project.blueprint.metadata.revision, parsed.data.approvedBy);
+      return context.json({ acceptance });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to approve delivery.' }, 409);
     }
   });
 

@@ -25,6 +25,7 @@ type DependencyInstallResult = { status: 'installed' | 'failed'; exitCode: numbe
 type FeatureTask = { id: string; blueprintRevision: number; title: string; objective: string; acceptanceCriteria: string[]; status: 'draft' | 'approved'; approvedBy?: string; approvedAt?: string };
 type RuntimeRun = { id: string; status: 'planned' | 'cancelled'; taskId: string; blueprintRevision: number; plan: { mode: 'dry-run'; executionAllowed: false; noExternalChanges: true; command: string[] } };
 type GitEvidence = { branch: string; head: string; status: string; diffStat: string };
+type AcceptanceRecord = { status: 'blocked' | 'ready' | 'approved'; summary: string; criteriaConfirmed: boolean; qualityStatus: 'passed' | 'failed' | 'missing'; approvedBy?: string; approvedAt?: string };
 type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
 type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
 
@@ -72,6 +73,7 @@ export function App() {
   const [featureTask, setFeatureTask] = useState<FeatureTask | null>(null);
   const [runtimeRun, setRuntimeRun] = useState<RuntimeRun | null>(null);
   const [gitEvidence, setGitEvidence] = useState<GitEvidence | null>(null);
+  const [acceptance, setAcceptance] = useState<AcceptanceRecord | null>(null);
   const [providerPlans, setProviderPlans] = useState<ProviderPlan[]>([]);
   const [providerVerification, setProviderVerification] = useState<ProviderVerification[] | null>(null);
   const [providerReport, setProviderReport] = useState('');
@@ -85,6 +87,7 @@ export function App() {
   const [installingDependencies, setInstallingDependencies] = useState(false);
   const [savingFeatureTask, setSavingFeatureTask] = useState(false);
   const [preparingRuntime, setPreparingRuntime] = useState(false);
+  const [submittingAcceptance, setSubmittingAcceptance] = useState(false);
   const [applyingFakeProviders, setApplyingFakeProviders] = useState(false);
   const [verifyingProviders, setVerifyingProviders] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
@@ -96,6 +99,8 @@ export function App() {
   const [featureTitle, setFeatureTitle] = useState('');
   const [featureObjective, setFeatureObjective] = useState('');
   const [featureCriteria, setFeatureCriteria] = useState('');
+  const [acceptanceSummary, setAcceptanceSummary] = useState('');
+  const [criteriaConfirmed, setCriteriaConfirmed] = useState(false);
 
   const decisions = useMemo(() => selected ? getBlueprintDecisions(selected.blueprint) : [], [selected]);
   const selectedArtifact = useMemo(
@@ -133,6 +138,7 @@ export function App() {
       void loadQualityGate(projectId);
       void loadFeatureTask(projectId);
       void loadRuntimePlan(projectId);
+      void loadAcceptance(projectId);
       void loadProviderPlan(projectId);
       setError('');
     } catch (cause) {
@@ -234,6 +240,18 @@ export function App() {
     }
   };
 
+  const loadAcceptance = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/acceptance`);
+      if (!response.ok) throw new Error('Unable to load acceptance.');
+      const payload = await response.json() as { acceptance: AcceptanceRecord | null };
+      setAcceptance(payload.acceptance);
+      if (payload.acceptance) { setAcceptanceSummary(payload.acceptance.summary); setCriteriaConfirmed(payload.acceptance.criteriaConfirmed); }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load acceptance.');
+    }
+  };
+
   const loadProviderPlan = async (projectId: string) => {
     try {
       const response = await fetch(`/api/projects/${projectId}/provider-plan`);
@@ -258,6 +276,7 @@ export function App() {
     setFeatureTask(null);
     setRuntimeRun(null);
     setGitEvidence(null);
+    setAcceptance(null);
     setProviderPlans([]);
     setProviderVerification(null);
     setProviderReport('');
@@ -268,6 +287,8 @@ export function App() {
     setFeatureTitle('');
     setFeatureObjective('');
     setFeatureCriteria('');
+    setAcceptanceSummary('');
+    setCriteriaConfirmed(false);
   };
 
   const runPreflight = async () => {
@@ -489,6 +510,44 @@ export function App() {
     }
   };
 
+  const submitAcceptance = async () => {
+    if (!selected || !featureTask || featureTask.status !== 'approved' || !runtimeRun || submittingAcceptance || acceptance?.status === 'approved') return;
+    if (acceptanceSummary.trim().length < 10) { setError('Write an acceptance summary before submitting.'); return; }
+    setSubmittingAcceptance(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/acceptance`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ summary: acceptanceSummary, criteriaConfirmed }),
+      });
+      const payload = await response.json() as { acceptance?: AcceptanceRecord; error?: string };
+      if (!payload.acceptance) throw new Error(payload.error ?? 'Unable to submit acceptance.');
+      setAcceptance(payload.acceptance);
+      setError(response.ok ? '' : 'Acceptance is blocked. Review the evidence before approval.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to submit acceptance.');
+    } finally {
+      setSubmittingAcceptance(false);
+    }
+  };
+
+  const approveDelivery = async () => {
+    if (!selected || !acceptance || acceptance.status !== 'ready' || submittingAcceptance) return;
+    if (!window.confirm('Approve this delivery evidence? This does not deploy production resources.')) return;
+    setSubmittingAcceptance(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/acceptance/approve`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'APPROVE_DELIVERY' }),
+      });
+      const payload = await response.json() as { acceptance?: AcceptanceRecord; error?: string };
+      if (!response.ok || !payload.acceptance) throw new Error(payload.error ?? 'Unable to approve delivery.');
+      setAcceptance(payload.acceptance);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to approve delivery.');
+    } finally {
+      setSubmittingAcceptance(false);
+    }
+  };
+
   const applyFakeProviders = async () => {
     if (!selected || !baselineApproval || applyingFakeProviders) return;
     const confirmed = window.confirm('Run the Fake Provider simulation? It changes only in-memory simulation state and creates no cloud resources.');
@@ -652,6 +711,7 @@ export function App() {
               {applyRun?.status === 'completed' && dependencyReadiness && <div className={`quality-gate ${dependencyReadiness.status}`}><div><p className="eyebrow">Local quality gate</p><h3>{qualityGateResult ? `Last run: ${qualityGateResult.status}` : dependencyReadiness.status === 'ready' ? 'Ready to run' : 'Dependencies required'}</h3><p>{dependencyReadiness.nextAction}</p></div>{dependencyReadiness.status === 'missing-dependencies' && <button className="secondary-button" type="button" onClick={() => void installDependencies()} disabled={installingDependencies}>{installingDependencies ? 'Installing...' : 'Install dependencies'}<ArrowRight size={15} aria-hidden="true" /></button>}{dependencyReadiness.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void runQualityGate()} disabled={applyingBaseline}>{applyingBaseline ? 'Running...' : 'Run quality gate'}<CheckCircle2 size={15} aria-hidden="true" /></button>}</div>}
               {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">Feature delivery</p><h3>{featureTask ? featureTask.title : 'Define the next feature'}</h3><p>{featureTask ? `Task is ${featureTask.status}. Acceptance criteria are the Agent boundary.` : 'Create a focused task package before asking an Agent to change code.'}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{featureTask.status}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">Task title</label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder="e.g. Add receipt list" maxLength={120} /><label htmlFor="feature-objective">Objective</label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder="What user outcome should this feature deliver?" maxLength={2000} /><label htmlFor="feature-criteria">Acceptance criteria <small>one per line</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder="The list renders saved receipts.\nEmpty state is visible." maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Creating task...' : 'Create feature task'}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.status === 'draft' ? <button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Approving...' : 'Approve task for Agent'}<ShieldCheck size={15} aria-hidden="true" /></button> : <small>Approved by {featureTask.approvedBy} · {featureTask.approvedAt && formatDate(featureTask.approvedAt)}</small>}</div>}</div>}
               {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">Agent runtime</p><h3>{runtimeRun ? `Dry-run ${runtimeRun.status}` : 'Runtime not prepared'}</h3><p>{runtimeRun ? 'No Codex process has started. Review the local evidence before any future execution.' : 'Prepare a guarded Runtime plan from the approved task.'}</p></div>{runtimeRun?.status === 'planned' ? <button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Cancelling...' : 'Cancel dry-run'}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Preparing...' : 'Prepare Runtime'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{gitEvidence && <div className="git-evidence"><span>Branch <strong>{gitEvidence.branch}</strong></span><span>HEAD <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>Working tree <strong>{gitEvidence.status || 'clean'}</strong></span><span>Diff <strong>{gitEvidence.diffStat || 'no changes'}</strong></span></div>}</div>}
+              {featureTask?.status === 'approved' && runtimeRun && <div className={`acceptance-panel ${acceptance?.status ?? 'pending'}`}><div className="runtime-heading"><div><p className="eyebrow">Human acceptance</p><h3>{acceptance ? `Acceptance ${acceptance.status}` : 'Submit delivery evidence'}</h3><p>{acceptance?.status === 'blocked' ? `Blocked: Quality Gate is ${acceptance.qualityStatus}.` : 'Confirm the acceptance criteria and record what was verified.'}</p></div>{acceptance?.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void approveDelivery()} disabled={submittingAcceptance}>{submittingAcceptance ? 'Approving...' : 'Approve delivery'}<ShieldCheck size={15} aria-hidden="true" /></button>}</div>{acceptance?.status !== 'approved' && <div className="acceptance-form"><label htmlFor="acceptance-summary">Acceptance summary</label><textarea id="acceptance-summary" value={acceptanceSummary} onChange={event => setAcceptanceSummary(event.target.value)} placeholder="Describe what was verified and what remains." maxLength={2000} /><label className="check-row"><input type="checkbox" checked={criteriaConfirmed} onChange={event => setCriteriaConfirmed(event.target.checked)} /> I reviewed every acceptance criterion</label><button className="primary-button" type="button" onClick={() => void submitAcceptance()} disabled={submittingAcceptance}>{submittingAcceptance ? 'Submitting...' : 'Submit acceptance evidence'}<ArrowRight size={15} aria-hidden="true" /></button></div>}</div>}
               <p className="baseline-note">No remote resource has been created. The simulator writes only local generated artifacts and an execution manifest.</p>
               <div className="provider-simulation"><div className="provider-simulation-heading"><div><p className="eyebrow">Simulation only</p><h3>Provider lifecycle</h3><p>Plans and verification use in-memory Fake Providers. No GitHub, Supabase, Vercel or Cloudflare API is called.</p></div><span className="dry-run-tag">No external writes</span></div><div className="provider-plan-list">{providerPlans.map(plan => <article className="provider-plan" key={plan.providerId}><div><strong>{plan.providerId}</strong><small>{plan.idempotencyKey}</small></div><ol>{plan.resources.map(resource => <li key={resource.spec.id}><span>{resource.spec.id}</span><em>{resource.action}</em><small>{resource.reason}</small></li>)}</ol></article>)}</div><div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void verifyProviders()} disabled={verifyingProviders}>{verifyingProviders ? 'Verifying...' : 'Verify simulation state'}<RefreshCw size={15} aria-hidden="true" /></button>{baselineApproval && <button className="secondary-button" type="button" onClick={() => void applyFakeProviders()} disabled={applyingFakeProviders}>{applyingFakeProviders ? 'Applying simulation...' : 'Apply Fake Providers'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{providerVerification && <div className="provider-verification">{providerVerification.map(item => <span className={item.verified ? 'verified' : 'unverified'} key={item.providerId}>{item.providerId}: {item.verified ? 'verified' : `missing ${item.missing.length}, drift ${item.mismatched.length}`}</span>)}</div>}{providerReport && <pre className="provider-report">{providerReport}</pre>}</div>
             </section>}
