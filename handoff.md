@@ -132,9 +132,9 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 
 ## 8. 下一步执行顺序
 
-1. 把 Local Quality Gate、依赖安装和 Delivery Report 合并为可审查的本地交付证据链；
-2. 接入 Local Codex Runtime，在 feature branch/worktree 中执行一个真实功能任务；
-3. 增加本地 feature task package、验收标准和人工 Approval 记录；
+1. 在用户恢复 Codex 状态目录权限和认证后，完成只读 Probe、受限写入 Probe、取消/恢复 Probe；
+2. 用一次真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Acceptance Gate 的成功路径；
+3. 将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联，但不把本地批准误标记为生产交付；
 4. 完成 Dual Preview 与 Supabase Auth 的真实平台验证，或由用户确认明确降级路径；
 5. 在真实授权边界下接入 GitHub、Vercel、Cloudflare、Supabase Provider Adapter；
 6. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。
