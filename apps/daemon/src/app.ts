@@ -159,6 +159,19 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
+  app.get('/api/projects/:projectId/dependencies', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const readiness = await store.getDependencyReadiness(project.id, project.blueprint.metadata.revision);
+    return context.json({ readiness });
+  });
+
+  app.get('/api/projects/:projectId/quality-gate', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    return context.json({ result: await store.getQualityGateResult(project.id, project.blueprint.metadata.revision) });
+  });
+
   app.get('/api/projects/:projectId/provider-plan', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);

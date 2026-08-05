@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/sql-js';
 import initSqlJs, { type Database } from 'sql.js';
@@ -83,6 +83,15 @@ export type QualityGateResult = {
   completedAt: string;
   output: string;
   workspacePath: string;
+};
+
+export type DependencyReadiness = {
+  status: 'not-applied' | 'missing-dependencies' | 'ready';
+  workspacePath: string | null;
+  packageLockPresent: boolean;
+  nodeModulesPresent: boolean;
+  qualityCommandPresent: boolean;
+  nextAction: string;
 };
 
 export class AgentDevStore {
@@ -459,6 +468,33 @@ export class AgentDevStore {
       // The report remains available even if the local Git evidence commit cannot be created.
     }
     return result;
+  }
+
+  async getDependencyReadiness(projectId: string, blueprintRevision: number): Promise<DependencyReadiness> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') {
+      return { status: 'not-applied', workspacePath: null, packageLockPresent: false, nodeModulesPresent: false, qualityCommandPresent: false, nextAction: 'Complete Local Apply before preparing dependencies.' };
+    }
+    const exists = async (path: string) => access(path).then(() => true).catch(() => false);
+    const [packageLockPresent, nodeModulesPresent, qualityCommandPresent] = await Promise.all([
+      exists(join(run.workspacePath, 'package-lock.json')),
+      exists(join(run.workspacePath, 'node_modules')),
+      exists(join(run.workspacePath, 'node_modules', '.bin', 'tsc')),
+    ]);
+    return qualityCommandPresent
+      ? { status: 'ready', workspacePath: run.workspacePath, packageLockPresent, nodeModulesPresent, qualityCommandPresent, nextAction: 'Run the Local Quality Gate.' }
+      : { status: 'missing-dependencies', workspacePath: run.workspacePath, packageLockPresent, nodeModulesPresent, qualityCommandPresent, nextAction: `Run npm install in ${run.workspacePath}, then refresh this status.` };
+  }
+
+  async getQualityGateResult(projectId: string, blueprintRevision: number): Promise<QualityGateResult | null> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run) return null;
+    try {
+      return JSON.parse(await readFile(join(run.workspacePath, 'quality-gate.json'), 'utf8')) as QualityGateResult;
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+      throw error;
+    }
   }
 
   async close() {

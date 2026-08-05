@@ -19,6 +19,8 @@ type ActivityEntry = { id: string; text: string; time: string };
 type BaselineApproval = { projectId: string; blueprintRevision: number; status: 'approved'; approvedBy: string; approvedAt: string };
 type ApplyStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed'; detail?: string };
 type ApplyRun = { id: string; projectId: string; blueprintRevision: number; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; workspacePath: string; steps: ApplyStep[]; createdAt: string; updatedAt: string };
+type DependencyReadiness = { status: 'not-applied' | 'missing-dependencies' | 'ready'; workspacePath: string | null; packageLockPresent: boolean; nodeModulesPresent: boolean; qualityCommandPresent: boolean; nextAction: string };
+type QualityGateResult = { status: 'passed' | 'failed'; command: string; exitCode: number; output: string; completedAt: string };
 type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
 type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
 
@@ -61,6 +63,8 @@ export function App() {
   const [baselinePlan, setBaselinePlan] = useState<BaselinePlan | null>(null);
   const [baselineApproval, setBaselineApproval] = useState<BaselineApproval | null>(null);
   const [applyRun, setApplyRun] = useState<ApplyRun | null>(null);
+  const [dependencyReadiness, setDependencyReadiness] = useState<DependencyReadiness | null>(null);
+  const [qualityGateResult, setQualityGateResult] = useState<QualityGateResult | null>(null);
   const [providerPlans, setProviderPlans] = useState<ProviderPlan[]>([]);
   const [providerVerification, setProviderVerification] = useState<ProviderVerification[] | null>(null);
   const [providerReport, setProviderReport] = useState('');
@@ -112,6 +116,8 @@ export function App() {
       void loadDryRun(projectId);
       void loadBaselinePlan(projectId);
       void loadApplyRun(projectId);
+      void loadDependencyReadiness(projectId);
+      void loadQualityGate(projectId);
       void loadProviderPlan(projectId);
       setError('');
     } catch (cause) {
@@ -156,6 +162,28 @@ export function App() {
     }
   };
 
+  const loadDependencyReadiness = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/dependencies`);
+      if (!response.ok) throw new Error('Unable to inspect template dependencies.');
+      const payload = await response.json() as { readiness: DependencyReadiness };
+      setDependencyReadiness(payload.readiness);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to inspect template dependencies.');
+    }
+  };
+
+  const loadQualityGate = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/quality-gate`);
+      if (!response.ok) throw new Error('Unable to load the quality gate result.');
+      const payload = await response.json() as { result: QualityGateResult | null };
+      setQualityGateResult(payload.result);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load the quality gate result.');
+    }
+  };
+
   const loadProviderPlan = async (projectId: string) => {
     try {
       const response = await fetch(`/api/projects/${projectId}/provider-plan`);
@@ -175,6 +203,8 @@ export function App() {
     setBaselinePlan(null);
     setBaselineApproval(null);
     setApplyRun(null);
+    setDependencyReadiness(null);
+    setQualityGateResult(null);
     setProviderPlans([]);
     setProviderVerification(null);
     setProviderReport('');
@@ -249,6 +279,7 @@ export function App() {
       const payload = await response.json() as { run?: ApplyRun; error?: string };
       if (!response.ok || !payload.run) throw new Error(payload.error ?? 'Unable to run local Apply.');
       setApplyRun(payload.run);
+      void loadDependencyReadiness(selected.id);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to run local Apply.');
@@ -269,9 +300,30 @@ export function App() {
       const payload = await response.json() as { run?: ApplyRun; error?: string };
       if (!response.ok || !payload.run) throw new Error(payload.error ?? 'Unable to retry local Apply.');
       setApplyRun(payload.run);
+      void loadDependencyReadiness(selected.id);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to retry local Apply.');
+    } finally {
+      setApplyingBaseline(false);
+    }
+  };
+
+  const runQualityGate = async () => {
+    if (!selected || !applyRun || applyRun.status !== 'completed' || dependencyReadiness?.status !== 'ready') return;
+    setApplyingBaseline(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/quality-gate`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ blueprintRevision: applyRun.blueprintRevision, confirmation: 'RUN_QUALITY_GATE' }),
+      });
+      const payload = await response.json() as { result?: QualityGateResult; error?: string };
+      if (!payload.result) throw new Error(payload.error ?? 'Unable to run the quality gate.');
+      setQualityGateResult(payload.result);
+      setError(response.ok ? '' : `Quality Gate failed with exit code ${payload.result.exitCode}.`);
+      await loadDependencyReadiness(selected.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to run the quality gate.');
     } finally {
       setApplyingBaseline(false);
     }
@@ -437,6 +489,7 @@ export function App() {
               {baselineApproval ? <div className="approval-record"><CheckCircle2 size={17} aria-hidden="true" /><div><strong>Baseline approval recorded</strong><small>Revision {baselineApproval.blueprintRevision} · {baselineApproval.approvedBy} · {formatDate(baselineApproval.approvedAt)}</small></div></div> : baselinePlan.readyForApproval ? <div className="approval-action"><p>This records intent only. It does not create remote resources or reveal secrets.</p><button className="primary-button" type="button" onClick={() => void approveBaseline()} disabled={approvingBaseline}>{approvingBaseline ? 'Recording approval...' : 'Approve baseline plan'}<ShieldCheck size={16} aria-hidden="true" /></button></div> : null}
               {baselineApproval && !applyRun && <div className="approval-action"><p>Run the local simulator to create the delivery package in the ignored `.agent-dev` workspace.</p><button className="primary-button" type="button" onClick={() => void applyBaseline()} disabled={applyingBaseline}>{applyingBaseline ? 'Applying locally...' : 'Run local Apply'}<ArrowRight size={16} aria-hidden="true" /></button></div>}
               {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>Attempt {applyRun.attempts} of 3 · {applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? 'Retrying...' : 'Retry local Apply'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}
+              {applyRun?.status === 'completed' && dependencyReadiness && <div className={`quality-gate ${dependencyReadiness.status}`}><div><p className="eyebrow">Local quality gate</p><h3>{qualityGateResult ? `Last run: ${qualityGateResult.status}` : dependencyReadiness.status === 'ready' ? 'Ready to run' : 'Dependencies required'}</h3><p>{dependencyReadiness.nextAction}</p></div>{dependencyReadiness.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void runQualityGate()} disabled={applyingBaseline}>{applyingBaseline ? 'Running...' : 'Run quality gate'}<CheckCircle2 size={15} aria-hidden="true" /></button>}</div>}
               <p className="baseline-note">No remote resource has been created. The simulator writes only local generated artifacts and an execution manifest.</p>
               <div className="provider-simulation"><div className="provider-simulation-heading"><div><p className="eyebrow">Simulation only</p><h3>Provider lifecycle</h3><p>Plans and verification use in-memory Fake Providers. No GitHub, Supabase, Vercel or Cloudflare API is called.</p></div><span className="dry-run-tag">No external writes</span></div><div className="provider-plan-list">{providerPlans.map(plan => <article className="provider-plan" key={plan.providerId}><div><strong>{plan.providerId}</strong><small>{plan.idempotencyKey}</small></div><ol>{plan.resources.map(resource => <li key={resource.spec.id}><span>{resource.spec.id}</span><em>{resource.action}</em><small>{resource.reason}</small></li>)}</ol></article>)}</div><div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void verifyProviders()} disabled={verifyingProviders}>{verifyingProviders ? 'Verifying...' : 'Verify simulation state'}<RefreshCw size={15} aria-hidden="true" /></button>{baselineApproval && <button className="secondary-button" type="button" onClick={() => void applyFakeProviders()} disabled={applyingFakeProviders}>{applyingFakeProviders ? 'Applying simulation...' : 'Apply Fake Providers'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{providerVerification && <div className="provider-verification">{providerVerification.map(item => <span className={item.verified ? 'verified' : 'unverified'} key={item.providerId}>{item.providerId}: {item.verified ? 'verified' : `missing ${item.missing.length}, drift ${item.mismatched.length}`}</span>)}</div>}{providerReport && <pre className="provider-report">{providerReport}</pre>}</div>
             </section>}

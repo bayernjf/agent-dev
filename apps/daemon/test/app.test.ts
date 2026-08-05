@@ -163,6 +163,9 @@ describe('daemon API', () => {
     });
     expect(applied.status).toBe(200);
     await expect(applied.json()).resolves.toMatchObject({ run: { status: 'completed', steps: expect.arrayContaining([expect.objectContaining({ status: 'completed' })]) } });
+    const dependencies = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/dependencies`);
+    expect(dependencies.status).toBe(200);
+    await expect(dependencies.json()).resolves.toMatchObject({ readiness: { status: 'missing-dependencies', qualityCommandPresent: false } });
     const quality = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/quality-gate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -170,6 +173,8 @@ describe('daemon API', () => {
     });
     expect(quality.status).toBe(422);
     await expect(quality.json()).resolves.toMatchObject({ result: { status: 'failed', command: 'npm run quality' } });
+    const latestQuality = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/quality-gate`);
+    await expect(latestQuality.json()).resolves.toMatchObject({ result: { status: 'failed' } });
     const invalidRetry = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply/retry`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

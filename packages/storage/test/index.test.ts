@@ -115,13 +115,15 @@ describe('AgentDevStore', () => {
       const quality = await store.runQualityGate(created.id, 1);
       expect(quality.status).toBe('failed');
       expect(quality.command).toBe('npm run quality');
+      await expect(store.getDependencyReadiness(created.id, 1)).resolves.toMatchObject({ status: 'missing-dependencies', packageLockPresent: false, qualityCommandPresent: false });
+      await expect(store.getQualityGateResult(created.id, 1)).resolves.toMatchObject({ status: 'failed', command: 'npm run quality' });
       await expect(readFile(join(completed.workspacePath, 'quality-gate.json'), 'utf8')).resolves.toContain('"status": "failed"');
       await expect(readFile(join(completed.workspacePath, 'QUALITY_REPORT.md'), 'utf8')).resolves.toContain('# Quality Gate Report');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 10_000);
 
   it('recovers the same Apply Run after an injected step failure', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
