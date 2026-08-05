@@ -17,6 +17,8 @@ type Project = {
 type ProjectDetail = Project & { blueprint: ProductBlueprint };
 type ActivityEntry = { id: string; text: string; time: string };
 type BaselineApproval = { projectId: string; blueprintRevision: number; status: 'approved'; approvedBy: string; approvedAt: string };
+type ApplyStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed'; detail?: string };
+type ApplyRun = { id: string; projectId: string; blueprintRevision: number; status: 'queued' | 'running' | 'completed' | 'failed'; workspacePath: string; steps: ApplyStep[]; createdAt: string; updatedAt: string };
 
 const defaultAnswers: BlueprintAnswers = {
   mode: 'beginner',
@@ -56,12 +58,14 @@ export function App() {
   const [dryRun, setDryRun] = useState<DryRunPlan | null>(null);
   const [baselinePlan, setBaselinePlan] = useState<BaselinePlan | null>(null);
   const [baselineApproval, setBaselineApproval] = useState<BaselineApproval | null>(null);
+  const [applyRun, setApplyRun] = useState<ApplyRun | null>(null);
   const [selectedArtifactId, setSelectedArtifactId] = useState<DryRunPlan['artifacts'][number]['id'] | null>(null);
   const [preflight, setPreflight] = useState<ConnectorPreflightReport | null>(null);
   const [accountDiscovery, setAccountDiscovery] = useState<AccountDiscoveryReport | null>(null);
   const [checkingPreflight, setCheckingPreflight] = useState(false);
   const [discoveringAccounts, setDiscoveringAccounts] = useState(false);
   const [approvingBaseline, setApprovingBaseline] = useState(false);
+  const [applyingBaseline, setApplyingBaseline] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
   const [name, setName] = useState('');
   const [answers, setAnswers] = useState<BlueprintAnswers>(defaultAnswers);
@@ -100,6 +104,7 @@ export function App() {
       setAnswers(answersFromBlueprint(payload.project.blueprint));
       void loadDryRun(projectId);
       void loadBaselinePlan(projectId);
+      void loadApplyRun(projectId);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load this Blueprint.');
@@ -132,11 +137,23 @@ export function App() {
     }
   };
 
+  const loadApplyRun = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/apply`);
+      if (!response.ok) throw new Error('Unable to load the local Apply run.');
+      const payload = await response.json() as { run: ApplyRun | null };
+      setApplyRun(payload.run);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load the local Apply run.');
+    }
+  };
+
   const startNewProject = () => {
     setSelected(null);
     setDryRun(null);
     setBaselinePlan(null);
     setBaselineApproval(null);
+    setApplyRun(null);
     setSelectedArtifactId(null);
     setName('');
     setAnswers(defaultAnswers);
@@ -194,13 +211,35 @@ export function App() {
     }
   };
 
+  const applyBaseline = async () => {
+    if (!selected || !baselinePlan?.readyForApproval || !baselineApproval || applyingBaseline) return;
+    const confirmed = window.confirm('Run the local Apply Simulator? It writes only inside .agent-dev and makes no external changes.');
+    if (!confirmed) return;
+    setApplyingBaseline(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/apply`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ blueprintRevision: baselinePlan.blueprintRevision, confirmation: 'APPLY_BASELINE' }),
+      });
+      const payload = await response.json() as { run?: ApplyRun; error?: string };
+      if (!response.ok || !payload.run) throw new Error(payload.error ?? 'Unable to run local Apply.');
+      setApplyRun(payload.run);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to run local Apply.');
+    } finally {
+      setApplyingBaseline(false);
+    }
+  };
+
   useEffect(() => {
     void loadProjects();
     const source = new EventSource('/events');
     const onEvent = (event: Event) => {
       const payload = JSON.parse((event as MessageEvent<string>).data) as { type: string; projectId: string; projectName: string; occurredAt: string };
       setActivity(current => [
-        { id: crypto.randomUUID(), text: `${payload.type === 'blueprint.revised' ? 'Blueprint revised' : payload.type === 'baseline.approved' ? 'Baseline approved' : 'Project created'}: ${payload.projectName}`, time: formatDate(payload.occurredAt) },
+        { id: crypto.randomUUID(), text: `${payload.type === 'blueprint.revised' ? 'Blueprint revised' : payload.type === 'baseline.approved' ? 'Baseline approved' : payload.type === 'apply.completed' ? 'Local Apply completed' : payload.type === 'apply.failed' ? 'Local Apply failed' : 'Project created'}: ${payload.projectName}`, time: formatDate(payload.occurredAt) },
         ...current,
       ].slice(0, 5));
       void loadProjects();
@@ -245,6 +284,7 @@ export function App() {
       setAnswers(answersFromBlueprint(payload.project.blueprint));
       await loadDryRun(payload.project.id);
       await loadBaselinePlan(payload.project.id);
+      await loadApplyRun(payload.project.id);
       await loadProjects();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to save the Blueprint.');
@@ -312,7 +352,9 @@ export function App() {
                 <div><h3>{resource.title}</h3><p>{resource.owner ?? 'Not selected'}</p><small>{resource.reason}</small></div><span className={`resource-status ${resource.status}`}>{resource.status === 'blocked' ? 'Blocked' : 'Awaiting approval'}</span>
               </article>)}</div>
               {baselineApproval ? <div className="approval-record"><CheckCircle2 size={17} aria-hidden="true" /><div><strong>Baseline approval recorded</strong><small>Revision {baselineApproval.blueprintRevision} · {baselineApproval.approvedBy} · {formatDate(baselineApproval.approvedAt)}</small></div></div> : baselinePlan.readyForApproval ? <div className="approval-action"><p>This records intent only. It does not create remote resources or reveal secrets.</p><button className="primary-button" type="button" onClick={() => void approveBaseline()} disabled={approvingBaseline}>{approvingBaseline ? 'Recording approval...' : 'Approve baseline plan'}<ShieldCheck size={16} aria-hidden="true" /></button></div> : null}
-              <p className="baseline-note">No remote resource has been created. Applying this approved plan is a separate future capability.</p>
+              {baselineApproval && !applyRun && <div className="approval-action"><p>Run the local simulator to create the delivery package in the ignored `.agent-dev` workspace.</p><button className="primary-button" type="button" onClick={() => void applyBaseline()} disabled={applyingBaseline}>{applyingBaseline ? 'Applying locally...' : 'Run local Apply'}<ArrowRight size={16} aria-hidden="true" /></button></div>}
+              {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>{applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol></div>}
+              <p className="baseline-note">No remote resource has been created. The simulator writes only local generated artifacts and an execution manifest.</p>
             </section>}
           </section>
 

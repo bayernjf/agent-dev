@@ -1,20 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/sql-js';
 import initSqlJs, { type Database } from 'sql.js';
 import type { ProductBlueprint } from '@agent-dev/blueprint';
-import { createBaselinePlan, productBlueprintSchema } from '@agent-dev/blueprint';
+import { createBaselinePlan, createDryRunPlan, productBlueprintSchema } from '@agent-dev/blueprint';
 import { createNeedsInputRun, type DeliveryState } from '@agent-dev/workflow';
-import { baselineApprovals, blueprintRevisions, deliveryRuns, projects } from './schema.js';
+import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects } from './schema.js';
 import { migrations } from './migrations.js';
 
 const require = createRequire(import.meta.url);
 
 function createOrm(database: Database) {
-  return drizzle(database, { schema: { baselineApprovals, projects, blueprintRevisions, deliveryRuns } });
+  return drizzle(database, { schema: { applyRuns, baselineApprovals, projects, blueprintRevisions, deliveryRuns } });
 }
 
 export type CreateProjectInput = {
@@ -43,6 +43,26 @@ export type BaselineApproval = {
   status: 'approved';
   approvedBy: string;
   approvedAt: string;
+};
+
+export type ApplyStep = {
+  id: 'validate-blueprint' | 'create-workspace' | 'write-artifacts' | 'write-manifest';
+  title: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  detail?: string;
+  startedAt?: string;
+  completedAt?: string;
+};
+
+export type ApplyRun = {
+  id: string;
+  projectId: string;
+  blueprintRevision: number;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  workspacePath: string;
+  steps: ApplyStep[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 export class AgentDevStore {
@@ -264,6 +284,79 @@ export class AgentDevStore {
     return approval;
   }
 
+  getApplyRun(runId: string): ApplyRun | null {
+    const row = this.orm.select().from(applyRuns).where(eq(applyRuns.id, runId)).get();
+    return row ? this.parseApplyRun(row) : null;
+  }
+
+  getLatestApplyRun(projectId: string, blueprintRevision: number): ApplyRun | null {
+    const row = this.orm.select().from(applyRuns)
+      .where(eq(applyRuns.projectId, projectId))
+      .orderBy(desc(applyRuns.createdAt))
+      .all()
+      .find(candidate => candidate.blueprintRevision === blueprintRevision);
+    return row ? this.parseApplyRun(row) : null;
+  }
+
+  async createApplyRun(projectId: string, blueprintRevision: number): Promise<ApplyRun> {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error(`Project ${projectId} was not found.`);
+    if (project.blueprint.metadata.revision !== blueprintRevision) throw new Error('The apply must target the latest Blueprint revision.');
+    if (!this.getBaselineApproval(projectId, blueprintRevision)) throw new Error('Approve the baseline before starting Apply.');
+    const existing = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (existing && (existing.status === 'running' || existing.status === 'completed')) return existing;
+
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    const workspacePath = join(dirname(this.databasePath), 'apply', projectId, `revision-${blueprintRevision}`);
+    const steps: ApplyStep[] = [
+      { id: 'validate-blueprint', title: 'Validate Blueprint revision', status: 'pending' },
+      { id: 'create-workspace', title: 'Create isolated local workspace', status: 'pending' },
+      { id: 'write-artifacts', title: 'Write generated delivery artifacts', status: 'pending' },
+      { id: 'write-manifest', title: 'Write execution manifest', status: 'pending' },
+    ];
+    this.orm.insert(applyRuns).values({ id, projectId, blueprintRevision, status: 'queued', workspacePath, stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now }).run();
+    await this.persist();
+    return { id, projectId, blueprintRevision, status: 'queued', workspacePath, steps, createdAt: now, updatedAt: now };
+  }
+
+  async executeApplyRun(runId: string): Promise<ApplyRun> {
+    const run = this.getApplyRun(runId);
+    if (!run) throw new Error(`Apply run ${runId} was not found.`);
+    if (run.status === 'completed' || run.status === 'failed') return run;
+    const project = this.getProject(run.projectId);
+    if (!project || project.blueprint.metadata.revision !== run.blueprintRevision) throw new Error('Apply run no longer matches the current Blueprint revision.');
+    const steps = run.steps.map(step => ({ ...step }));
+    await this.updateApplyRun(run, 'running', steps);
+    try {
+      await this.runApplyStep(steps[0], async () => { productBlueprintSchema.parse(project.blueprint); });
+      await this.runApplyStep(steps[1], async () => { await mkdir(run.workspacePath, { recursive: true }); });
+      await this.runApplyStep(steps[2], async () => {
+        for (const artifact of createDryRunPlan(project.blueprint).artifacts) {
+          const target = join(run.workspacePath, artifact.path);
+          await mkdir(dirname(target), { recursive: true });
+          await writeFile(target, artifact.content, 'utf8');
+        }
+      });
+      await this.runApplyStep(steps[3], async () => {
+        await writeFile(join(run.workspacePath, 'apply-manifest.json'), JSON.stringify({
+          projectId: run.projectId,
+          blueprintRevision: run.blueprintRevision,
+          noExternalChanges: true,
+          generatedAt: new Date().toISOString(),
+          providerWrites: [],
+          note: 'Local Apply Simulator only. No provider resource was created.',
+        }, null, 2) + '\n', 'utf8');
+      });
+      return await this.updateApplyRun(run, 'completed', steps);
+    } catch (error) {
+      const failed = steps.find(step => step.status === 'running');
+      if (failed) failed.status = 'failed';
+      if (failed) failed.detail = error instanceof Error ? error.message : String(error);
+      return await this.updateApplyRun(run, 'failed', steps);
+    }
+  }
+
   async close() {
     await this.persist();
     this.sqlite.close();
@@ -285,6 +378,31 @@ export class AgentDevStore {
         throw error;
       }
     }
+  }
+
+  private parseApplyRun(row: typeof applyRuns.$inferSelect): ApplyRun {
+    return { id: row.id, projectId: row.projectId, blueprintRevision: row.blueprintRevision, status: row.status as ApplyRun['status'], workspacePath: row.workspacePath, steps: JSON.parse(row.stepsJson) as ApplyStep[], createdAt: row.createdAt, updatedAt: row.updatedAt };
+  }
+
+  private async runApplyStep(step: ApplyStep, operation: () => Promise<void>) {
+    step.status = 'running';
+    step.startedAt = new Date().toISOString();
+    try {
+      await operation();
+      step.status = 'completed';
+      step.completedAt = new Date().toISOString();
+    } catch (error) {
+      step.status = 'failed';
+      step.detail = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
+  }
+
+  private async updateApplyRun(run: ApplyRun, status: ApplyRun['status'], steps: ApplyStep[]) {
+    const updatedAt = new Date().toISOString();
+    this.orm.update(applyRuns).set({ status, stepsJson: JSON.stringify(steps), updatedAt }).where(eq(applyRuns.id, run.id)).run();
+    await this.persist();
+    return { ...run, status, steps, updatedAt };
   }
 
   private async persist() {

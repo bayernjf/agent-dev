@@ -47,4 +47,20 @@ export const migrations = [
       );
     `,
   },
+  {
+    id: '0003_apply_runs',
+    sql: `
+      CREATE TABLE IF NOT EXISTS apply_runs (
+        id TEXT PRIMARY KEY NOT NULL,
+        project_id TEXT NOT NULL,
+        blueprint_revision INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        workspace_path TEXT NOT NULL,
+        steps_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(project_id) REFERENCES projects(id)
+      );
+    `,
+  },
 ] as const;

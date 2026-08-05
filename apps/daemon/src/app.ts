@@ -22,6 +22,11 @@ const approveBaselineSchema = z.object({
   approvedBy: z.string().trim().min(1).max(120).default('local-user'),
 });
 
+const applyBaselineSchema = z.object({
+  blueprintRevision: z.number().int().positive(),
+  confirmation: z.literal('APPLY_BASELINE'),
+});
+
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
@@ -82,6 +87,33 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       return context.json({ projectId, approval, plan: createBaselinePlan(project.blueprint) });
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to approve the baseline.' }, 409);
+    }
+  });
+
+  app.get('/api/projects/:projectId/apply', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    return context.json({ run: store.getLatestApplyRun(project.id, project.blueprint.metadata.revision) });
+  });
+
+  app.post('/api/projects/:projectId/apply', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = applyBaselineSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Apply requires the current revision and confirmation APPLY_BASELINE.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const queued = await store.createApplyRun(projectId, parsed.data.blueprintRevision);
+      const run = await store.executeApplyRun(queued.id);
+      events.emit({
+        type: run.status === 'completed' ? 'apply.completed' : 'apply.failed',
+        projectId,
+        projectName: project.name,
+        occurredAt: run.updatedAt,
+      });
+      return context.json({ run }, run.status === 'completed' ? 200 : 422);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to run local Apply.' }, 409);
     }
   });
 

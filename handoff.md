@@ -1,7 +1,7 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-02  
-> 当前阶段：产品定义完成，Phase 0 技术 Spike 进行中
+> 更新时间：2026-08-06
+> 当前阶段：Local Delivery Control Plane 已实现；真实 Provider Apply 与联合 Preview 仍处于技术验证阶段
 > 工作目录：仓库根目录
 
 ## 1. 项目摘要
@@ -29,8 +29,9 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 六项目能力矩阵 | 已完成 |
 | 技术 Spike | Workflow Resume、macOS Secret Boundary 已通过；Codex 部分通过；Dual Preview 真实执行阻塞；Supabase Auth 前置阻塞 |
 | Git 仓库 | 已初始化；Phase 0 提交已完成 |
-| package.json / 代码骨架 | 正式骨架不存在；Workflow Spike 有独立实验 package |
-| 测试、构建和部署 | 两个本地 Spike 已通过；真实云端部署未运行 |
+| package.json / 代码骨架 | npm workspaces、Studio、Daemon、Blueprint、Policy、Storage、Workflow 已实现 |
+| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、Local Apply Simulator |
+| 测试、构建和部署 | 本地单元测试与 Studio build 已通过；真实云端部署未运行 |
 
 不要把文档中的设计描述为已实现能力。
 
@@ -113,7 +114,7 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 
 ## 7. 阻塞性技术 Spike
 
-下一位执行 Agent 不应直接搭完整 UI，应先完成或明确降级以下验证：
+下一位执行 Agent 在接入真实外部写操作前，应先完成或明确降级以下验证：
 
 1. **Codex Runtime**：官方非交互入口、结构化输出、取消和恢复；
 2. **Dual Preview**：Vercel API Preview URL 注入 Cloudflare Pages Build；
@@ -131,17 +132,13 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 
 ## 8. 下一步执行顺序
 
-1. 完成其余四个 Spike；Codex 认证恢复后补齐 Runtime 成功路径、写入、恢复和取消验证；
-2. 根据 Spike 结果冻结 Adapter 契约；
-3. 初始化 npm workspaces；
-4. 创建 Studio、Daemon、CLI 和 packages 骨架；
-5. 完成 SQLite + XState + SSE 最小恢复闭环；
-6. 实现 Blueprint v1alpha1 和文档生成；
-7. 实现 GitHub、Vercel、Cloudflare、Supabase Adapter；
-8. 完成联合 Preview；
-9. 接入 Local Codex Runtime 和功能 PR；
-10. 完成人工 Gate、Evidence、Delivery Report；
-11. 使用三个真实项目连续验证。
+1. 为 Local Apply Simulator 增加可恢复步骤、失败重试和交付报告；
+2. 根据 Spike 结果冻结 Provider Adapter 契约，并实现不联网的 Fake Adapter 测试层；
+3. 完成固定 Web SaaS 模板及其本地质量门禁；
+4. 完成 Dual Preview 和 Supabase Auth 的真实平台验证；
+5. 接入 Local Codex Runtime、隔离 worktree 和功能 PR；
+6. 接入真实 GitHub、Vercel、Cloudflare、Supabase Adapter；
+7. 使用三个真实项目连续验证。
 
 ## 9. 尚待用户决策
 

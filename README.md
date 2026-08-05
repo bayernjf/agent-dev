@@ -62,9 +62,10 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 读取本机 GitHub、Vercel 与 Cloudflare CLI 的当前身份状态；Supabase 仍明确要求人工确认；
 - 在专业模式保存 GitHub Owner、Supabase Organization、Vercel Team 与 Cloudflare Account，并生成不执行创建操作的资源基线计划；
 - 对已完整选择归属的基线计划记录显式、本地且按 Blueprint Revision 绑定的审批；
+- 在审批后运行本地 Apply Simulator，将生成物和无 Secret 的执行清单写入忽略的 `.agent-dev/apply/` 工作区，并保留逐步骤结果；
 - 通过本地 SQLite 保存项目、交付状态和 Blueprint 历史。
 
-身份发现只读取本机 CLI 已有登录状态；资源基线计划只显示阻塞项和待批准的创建意图。审批当前只是一条本地审计记录，绝不写入 GitHub、Supabase、Vercel 或 Cloudflare。
+身份发现只读取本机 CLI 已有登录状态；资源基线计划只显示阻塞项和待批准的创建意图。审批当前只是一条本地审计记录；Apply Simulator 只写入本仓库忽略的本地工作区，绝不写入 GitHub、Supabase、Vercel 或 Cloudflare。
 
 尚未实现：将生成物写入目标产品仓库、Provider 资源创建、Secret 连接、模板代码生成、Codex 执行、PR/Preview 编排与交付报告。它们仍受下方 Phase 0 技术验证结论约束。
 

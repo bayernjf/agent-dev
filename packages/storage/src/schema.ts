@@ -42,3 +42,14 @@ export const baselineApprovals = sqliteTable(
   },
   table => [uniqueIndex('baseline_approvals_project_revision').on(table.projectId, table.blueprintRevision)],
 );
+
+export const applyRuns = sqliteTable('apply_runs', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  blueprintRevision: integer('blueprint_revision').notNull(),
+  status: text('status').notNull(),
+  workspacePath: text('workspace_path').notNull(),
+  stepsJson: text('steps_json').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});

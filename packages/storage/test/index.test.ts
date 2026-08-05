@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -73,6 +73,35 @@ describe('AgentDevStore', () => {
       const reopened = await AgentDevStore.open(databasePath);
       expect(reopened.getBaselineApproval(created.id, 1)).toEqual(approval);
       await reopened.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('runs the local Apply Simulator without provider writes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    const databasePath = join(directory, 'agent-dev.sqlite');
+    try {
+      const store = await AgentDevStore.open(databasePath);
+      const created = await store.createProject({
+        name: 'Local Apply',
+        blueprint: createBlueprint('local-apply', {
+          mode: 'professional',
+          githubOwner: 'acme',
+          supabaseOrganization: 'acme',
+          vercelTeam: 'acme',
+          cloudflareAccount: 'acme',
+        }),
+      });
+      await store.approveBaseline(created.id, 1, 'test-user');
+      const queued = await store.createApplyRun(created.id, 1);
+      const completed = await store.executeApplyRun(queued.id);
+
+      expect(completed.status).toBe('completed');
+      expect(completed.steps.every(step => step.status === 'completed')).toBe(true);
+      await expect(readFile(join(completed.workspacePath, 'apply-manifest.json'), 'utf8')).resolves.toContain('No provider resource was created');
+      await expect(readFile(join(completed.workspacePath, 'generated', 'AGENTS.md'), 'utf8')).resolves.toContain('Agent Execution Constraints');
+      await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

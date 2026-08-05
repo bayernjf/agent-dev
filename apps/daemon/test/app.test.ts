@@ -124,6 +124,13 @@ describe('daemon API', () => {
     });
     expect(missingConfirmation.status).toBe(400);
 
+    const beforeApproval = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+    expect(beforeApproval.status).toBe(409);
+
     const approved = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan/approve`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -134,6 +141,14 @@ describe('daemon API', () => {
 
     const plan = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan`);
     await expect(plan.json()).resolves.toMatchObject({ approval: { status: 'approved' } });
+
+    const applied = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+    expect(applied.status).toBe(200);
+    await expect(applied.json()).resolves.toMatchObject({ run: { status: 'completed', steps: expect.arrayContaining([expect.objectContaining({ status: 'completed' })]) } });
     await store.close();
   });
 });
