@@ -21,6 +21,7 @@ type ApplyStep = { id: string; title: string; status: 'pending' | 'running' | 'c
 type ApplyRun = { id: string; projectId: string; blueprintRevision: number; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; workspacePath: string; steps: ApplyStep[]; createdAt: string; updatedAt: string };
 type DependencyReadiness = { status: 'not-applied' | 'missing-dependencies' | 'ready'; workspacePath: string | null; packageLockPresent: boolean; nodeModulesPresent: boolean; qualityCommandPresent: boolean; nextAction: string };
 type QualityGateResult = { status: 'passed' | 'failed'; command: string; exitCode: number; output: string; completedAt: string };
+type DependencyInstallResult = { status: 'installed' | 'failed'; exitCode: number; output: string; completedAt: string };
 type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
 type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
 
@@ -75,6 +76,7 @@ export function App() {
   const [discoveringAccounts, setDiscoveringAccounts] = useState(false);
   const [approvingBaseline, setApprovingBaseline] = useState(false);
   const [applyingBaseline, setApplyingBaseline] = useState(false);
+  const [installingDependencies, setInstallingDependencies] = useState(false);
   const [applyingFakeProviders, setApplyingFakeProviders] = useState(false);
   const [verifyingProviders, setVerifyingProviders] = useState(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([{ id: 'local-ready', text: 'Local delivery control plane ready', time: 'Now' }]);
@@ -329,6 +331,26 @@ export function App() {
     }
   };
 
+  const installDependencies = async () => {
+    if (!selected || !applyRun || applyRun.status !== 'completed' || dependencyReadiness?.status !== 'missing-dependencies' || installingDependencies) return;
+    if (!window.confirm('Run npm install in the isolated Agent-Dev workspace? This may access the npm registry and writes only that workspace.')) return;
+    setInstallingDependencies(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/dependencies/install`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ blueprintRevision: applyRun.blueprintRevision, confirmation: 'INSTALL_DEPENDENCIES' }),
+      });
+      const payload = await response.json() as { result?: DependencyInstallResult; error?: string };
+      if (!payload.result) throw new Error(payload.error ?? 'Unable to install dependencies.');
+      await loadDependencyReadiness(selected.id);
+      setError(response.ok ? '' : `Dependency installation failed with exit code ${payload.result.exitCode}.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to install dependencies.');
+    } finally {
+      setInstallingDependencies(false);
+    }
+  };
+
   const applyFakeProviders = async () => {
     if (!selected || !baselineApproval || applyingFakeProviders) return;
     const confirmed = window.confirm('Run the Fake Provider simulation? It changes only in-memory simulation state and creates no cloud resources.');
@@ -489,7 +511,7 @@ export function App() {
               {baselineApproval ? <div className="approval-record"><CheckCircle2 size={17} aria-hidden="true" /><div><strong>Baseline approval recorded</strong><small>Revision {baselineApproval.blueprintRevision} · {baselineApproval.approvedBy} · {formatDate(baselineApproval.approvedAt)}</small></div></div> : baselinePlan.readyForApproval ? <div className="approval-action"><p>This records intent only. It does not create remote resources or reveal secrets.</p><button className="primary-button" type="button" onClick={() => void approveBaseline()} disabled={approvingBaseline}>{approvingBaseline ? 'Recording approval...' : 'Approve baseline plan'}<ShieldCheck size={16} aria-hidden="true" /></button></div> : null}
               {baselineApproval && !applyRun && <div className="approval-action"><p>Run the local simulator to create the delivery package in the ignored `.agent-dev` workspace.</p><button className="primary-button" type="button" onClick={() => void applyBaseline()} disabled={applyingBaseline}>{applyingBaseline ? 'Applying locally...' : 'Run local Apply'}<ArrowRight size={16} aria-hidden="true" /></button></div>}
               {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>Attempt {applyRun.attempts} of 3 · {applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? 'Retrying...' : 'Retry local Apply'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}
-              {applyRun?.status === 'completed' && dependencyReadiness && <div className={`quality-gate ${dependencyReadiness.status}`}><div><p className="eyebrow">Local quality gate</p><h3>{qualityGateResult ? `Last run: ${qualityGateResult.status}` : dependencyReadiness.status === 'ready' ? 'Ready to run' : 'Dependencies required'}</h3><p>{dependencyReadiness.nextAction}</p></div>{dependencyReadiness.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void runQualityGate()} disabled={applyingBaseline}>{applyingBaseline ? 'Running...' : 'Run quality gate'}<CheckCircle2 size={15} aria-hidden="true" /></button>}</div>}
+              {applyRun?.status === 'completed' && dependencyReadiness && <div className={`quality-gate ${dependencyReadiness.status}`}><div><p className="eyebrow">Local quality gate</p><h3>{qualityGateResult ? `Last run: ${qualityGateResult.status}` : dependencyReadiness.status === 'ready' ? 'Ready to run' : 'Dependencies required'}</h3><p>{dependencyReadiness.nextAction}</p></div>{dependencyReadiness.status === 'missing-dependencies' && <button className="secondary-button" type="button" onClick={() => void installDependencies()} disabled={installingDependencies}>{installingDependencies ? 'Installing...' : 'Install dependencies'}<ArrowRight size={15} aria-hidden="true" /></button>}{dependencyReadiness.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void runQualityGate()} disabled={applyingBaseline}>{applyingBaseline ? 'Running...' : 'Run quality gate'}<CheckCircle2 size={15} aria-hidden="true" /></button>}</div>}
               <p className="baseline-note">No remote resource has been created. The simulator writes only local generated artifacts and an execution manifest.</p>
               <div className="provider-simulation"><div className="provider-simulation-heading"><div><p className="eyebrow">Simulation only</p><h3>Provider lifecycle</h3><p>Plans and verification use in-memory Fake Providers. No GitHub, Supabase, Vercel or Cloudflare API is called.</p></div><span className="dry-run-tag">No external writes</span></div><div className="provider-plan-list">{providerPlans.map(plan => <article className="provider-plan" key={plan.providerId}><div><strong>{plan.providerId}</strong><small>{plan.idempotencyKey}</small></div><ol>{plan.resources.map(resource => <li key={resource.spec.id}><span>{resource.spec.id}</span><em>{resource.action}</em><small>{resource.reason}</small></li>)}</ol></article>)}</div><div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void verifyProviders()} disabled={verifyingProviders}>{verifyingProviders ? 'Verifying...' : 'Verify simulation state'}<RefreshCw size={15} aria-hidden="true" /></button>{baselineApproval && <button className="secondary-button" type="button" onClick={() => void applyFakeProviders()} disabled={applyingFakeProviders}>{applyingFakeProviders ? 'Applying simulation...' : 'Apply Fake Providers'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{providerVerification && <div className="provider-verification">{providerVerification.map(item => <span className={item.verified ? 'verified' : 'unverified'} key={item.providerId}>{item.providerId}: {item.verified ? 'verified' : `missing ${item.missing.length}, drift ${item.mismatched.length}`}</span>)}</div>}{providerReport && <pre className="provider-report">{providerReport}</pre>}</div>
             </section>}

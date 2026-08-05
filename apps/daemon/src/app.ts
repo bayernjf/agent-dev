@@ -38,6 +38,11 @@ const qualityGateSchema = z.object({
   confirmation: z.literal('RUN_QUALITY_GATE'),
 });
 
+const dependencyInstallSchema = z.object({
+  blueprintRevision: z.number().int().positive(),
+  confirmation: z.literal('INSTALL_DEPENDENCIES'),
+});
+
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
@@ -164,6 +169,21 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     const readiness = await store.getDependencyReadiness(project.id, project.blueprint.metadata.revision);
     return context.json({ readiness });
+  });
+
+  app.post('/api/projects/:projectId/dependencies/install', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = dependencyInstallSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Dependency installation requires the current revision and confirmation INSTALL_DEPENDENCIES.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    if (project.blueprint.metadata.revision !== parsed.data.blueprintRevision) return context.json({ error: 'Dependency installation must target the current Blueprint revision.' }, 409);
+    try {
+      const result = await store.installDependencies(projectId, parsed.data.blueprintRevision);
+      return context.json({ result }, result.status === 'installed' ? 200 : 422);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to install dependencies.' }, 409);
+    }
   });
 
   app.get('/api/projects/:projectId/quality-gate', async context => {

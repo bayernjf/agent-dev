@@ -71,6 +71,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - Local Apply 会从 baseline commit 创建 `feature/agent-dev/revision-N` 本地 feature 分支，并把分支与基线提交写入 `apply-manifest.json` 和 Delivery Report；
 - Local Quality Gate 可在生成工作区执行 `npm run quality`，持久化 `quality-gate.json` 与 `QUALITY_REPORT.md`，失败时返回真实退出码和命令输出，不会伪报通过；
 - Studio 会检查生成工作区的 `node_modules`、TypeScript quality binary 和 lock file 状态；依赖未安装时给出本地 `npm install` 指引，并禁用质量门禁执行；
+- 依赖安装是独立的显式动作（`INSTALL_DEPENDENCIES`）：只在用户确认后运行 `npm install`，并生成 `dependency-install.json` 与 `DEPENDENCY_INSTALL_REPORT.md`；
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
 - 模板基线带有根 TypeScript/Vite 配置，可执行 `npm run quality` 和 `npm run build` 作为生成工程的质量入口；
 - Apply 步骤按状态持久化，支持失败后显式重试（最多 3 次）并对已完成 Run 保持幂等；

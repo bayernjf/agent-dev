@@ -166,6 +166,11 @@ describe('daemon API', () => {
     const dependencies = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/dependencies`);
     expect(dependencies.status).toBe(200);
     await expect(dependencies.json()).resolves.toMatchObject({ readiness: { status: 'missing-dependencies', qualityCommandPresent: false } });
+    const missingInstallConfirmation = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/dependencies/install`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintRevision: 1 }),
+    });
+    expect(missingInstallConfirmation.status).toBe(400);
     const quality = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/quality-gate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

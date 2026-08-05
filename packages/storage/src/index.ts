@@ -94,6 +94,18 @@ export type DependencyReadiness = {
   nextAction: string;
 };
 
+export type DependencyInstallResult = {
+  projectId: string;
+  blueprintRevision: number;
+  status: 'installed' | 'failed';
+  command: string;
+  exitCode: number;
+  startedAt: string;
+  completedAt: string;
+  output: string;
+  workspacePath: string;
+};
+
 export class AgentDevStore {
   private readonly orm: ReturnType<typeof createOrm>;
 
@@ -497,6 +509,36 @@ export class AgentDevStore {
     }
   }
 
+  async installDependencies(projectId: string, blueprintRevision: number): Promise<DependencyInstallResult> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before installing dependencies.');
+    const command = 'npm install';
+    const startedAt = new Date().toISOString();
+    let status: DependencyInstallResult['status'] = 'installed';
+    let exitCode = 0;
+    let output = '';
+    try {
+      const result = await execFileAsync('npm', ['install'], { cwd: run.workspacePath, timeout: 300_000, maxBuffer: 2_000_000 });
+      output = `${result.stdout}${result.stderr}`.trim();
+    } catch (error) {
+      const cause = error as { code?: number | string; stdout?: string; stderr?: string; message?: string };
+      status = 'failed';
+      exitCode = typeof cause.code === 'number' ? cause.code : 1;
+      output = `${cause.stdout ?? ''}${cause.stderr ?? ''}${cause.message ?? ''}`.trim();
+    }
+    const completedAt = new Date().toISOString();
+    const result: DependencyInstallResult = { projectId, blueprintRevision, status, command, exitCode, startedAt, completedAt, output, workspacePath: run.workspacePath };
+    await writeFile(join(run.workspacePath, 'dependency-install.json'), JSON.stringify(result, null, 2) + '\n', 'utf8');
+    await writeFile(join(run.workspacePath, 'DEPENDENCY_INSTALL_REPORT.md'), this.buildDependencyInstallReport(result), 'utf8');
+    try {
+      await execFileAsync('git', ['add', 'dependency-install.json', 'DEPENDENCY_INSTALL_REPORT.md', 'package-lock.json'], { cwd: run.workspacePath });
+      await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `chore: ${status === 'installed' ? 'record dependency installation' : 'record dependency installation failure'}`], { cwd: run.workspacePath });
+    } catch {
+      // Installation evidence remains available even when the local evidence commit fails.
+    }
+    return result;
+  }
+
   async close() {
     await this.persist();
     this.sqlite.close();
@@ -586,6 +628,10 @@ export class AgentDevStore {
 
   private buildQualityReport(result: QualityGateResult) {
     return `# Quality Gate Report\n\n- Status: ${result.status}\n- Command: \`${result.command}\`\n- Exit code: ${result.exitCode}\n- Blueprint revision: ${result.blueprintRevision}\n- Started: ${result.startedAt}\n- Completed: ${result.completedAt}\n\n## Output\n\n\`\`\`text\n${result.output || '(no output)'}\n\`\`\`\n\n## Boundary\n\nThis report was produced by the local Agent-Dev quality gate. A passed local gate does not replace GitHub Actions or human acceptance testing.\n`;
+  }
+
+  private buildDependencyInstallReport(result: DependencyInstallResult) {
+    return `# Dependency Installation Report\n\n- Status: ${result.status}\n- Command: \`${result.command}\`\n- Exit code: ${result.exitCode}\n- Blueprint revision: ${result.blueprintRevision}\n- Started: ${result.startedAt}\n- Completed: ${result.completedAt}\n\n## Output\n\n\`\`\`text\n${result.output || '(no output)'}\n\`\`\`\n\n## Boundary\n\nThis installation was explicitly requested and ran only inside the local Agent-Dev workspace. No provider or production resource was changed.\n`;
   }
 
   private async persist() {
