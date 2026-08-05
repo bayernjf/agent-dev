@@ -132,13 +132,12 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 
 ## 8. 下一步执行顺序
 
-1. 补充 Apply 模拟中断注入测试和实际恢复路径；
-2. 根据 Spike 结果冻结 Provider Adapter 契约，并实现不联网的 Fake Adapter 测试层；
-3. 完成固定 Web SaaS 模板及其本地质量门禁；
-4. 完成 Dual Preview 和 Supabase Auth 的真实平台验证；
-5. 接入 Local Codex Runtime、隔离 worktree 和功能 PR；
-6. 接入真实 GitHub、Vercel、Cloudflare、Supabase Adapter；
-7. 使用三个真实项目连续验证。
+1. 把 Local Quality Gate、依赖安装和 Delivery Report 合并为可审查的本地交付证据链；
+2. 接入 Local Codex Runtime，在 feature branch/worktree 中执行一个真实功能任务；
+3. 增加本地 feature task package、验收标准和人工 Approval 记录；
+4. 完成 Dual Preview 与 Supabase Auth 的真实平台验证，或由用户确认明确降级路径；
+5. 在真实授权边界下接入 GitHub、Vercel、Cloudflare、Supabase Provider Adapter；
+6. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。
 
 ## 9. 尚待用户决策
 
