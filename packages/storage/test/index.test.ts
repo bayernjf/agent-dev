@@ -98,7 +98,9 @@ describe('AgentDevStore', () => {
       const completed = await store.executeApplyRun(queued.id);
 
       expect(completed.status).toBe('completed');
+      expect(completed.attempts).toBe(1);
       expect(completed.steps.every(step => step.status === 'completed')).toBe(true);
+      await expect(store.executeApplyRun(queued.id)).resolves.toMatchObject({ id: queued.id, status: 'completed', attempts: 1 });
       await expect(readFile(join(completed.workspacePath, 'apply-manifest.json'), 'utf8')).resolves.toContain('No provider resource was created');
       await expect(readFile(join(completed.workspacePath, 'DELIVERY_REPORT.md'), 'utf8')).resolves.toContain('External writes: none');
       await expect(readFile(join(completed.workspacePath, 'generated', 'AGENTS.md'), 'utf8')).resolves.toContain('Agent Execution Constraints');

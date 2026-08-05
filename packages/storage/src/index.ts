@@ -59,6 +59,7 @@ export type ApplyRun = {
   projectId: string;
   blueprintRevision: number;
   status: 'queued' | 'running' | 'completed' | 'failed';
+  attempts: number;
   workspacePath: string;
   steps: ApplyStep[];
   createdAt: string;
@@ -304,7 +305,7 @@ export class AgentDevStore {
     if (project.blueprint.metadata.revision !== blueprintRevision) throw new Error('The apply must target the latest Blueprint revision.');
     if (!this.getBaselineApproval(projectId, blueprintRevision)) throw new Error('Approve the baseline before starting Apply.');
     const existing = this.getLatestApplyRun(projectId, blueprintRevision);
-    if (existing && (existing.status === 'running' || existing.status === 'completed')) return existing;
+    if (existing) return existing;
 
     const now = new Date().toISOString();
     const id = randomUUID();
@@ -316,30 +317,33 @@ export class AgentDevStore {
       { id: 'write-manifest', title: 'Write execution manifest', status: 'pending' },
       { id: 'write-report', title: 'Write delivery report', status: 'pending' },
     ];
-    this.orm.insert(applyRuns).values({ id, projectId, blueprintRevision, status: 'queued', workspacePath, stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now }).run();
+    this.orm.insert(applyRuns).values({ id, projectId, blueprintRevision, status: 'queued', attempts: 0, workspacePath, stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now }).run();
     await this.persist();
-    return { id, projectId, blueprintRevision, status: 'queued', workspacePath, steps, createdAt: now, updatedAt: now };
+    return { id, projectId, blueprintRevision, status: 'queued', attempts: 0, workspacePath, steps, createdAt: now, updatedAt: now };
   }
 
   async executeApplyRun(runId: string): Promise<ApplyRun> {
     const run = this.getApplyRun(runId);
     if (!run) throw new Error(`Apply run ${runId} was not found.`);
-    if (run.status === 'completed' || run.status === 'failed') return run;
+    if (run.status === 'completed') return run;
+    if (run.attempts >= 3) return run;
     const project = this.getProject(run.projectId);
     if (!project || project.blueprint.metadata.revision !== run.blueprintRevision) throw new Error('Apply run no longer matches the current Blueprint revision.');
     const steps = run.steps.map(step => ({ ...step }));
-    await this.updateApplyRun(run, 'running', steps);
+    for (const step of steps) if (step.status === 'running' || step.status === 'failed') step.status = 'pending';
+    const attempts = run.attempts + 1;
+    await this.updateApplyRun(run, 'running', steps, attempts);
     try {
-      await this.runApplyStep(steps[0], async () => { productBlueprintSchema.parse(project.blueprint); });
-      await this.runApplyStep(steps[1], async () => { await mkdir(run.workspacePath, { recursive: true }); });
-      await this.runApplyStep(steps[2], async () => {
+      await this.executePendingStep(run, steps[0], attempts, async () => { productBlueprintSchema.parse(project.blueprint); });
+      await this.executePendingStep(run, steps[1], attempts, async () => { await mkdir(run.workspacePath, { recursive: true }); });
+      await this.executePendingStep(run, steps[2], attempts, async () => {
         for (const artifact of createDryRunPlan(project.blueprint).artifacts) {
           const target = join(run.workspacePath, artifact.path);
           await mkdir(dirname(target), { recursive: true });
           await writeFile(target, artifact.content, 'utf8');
         }
       });
-      await this.runApplyStep(steps[3], async () => {
+      await this.executePendingStep(run, steps[3], attempts, async () => {
         await writeFile(join(run.workspacePath, 'apply-manifest.json'), JSON.stringify({
           projectId: run.projectId,
           blueprintRevision: run.blueprintRevision,
@@ -349,10 +353,10 @@ export class AgentDevStore {
           note: 'Local Apply Simulator only. No provider resource was created.',
         }, null, 2) + '\n', 'utf8');
       });
-      await this.runApplyStep(steps[4], async () => {
+      await this.executePendingStep(run, steps[4], attempts, async () => {
         await writeFile(join(run.workspacePath, 'DELIVERY_REPORT.md'), this.buildDeliveryReport(run, project.blueprint.metadata.name, steps, 'completed'), 'utf8');
       });
-      return await this.updateApplyRun(run, 'completed', steps);
+      return await this.updateApplyRun(run, 'completed', steps, attempts);
     } catch (error) {
       const failed = steps.find(step => step.status === 'running');
       if (failed) failed.status = 'failed';
@@ -365,7 +369,7 @@ export class AgentDevStore {
           // Preserve the original step failure if the report itself cannot be written.
         }
       }
-      return await this.updateApplyRun(run, 'failed', steps);
+      return await this.updateApplyRun(run, 'failed', steps, attempts);
     }
   }
 
@@ -393,7 +397,7 @@ export class AgentDevStore {
   }
 
   private parseApplyRun(row: typeof applyRuns.$inferSelect): ApplyRun {
-    return { id: row.id, projectId: row.projectId, blueprintRevision: row.blueprintRevision, status: row.status as ApplyRun['status'], workspacePath: row.workspacePath, steps: JSON.parse(row.stepsJson) as ApplyStep[], createdAt: row.createdAt, updatedAt: row.updatedAt };
+    return { id: row.id, projectId: row.projectId, blueprintRevision: row.blueprintRevision, status: row.status as ApplyRun['status'], attempts: row.attempts, workspacePath: row.workspacePath, steps: JSON.parse(row.stepsJson) as ApplyStep[], createdAt: row.createdAt, updatedAt: row.updatedAt };
   }
 
   private async runApplyStep(step: ApplyStep, operation: () => Promise<void>) {
@@ -410,11 +414,20 @@ export class AgentDevStore {
     }
   }
 
-  private async updateApplyRun(run: ApplyRun, status: ApplyRun['status'], steps: ApplyStep[]) {
+  private async executePendingStep(run: ApplyRun, step: ApplyStep, attempts: number, operation: () => Promise<void>) {
+    if (step.status === 'completed') return;
+    await this.updateApplyRun(run, 'running', run.steps, attempts);
+    await this.runApplyStep(step, operation);
+    await this.updateApplyRun(run, 'running', run.steps, attempts);
+  }
+
+  private async updateApplyRun(run: ApplyRun, status: ApplyRun['status'], steps: ApplyStep[], attempts = run.attempts) {
     const updatedAt = new Date().toISOString();
-    this.orm.update(applyRuns).set({ status, stepsJson: JSON.stringify(steps), updatedAt }).where(eq(applyRuns.id, run.id)).run();
+    this.orm.update(applyRuns).set({ status, attempts, stepsJson: JSON.stringify(steps), updatedAt }).where(eq(applyRuns.id, run.id)).run();
     await this.persist();
-    return { ...run, status, steps, updatedAt };
+    run.attempts = attempts;
+    run.steps = steps;
+    return { ...run, status, attempts, steps, updatedAt };
   }
 
   private buildDeliveryReport(run: ApplyRun, projectName: string, steps: ApplyStep[], status: 'completed' | 'failed') {

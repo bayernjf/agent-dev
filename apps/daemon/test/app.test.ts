@@ -149,6 +149,12 @@ describe('daemon API', () => {
     });
     expect(applied.status).toBe(200);
     await expect(applied.json()).resolves.toMatchObject({ run: { status: 'completed', steps: expect.arrayContaining([expect.objectContaining({ status: 'completed' })]) } });
+    const invalidRetry = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply/retry`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'RETRY_APPLY' }),
+    });
+    expect(invalidRetry.status).toBe(409);
     await store.close();
   });
 });

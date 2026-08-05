@@ -63,4 +63,8 @@ export const migrations = [
       );
     `,
   },
+  {
+    id: '0004_apply_attempts',
+    sql: `ALTER TABLE apply_runs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;`,
+  },
 ] as const;

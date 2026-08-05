@@ -18,7 +18,7 @@ type ProjectDetail = Project & { blueprint: ProductBlueprint };
 type ActivityEntry = { id: string; text: string; time: string };
 type BaselineApproval = { projectId: string; blueprintRevision: number; status: 'approved'; approvedBy: string; approvedAt: string };
 type ApplyStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed'; detail?: string };
-type ApplyRun = { id: string; projectId: string; blueprintRevision: number; status: 'queued' | 'running' | 'completed' | 'failed'; workspacePath: string; steps: ApplyStep[]; createdAt: string; updatedAt: string };
+type ApplyRun = { id: string; projectId: string; blueprintRevision: number; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; workspacePath: string; steps: ApplyStep[]; createdAt: string; updatedAt: string };
 
 const defaultAnswers: BlueprintAnswers = {
   mode: 'beginner',
@@ -233,6 +233,26 @@ export function App() {
     }
   };
 
+  const retryApply = async () => {
+    if (!selected || !applyRun || applyRun.status !== 'failed' || applyRun.attempts >= 3 || applyingBaseline) return;
+    setApplyingBaseline(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/apply/retry`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'RETRY_APPLY' }),
+      });
+      const payload = await response.json() as { run?: ApplyRun; error?: string };
+      if (!response.ok || !payload.run) throw new Error(payload.error ?? 'Unable to retry local Apply.');
+      setApplyRun(payload.run);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to retry local Apply.');
+    } finally {
+      setApplyingBaseline(false);
+    }
+  };
+
   useEffect(() => {
     void loadProjects();
     const source = new EventSource('/events');
@@ -353,7 +373,7 @@ export function App() {
               </article>)}</div>
               {baselineApproval ? <div className="approval-record"><CheckCircle2 size={17} aria-hidden="true" /><div><strong>Baseline approval recorded</strong><small>Revision {baselineApproval.blueprintRevision} · {baselineApproval.approvedBy} · {formatDate(baselineApproval.approvedAt)}</small></div></div> : baselinePlan.readyForApproval ? <div className="approval-action"><p>This records intent only. It does not create remote resources or reveal secrets.</p><button className="primary-button" type="button" onClick={() => void approveBaseline()} disabled={approvingBaseline}>{approvingBaseline ? 'Recording approval...' : 'Approve baseline plan'}<ShieldCheck size={16} aria-hidden="true" /></button></div> : null}
               {baselineApproval && !applyRun && <div className="approval-action"><p>Run the local simulator to create the delivery package in the ignored `.agent-dev` workspace.</p><button className="primary-button" type="button" onClick={() => void applyBaseline()} disabled={applyingBaseline}>{applyingBaseline ? 'Applying locally...' : 'Run local Apply'}<ArrowRight size={16} aria-hidden="true" /></button></div>}
-              {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>{applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol></div>}
+              {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>Attempt {applyRun.attempts} of 3 · {applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? 'Retrying...' : 'Retry local Apply'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}
               <p className="baseline-note">No remote resource has been created. The simulator writes only local generated artifacts and an execution manifest.</p>
             </section>}
           </section>

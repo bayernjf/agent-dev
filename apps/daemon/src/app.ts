@@ -27,6 +27,10 @@ const applyBaselineSchema = z.object({
   confirmation: z.literal('APPLY_BASELINE'),
 });
 
+const retryApplySchema = z.object({
+  confirmation: z.literal('RETRY_APPLY'),
+});
+
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
@@ -115,6 +119,21 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to run local Apply.' }, 409);
     }
+  });
+
+  app.post('/api/projects/:projectId/apply/retry', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = retryApplySchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Retry requires confirmation RETRY_APPLY.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const existing = store.getLatestApplyRun(projectId, project.blueprint.metadata.revision);
+    if (!existing) return context.json({ error: 'No Apply run is available to retry.' }, 404);
+    if (existing.status !== 'failed') return context.json({ error: 'Only a failed Apply run can be retried.' }, 409);
+    if (existing.attempts >= 3) return context.json({ error: 'Apply retry limit reached.' }, 409);
+    const run = await store.executeApplyRun(existing.id);
+    events.emit({ type: run.status === 'completed' ? 'apply.completed' : 'apply.failed', projectId, projectName: project.name, occurredAt: run.updatedAt });
+    return context.json({ run }, run.status === 'completed' ? 200 : 422);
   });
 
   app.post('/api/projects', async context => {

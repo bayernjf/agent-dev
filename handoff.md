@@ -30,7 +30,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 技术 Spike | Workflow Resume、macOS Secret Boundary 已通过；Codex 部分通过；Dual Preview 真实执行阻塞；Supabase Auth 前置阻塞 |
 | Git 仓库 | 已初始化；Phase 0 提交已完成 |
 | package.json / 代码骨架 | npm workspaces、Studio、Daemon、Blueprint、Policy、Storage、Workflow 已实现 |
-| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、Local Apply Simulator、Delivery Report |
+| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、可恢复/可重试的 Local Apply Simulator、Delivery Report |
 | 测试、构建和部署 | 本地单元测试与 Studio build 已通过；真实云端部署未运行 |
 
 不要把文档中的设计描述为已实现能力。
@@ -132,7 +132,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 
 ## 8. 下一步执行顺序
 
-1. 为 Local Apply Simulator 增加可恢复步骤和失败重试；交付报告初版已完成；
+1. 将 Local Apply 的本地状态进一步接入 XState Delivery State，并补充模拟中断注入测试；
 2. 根据 Spike 结果冻结 Provider Adapter 契约，并实现不联网的 Fake Adapter 测试层；
 3. 完成固定 Web SaaS 模板及其本地质量门禁；
 4. 完成 Dual Preview 和 Supabase Auth 的真实平台验证；
