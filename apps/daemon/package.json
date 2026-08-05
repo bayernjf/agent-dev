@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@agent-dev/blueprint": "file:../../packages/blueprint",
+    "@agent-dev/provider-core": "file:../../packages/provider-core",
     "@agent-dev/policy": "file:../../packages/policy",
     "@agent-dev/storage": "file:../../packages/storage",
     "@agent-dev/workflow": "file:../../packages/workflow",

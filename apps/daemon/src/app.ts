@@ -5,7 +5,9 @@ import { z } from 'zod';
 import { blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryRunPlan, getBlueprintDecisions } from '@agent-dev/blueprint';
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
+import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { DaemonEventBus } from './events.js';
+import { providerSpecsFromBlueprint } from './providers.js';
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -40,6 +42,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   const app = new Hono();
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
+  const fakeProviders = new FakeProviderRegistry();
 
   app.get('/api/health', context =>
     context.json({ service: 'agent-dev-daemon', status: 'ok', version: '0.1.0-alpha.0' }),
@@ -134,6 +137,33 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const run = await store.executeApplyRun(existing.id);
     events.emit({ type: run.status === 'completed' ? 'apply.completed' : 'apply.failed', projectId, projectName: project.name, occurredAt: run.updatedAt });
     return context.json({ run }, run.status === 'completed' ? 200 : 422);
+  });
+
+  app.get('/api/projects/:projectId/provider-plan', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const plans = await fakeProviders.plan(project.id, providerSpecsFromBlueprint(project.blueprint));
+    return context.json({ projectId: project.id, noExternalChanges: true, plans });
+  });
+
+  app.post('/api/projects/:projectId/provider-plan/apply', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ confirmation: z.literal('APPLY_FAKE_PROVIDERS') }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Fake Provider Apply requires confirmation APPLY_FAKE_PROVIDERS.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const approval = store.getBaselineApproval(projectId, project.blueprint.metadata.revision);
+    if (!approval) return context.json({ error: 'Approve the baseline before applying Fake Providers.' }, 409);
+    const plans = await fakeProviders.plan(projectId, providerSpecsFromBlueprint(project.blueprint));
+    const results = await fakeProviders.apply(projectId, plans, approval);
+    return context.json({ projectId, noExternalChanges: true, results });
+  });
+
+  app.get('/api/projects/:projectId/provider-plan/verify', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const verification = await fakeProviders.verify(project.id, providerSpecsFromBlueprint(project.blueprint));
+    return context.json({ projectId: project.id, verification, verified: verification.every(item => item.verified) });
   });
 
   app.post('/api/projects', async context => {

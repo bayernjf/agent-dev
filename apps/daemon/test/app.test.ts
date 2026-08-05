@@ -142,6 +142,20 @@ describe('daemon API', () => {
     const plan = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan`);
     await expect(plan.json()).resolves.toMatchObject({ approval: { status: 'approved' } });
 
+    const providerPlan = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/provider-plan`);
+    expect(providerPlan.status).toBe(200);
+    await expect(providerPlan.json()).resolves.toMatchObject({ noExternalChanges: true, plans: expect.arrayContaining([expect.objectContaining({ providerId: 'github', noExternalChanges: true })]) });
+
+    const providerApply = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/provider-plan/apply`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'APPLY_FAKE_PROVIDERS' }),
+    });
+    expect(providerApply.status).toBe(200);
+
+    const providerVerify = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/provider-plan/verify`);
+    await expect(providerVerify.json()).resolves.toMatchObject({ verified: true });
+
     const applied = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/apply`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

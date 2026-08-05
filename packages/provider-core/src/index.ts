@@ -118,3 +118,30 @@ export class FakeProviderAdapter implements ProviderAdapter {
     return drift;
   }
 }
+
+export type ProviderResourceSpecs = Record<string, ProviderResourceSpec[]>;
+
+export class FakeProviderRegistry {
+  private readonly adapters = new Map<string, FakeProviderAdapter>();
+
+  private adapter(projectId: string, providerId: string) {
+    const key = `${projectId}:${providerId}`;
+    const existing = this.adapters.get(key);
+    if (existing) return existing;
+    const created = new FakeProviderAdapter(providerId);
+    this.adapters.set(key, created);
+    return created;
+  }
+
+  async plan(projectId: string, specs: ProviderResourceSpecs) {
+    return Promise.all(Object.entries(specs).map(async ([providerId, resources]) => this.adapter(projectId, providerId).plan(resources)));
+  }
+
+  async apply(projectId: string, plans: ProviderPlan[], approval: ProviderApproval) {
+    return Promise.all(plans.map(plan => this.adapter(projectId, plan.providerId).apply(plan, approval)));
+  }
+
+  async verify(projectId: string, specs: ProviderResourceSpecs) {
+    return Promise.all(Object.entries(specs).map(async ([providerId, resources]) => this.adapter(projectId, providerId).verify(resources)));
+  }
+}
