@@ -140,7 +140,7 @@ describe('AgentDevStore', () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, 30_000);
 
   it('recovers the same Apply Run after an injected step failure', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));

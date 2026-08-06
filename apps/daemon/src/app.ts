@@ -245,6 +245,19 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
+  app.post('/api/projects/:projectId/runtime/execute', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const body = await context.req.json().catch(() => null) as { confirmation?: string } | null;
+    if (body?.confirmation !== 'EXECUTE_RUNTIME_RUN') return context.json({ error: 'Runtime execution requires confirmation EXECUTE_RUNTIME_RUN.' }, 400);
+    try {
+      const run = await store.executeRuntimeRun(project.id, project.blueprint.metadata.revision);
+      return context.json({ run }, run.status === 'completed' ? 200 : 422);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to execute the Runtime run.' }, 409);
+    }
+  });
+
   app.post('/api/projects/:projectId/runtime/cancel', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);

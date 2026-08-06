@@ -1,7 +1,7 @@
 # Codex Runtime Spike 记录
 
 > 日期：2026-08-02
-> 状态：CLI 协议已验证，实际执行因本机 Codex 认证无效而阻塞
+> 状态：受限 Execute 路径已实现，实际认证成功路径仍阻塞
 > 实验代码：[`spikes/codex-runtime`](../../spikes/codex-runtime/)
 
 ## 1. 目标
@@ -116,6 +116,8 @@ Probe 创建独立临时 Git 仓库并执行两种模式：
 - Runtime级 allowed-path 能否仅依赖 sandbox，或需要 Agent-Dev diff validator 二次限制。
 
 ## 7. 后续验证
+
+Agent-Dev 当前已实现显式 `EXECUTE_RUNTIME_RUN` 路径：仅已批准 Feature Task、隔离 workspace、`workspace-write` sandbox、`--ask-for-approval never` 和环境变量白名单可以进入子进程执行。执行结果以退出码、超时、输出和 Git evidence 持久化；dry-run 仍是默认路径。该实现通过了注入式 Runtime Runner 测试，但没有把测试替代为真实模型成功证据。
 
 已完成的只读 Probe 曾成功启动 CLI 并观察到 `thread.started`、`turn.started`、重试/错误和 `turn.failed` 事件，证明非交互入口与 JSONL 事件通道可用。请求随后因本机认证无效而失败，尚未产生符合 Schema 的最终输出。
 

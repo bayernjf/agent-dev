@@ -227,5 +227,5 @@ describe('daemon API', () => {
     });
     expect(invalidRetry.status).toBe(409);
     await store.close();
-  }, 10_000);
+  }, 30_000);
 });

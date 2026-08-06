@@ -74,10 +74,10 @@ Agent Runtime  -> 用户电脑中的 Codex
 - Studio 会检查生成工作区的 `node_modules`、TypeScript quality binary 和 lock file 状态；依赖未安装时给出本地 `npm install` 指引，并禁用质量门禁执行；
 - 依赖安装是独立的显式动作（`INSTALL_DEPENDENCIES`）：只在用户确认后运行 `npm install`，并生成 `dependency-install.json` 与 `DEPENDENCY_INSTALL_REPORT.md`；
 - Local Apply 完成后可在 Studio 创建 Feature Task，提交目标、验收标准和任务边界；人工批准后生成 `TASK_APPROVAL.md` 并提交到本地 feature 分支；
-- 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；当前 Runtime 执行器仍未接入真实 Codex 写入，先保留任务证据和边界。
-- Runtime Adapter 已能生成受 sandbox、workspace 和禁止路径约束的 Codex dry-run 命令计划，并探测 CLI 是否存在；认证和真实写入验证未通过前不会执行命令。
-- Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期、Git branch/HEAD/diff evidence 和 `RUNTIME_RUN_REPORT.md`；它不会把计划状态标记为代码已完成。
-- Studio 已展示 Runtime Run 状态、取消动作和 Git evidence；当前界面不会提供绕过 Gate 的 Codex 写入按钮。
+- 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；默认仍先生成 dry-run 计划。
+- Runtime Adapter 已能生成受 sandbox、workspace 和禁止路径约束的 Codex 计划，并通过环境变量白名单启动显式批准的 `workspace-write` 执行；认证和真实写入成功路径仍未验证前，不应宣称功能已交付。
+- Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence 和 `RUNTIME_RUN_REPORT.md`。
+- Studio 已展示 Runtime Run 状态、取消动作、显式 `Run Codex` 按钮和 Git evidence；Execute 只接受 `EXECUTE_RUNTIME_RUN` 确认，不允许绕过任务批准。
 - Acceptance Gate 已接入 Studio：提交验收总结和标准确认后，根据 Quality Gate/Git evidence 生成 `ACCEPTANCE_REPORT.md`；blocked 状态不能批准交付。
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
