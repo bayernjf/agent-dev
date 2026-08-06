@@ -616,6 +616,9 @@ export function App() {
     };
     source.addEventListener('project.created', onEvent);
     source.addEventListener('blueprint.revised', onEvent);
+    source.addEventListener('baseline.approved', onEvent);
+    source.addEventListener('apply.completed', onEvent);
+    source.addEventListener('apply.failed', onEvent);
     return () => source.close();
   }, [selected?.id]);
 
