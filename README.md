@@ -6,7 +6,7 @@ Agent-Dev 是面向 AI 产品创作者的自主产品交付平台。它不替代
 
 ## 第一版定位
 
-`v0.1` 面向已经使用 GitHub 和 Codex 的独立开发者，提供一条固定的 Web SaaS Golden Path：
+`v0.1` 面向已经使用 GitHub 和 Codex 的独立开发者，先提供一条固定的 Web SaaS Golden Path。Web SaaS 是验证交付控制面的第一种产品类型，不是 Agent-Dev 的最终产品边界。多产品类型的扩展原则和阶段见 [多产品类型交付方案](docs/multi-product-delivery-plan.md)。
 
 ```text
 React/Vite 前端 -> Cloudflare Pages
@@ -38,6 +38,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - [市场与竞争分析](docs/market-analysis.md)：相邻产品、竞争压力、差异化与商业判断。
 - [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)：六个真实项目到 Blueprint、Adapter 和验收用例的映射。
 - [产品路线图](docs/roadmap.md)：从内部闭环到托管运行时、模板生态和企业能力。
+- [多产品类型交付方案](docs/multi-product-delivery-plan.md)：Web SaaS、落地页、浏览器插件、桌面端和移动端的共享层、类型层与推进门槛。
 - [AI Agent 全周期开发 SOP](ai-agent-development-sop.md)：需求到生产交付的通用治理基线。
 - [现有项目组合复盘](portfolio-development-review.md)：六个已有项目的流程资产、缺口和证据。
 

@@ -1,6 +1,6 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-06
+> 更新时间：2026-08-07
 > 当前阶段：Local Delivery Control Plane 已实现；真实 Provider Apply 与联合 Preview 仍处于技术验证阶段
 > 工作目录：仓库根目录
 
@@ -12,7 +12,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 
 > 让人专注于产品为何存在，让 Agent 负责产品如何可靠地存在。
 
-首版完成结果不是生成代码，而是交付一个归用户所有、可以访问、可以继续开发和维护的 Web 产品基线，并通过相同流程交付至少一个真实功能。
+首版完成结果不是生成代码，而是交付一个归用户所有、可以访问、可以继续开发和维护的 Web 产品基线，并通过相同流程交付至少一个真实功能。Web SaaS 是当前验证类型；落地页、浏览器插件、桌面端和移动端属于后续独立 Product Type，不应被当前固定模板误认为已实现。详见 [多产品类型交付方案](docs/multi-product-delivery-plan.md)。
 
 ## 2. 当前真实状态
 
