@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+export { discoverAgentRuntimes, type AgentDescriptor, type CustomAgentInput, type AgentSource } from './catalog.js';
 
 const SAFE_ENV_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'TMP', 'TEMP', 'NO_COLOR'];
 const MAX_OUTPUT_LENGTH = 2_000_000;

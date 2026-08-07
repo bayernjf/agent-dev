@@ -146,4 +146,4 @@ runtime:
 
 ## 8. 当前实现边界
 
-当前代码只具备 Codex Runtime Adapter 和 Codex Preflight；多 Agent Catalog、Studio Agent 选择器和自定义 Agent 表单尚未实现。本文是实施基线，不代表这些能力已经可用。
+当前代码已提供本地 Agent Catalog API：内置 Agent 会自动探测本地 PATH，用户可以用名称和启动命令添加 custom Agent。Studio 的 Agent 选择器和持久化配置仍未实现；当前 custom 配置只在 daemon 进程生命周期内保存，重启后需要重新添加。

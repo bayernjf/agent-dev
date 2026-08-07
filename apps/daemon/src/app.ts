@@ -6,7 +6,7 @@ import { blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryR
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { buildCodexExecutionPlan, probeCodexRuntime } from '@agent-dev/agent-runtime';
+import { buildCodexExecutionPlan, discoverAgentRuntimes, probeCodexRuntime, type CustomAgentInput } from '@agent-dev/agent-runtime';
 import { DaemonEventBus } from './events.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint } from './providers.js';
 
@@ -67,6 +67,11 @@ const acceptanceApprovalSchema = z.object({
   approvedBy: z.string().trim().min(1).max(120).default('local-user'),
 });
 
+const customAgentSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  launchCommand: z.string().trim().min(1).max(200),
+});
+
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
@@ -74,6 +79,7 @@ export type DaemonDependencies = {
 
 export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}) {
   const app = new Hono();
+  const customAgents: CustomAgentInput[] = [];
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
   const fakeProviders = new FakeProviderRegistry();
@@ -223,6 +229,16 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   });
 
   app.get('/api/runtime/probe', context => context.json({ probe: probeCodexRuntime() }));
+
+  app.get('/api/runtime/catalog', context => context.json({ agents: discoverAgentRuntimes(customAgents) }));
+
+  app.post('/api/runtime/catalog', async context => {
+    const parsed = customAgentSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Custom Agent requires a name and launchCommand.' }, 400);
+    if (customAgents.some(agent => agent.name.toLowerCase() === parsed.data.name.toLowerCase())) return context.json({ error: 'An Agent with this name already exists.' }, 409);
+    customAgents.push(parsed.data);
+    return context.json({ agent: discoverAgentRuntimes(customAgents).at(-1) }, 201);
+  });
 
   app.get('/api/projects/:projectId/runtime/plan', async context => {
     const project = store.getProject(context.req.param('projectId'));

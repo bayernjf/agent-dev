@@ -195,6 +195,14 @@ describe('daemon API', () => {
     const runtimePlan = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/plan`);
     expect(runtimePlan.status).toBe(200);
     await expect(runtimePlan.json()).resolves.toMatchObject({ plan: { mode: 'dry-run', executionAllowed: false, noExternalChanges: true }, probe: { executionVerified: false } });
+    const catalog = await app.request('http://localhost/api/runtime/catalog');
+    expect(catalog.status).toBe(200);
+    await expect(catalog.json()).resolves.toMatchObject({ agents: expect.arrayContaining([expect.objectContaining({ id: 'codex', source: 'built-in' })]) });
+    const customAgent = await app.request('http://localhost/api/runtime/catalog', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Node Fixture', launchCommand: 'node' }),
+    });
+    expect(customAgent.status).toBe(201);
+    await expect(customAgent.json()).resolves.toMatchObject({ agent: { source: 'custom', name: 'Node Fixture', detected: true } });
     const runtimeRun = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/run`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'PREPARE_RUNTIME_RUN' }),
     });
