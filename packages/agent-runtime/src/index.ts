@@ -64,7 +64,7 @@ export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: strin
     mode: execute ? 'execute' : 'dry-run',
     taskId: task.id,
     workspacePath,
-    command: ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--ask-for-approval', 'never', '--cd', workspacePath, prompt],
+    command: ['codex', '--ask-for-approval', 'never', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', workspacePath, prompt],
     forbiddenPaths: ['.env', '.env.*', '.git/config', '~/.codex', '~/.ssh', 'production secrets'],
     acceptanceCriteria: task.acceptanceCriteria,
     noExternalChanges: !execute,
