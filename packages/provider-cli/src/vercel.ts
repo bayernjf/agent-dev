@@ -13,9 +13,10 @@ export class VercelAdapter implements ProviderAdapter {
   ) {}
 
   async discover(): Promise<ProviderState> {
-    const result = await this.runner('vercel', ['project', 'ls'], { cwd: this.workspacePath, timeout: 30_000 });
+    const result = await this.runner('vercel', ['project', 'ls'], { cwd: this.workspacePath, timeout: 30_000, env: { ...process.env, CI: 'true' } });
     if (!result.success) return { providerId: this.providerId, resources: [] };
-    const exists = result.stdout.split('\n').some(line => line.trim().startsWith(this.projectName));
+    const output = result.stdout || result.stderr;
+    const exists = output.split('\n').some(line => line.trim().startsWith(this.projectName));
     if (!exists) return { providerId: this.providerId, resources: [] };
     return {
       providerId: this.providerId,
@@ -49,7 +50,9 @@ export class VercelAdapter implements ProviderAdapter {
     if (approval.status !== 'approved') throw new Error('Provider Apply requires an approved plan.');
     for (const resource of plan.resources) {
       if (resource.action === 'noop') continue;
-      const result = await this.runner('vercel', ['--prod', '--yes'], { cwd: this.workspacePath, timeout: 300_000 });
+      await this.runner('vercel', ['project', 'add', this.projectName], { cwd: this.workspacePath, timeout: 30_000, env: { ...process.env, CI: 'true' } });
+      await this.runner('vercel', ['link', '--yes', '--project', this.projectName], { cwd: this.workspacePath, timeout: 30_000, env: { ...process.env, CI: 'true' } });
+      const result = await this.runner('vercel', ['deploy', '--prod', '--yes', '--no-wait'], { cwd: this.workspacePath, timeout: 120_000, env: { ...process.env, CI: 'true' } });
       if (!result.success) throw new Error(`Vercel deployment failed: ${result.stderr || result.stdout}`);
     }
     return { providerId: this.providerId, idempotencyKey: plan.idempotencyKey, applied: true, state: await this.discover() };
