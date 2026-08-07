@@ -29,6 +29,7 @@ type GitEvidence = { branch: string; head: string; status: string; diffStat: str
 type AcceptanceRecord = { status: 'blocked' | 'ready' | 'approved'; summary: string; criteriaConfirmed: boolean; qualityStatus: 'passed' | 'failed' | 'missing'; approvedBy?: string; approvedAt?: string };
 type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
 type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
+type AgentDescriptor = { id: string; name: string; source: 'built-in' | 'custom'; launchCommand: string; detected: boolean; version: string | null; detail: string; capabilities: string[] };
 
 const defaultAnswers: BlueprintAnswers = {
   mode: 'beginner',
@@ -103,6 +104,12 @@ export function App() {
   const [featureCriteria, setFeatureCriteria] = useState('');
   const [acceptanceSummary, setAcceptanceSummary] = useState('');
   const [criteriaConfirmed, setCriteriaConfirmed] = useState(false);
+  const [agents, setAgents] = useState<AgentDescriptor[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [savingAgent, setSavingAgent] = useState(false);
+  const [customAgentName, setCustomAgentName] = useState('');
+  const [customAgentCommand, setCustomAgentCommand] = useState('');
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   const decisions = useMemo(() => selected ? getBlueprintDecisions(selected.blueprint) : [], [selected]);
   const selectedArtifact = useMemo(
@@ -276,6 +283,51 @@ export function App() {
       setProviderReport('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load the provider simulation plan.');
+    }
+  };
+
+  const loadAgents = async () => {
+    setLoadingAgents(true);
+    try {
+      const response = await fetch('/api/runtime/catalog');
+      if (!response.ok) throw new Error('Unable to load the Agent Catalog.');
+      const payload = await response.json() as { agents: AgentDescriptor[] };
+      setAgents(payload.agents);
+      setSelectedAgentId(current => {
+        if (current && payload.agents.some(agent => agent.id === current)) return current;
+        const firstDetected = payload.agents.find(agent => agent.detected);
+        return firstDetected?.id ?? payload.agents[0]?.id ?? null;
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load the Agent Catalog.');
+    } finally {
+      setLoadingAgents(false);
+    }
+  };
+
+  const addCustomAgent = async () => {
+    if (customAgentName.trim().length < 1 || customAgentCommand.trim().length < 1) {
+      setError('Custom Agent requires both a name and a launch command.');
+      return;
+    }
+    setSavingAgent(true);
+    try {
+      const response = await fetch('/api/runtime/catalog', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: customAgentName.trim(), launchCommand: customAgentCommand.trim() }),
+      });
+      const payload = await response.json() as { agent?: AgentDescriptor; error?: string };
+      if (!response.ok || !payload.agent) throw new Error(payload.error ?? 'Unable to register the custom Agent.');
+      await loadAgents();
+      setSelectedAgentId(payload.agent.id);
+      setCustomAgentName('');
+      setCustomAgentCommand('');
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to register the custom Agent.');
+    } finally {
+      setSavingAgent(false);
     }
   };
 
@@ -492,7 +544,7 @@ export function App() {
     setPreparingRuntime(true);
     try {
       const response = await fetch(`/api/projects/${selected.id}/runtime/run`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'PREPARE_RUNTIME_RUN' }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'PREPARE_RUNTIME_RUN', agentId: selectedAgentId }),
       });
       const payload = await response.json() as { run?: RuntimeRun; error?: string };
       if (!response.ok || !payload.run) throw new Error(payload.error ?? 'Unable to prepare the Runtime run.');
@@ -645,6 +697,7 @@ export function App() {
 
   useEffect(() => {
     void loadProjects();
+    void loadAgents();
     const source = new EventSource('/events');
     const onEvent = (event: Event) => {
       const payload = JSON.parse((event as MessageEvent<string>).data) as { type: string; projectId: string; projectName: string; occurredAt: string };
@@ -717,6 +770,7 @@ export function App() {
           <a className="nav-item active" href="#projects"><FolderKanban size={18} aria-hidden="true" />Projects</a>
           <a className="nav-item" href="#decisions"><ShieldCheck size={18} aria-hidden="true" />Decisions</a>
           <a className="nav-item" href="#connections"><PlugZap size={18} aria-hidden="true" />Connections</a>
+          <a className="nav-item" href="#agents"><CircleDot size={18} aria-hidden="true" />Agents</a>
           <a className="nav-item" href="#activity"><Activity size={18} aria-hidden="true" />Activity</a>
           <a className="nav-item" href="#standards"><Settings2 size={18} aria-hidden="true" />Standards</a>
         </nav>
@@ -770,7 +824,7 @@ export function App() {
               {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>Attempt {applyRun.attempts} of 3 · {applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? 'Retrying...' : 'Retry local Apply'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}
               {applyRun?.status === 'completed' && dependencyReadiness && <div className={`quality-gate ${dependencyReadiness.status}`}><div><p className="eyebrow">Local quality gate</p><h3>{qualityGateResult ? `Last run: ${qualityGateResult.status}` : dependencyReadiness.status === 'ready' ? 'Ready to run' : 'Dependencies required'}</h3><p>{dependencyReadiness.nextAction}</p></div>{dependencyReadiness.status === 'missing-dependencies' && <button className="secondary-button" type="button" onClick={() => void installDependencies()} disabled={installingDependencies}>{installingDependencies ? 'Installing...' : 'Install dependencies'}<ArrowRight size={15} aria-hidden="true" /></button>}{dependencyReadiness.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void runQualityGate()} disabled={applyingBaseline}>{applyingBaseline ? 'Running...' : 'Run quality gate'}<CheckCircle2 size={15} aria-hidden="true" /></button>}</div>}
               {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">Feature delivery</p><h3>{featureTask ? featureTask.title : 'Define the next feature'}</h3><p>{featureTask ? `Task is ${featureTask.status}. Acceptance criteria are the Agent boundary.` : 'Create a focused task package before asking an Agent to change code.'}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{featureTask.status}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">Task title</label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder="e.g. Add receipt list" maxLength={120} /><label htmlFor="feature-objective">Objective</label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder="What user outcome should this feature deliver?" maxLength={2000} /><label htmlFor="feature-criteria">Acceptance criteria <small>one per line</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder="The list renders saved receipts.\nEmpty state is visible." maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Creating task...' : 'Create feature task'}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.status === 'draft' ? <button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Approving...' : 'Approve task for Agent'}<ShieldCheck size={15} aria-hidden="true" /></button> : <small>Approved by {featureTask.approvedBy} · {featureTask.approvedAt && formatDate(featureTask.approvedAt)}</small>}</div>}</div>}
-              {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">Agent runtime</p><h3>{runtimeRun ? `${runtimeRun.plan.mode === 'execute' ? 'Codex' : 'Dry-run'} ${runtimeRun.status}` : 'Runtime not prepared'}</h3><p>{runtimeRun?.status === 'completed' ? 'Codex finished. Review the diff and run the Quality Gate before acceptance.' : runtimeRun?.status === 'failed' ? `Codex failed on attempt ${runtimeRun.attempts}. Review the report or retry.` : runtimeRun?.status === 'running' ? 'Codex is working in the approved workspace.' : runtimeRun ? 'No Codex process has started. Review the local plan before explicitly starting execution.' : 'Prepare a guarded Runtime plan from the approved task.'}</p></div>{runtimeRun?.status === 'planned' ? <div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Cancelling...' : 'Cancel dry-run'}<RefreshCw size={15} aria-hidden="true" /></button><button className="primary-button" type="button" onClick={() => void executeRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Running Codex...' : 'Run Codex'}<ArrowRight size={15} aria-hidden="true" /></button></div> : runtimeRun?.status === 'failed' ? <button className="primary-button" type="button" onClick={() => void retryRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Retrying Codex...' : 'Retry Codex'}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Preparing...' : 'Prepare Runtime'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{gitEvidence && <div className="git-evidence"><span>Branch <strong>{gitEvidence.branch}</strong></span><span>HEAD <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>Working tree <strong>{gitEvidence.status || 'clean'}</strong></span><span>Diff <strong>{gitEvidence.diffStat || 'no changes'}</strong></span></div>}{runtimeRun?.result?.output && <pre className="provider-report">{runtimeRun.result.output}</pre>}{runtimeRun?.history.length ? <div className="runtime-history"><small>{runtimeRun.history.length} attempt{runtimeRun.history.length === 1 ? '' : 's'} recorded</small></div> : null}</div>}
+              {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">Agent runtime{selectedAgentId && agents.find(a => a.id === selectedAgentId) ? ` · ${agents.find(a => a.id === selectedAgentId)!.name}` : ''}</p><h3>{runtimeRun ? `${runtimeRun.plan.mode === 'execute' ? 'Codex' : 'Dry-run'} ${runtimeRun.status}` : 'Runtime not prepared'}</h3><p>{runtimeRun?.status === 'completed' ? 'Codex finished. Review the diff and run the Quality Gate before acceptance.' : runtimeRun?.status === 'failed' ? `Codex failed on attempt ${runtimeRun.attempts}. Review the report or retry.` : runtimeRun?.status === 'running' ? 'Codex is working in the approved workspace.' : runtimeRun ? 'No Codex process has started. Review the local plan before explicitly starting execution.' : 'Prepare a guarded Runtime plan from the approved task.'}</p></div>{runtimeRun?.status === 'planned' ? <div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Cancelling...' : 'Cancel dry-run'}<RefreshCw size={15} aria-hidden="true" /></button><button className="primary-button" type="button" onClick={() => void executeRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Running Codex...' : 'Run Codex'}<ArrowRight size={15} aria-hidden="true" /></button></div> : runtimeRun?.status === 'failed' ? <button className="primary-button" type="button" onClick={() => void retryRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Retrying Codex...' : 'Retry Codex'}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Preparing...' : 'Prepare Runtime'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{gitEvidence && <div className="git-evidence"><span>Branch <strong>{gitEvidence.branch}</strong></span><span>HEAD <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>Working tree <strong>{gitEvidence.status || 'clean'}</strong></span><span>Diff <strong>{gitEvidence.diffStat || 'no changes'}</strong></span></div>}{runtimeRun?.result?.output && <pre className="provider-report">{runtimeRun.result.output}</pre>}{runtimeRun?.history.length ? <div className="runtime-history"><small>{runtimeRun.history.length} attempt{runtimeRun.history.length === 1 ? '' : 's'} recorded</small></div> : null}</div>}
               {featureTask?.status === 'approved' && runtimeRun && <div className={`acceptance-panel ${acceptance?.status ?? 'pending'}`}><div className="runtime-heading"><div><p className="eyebrow">Human acceptance</p><h3>{acceptance ? `Acceptance ${acceptance.status}` : 'Submit delivery evidence'}</h3><p>{acceptance?.status === 'blocked' ? `Blocked: Quality Gate is ${acceptance.qualityStatus}.` : 'Confirm the acceptance criteria and record what was verified.'}</p></div>{acceptance?.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void approveDelivery()} disabled={submittingAcceptance}>{submittingAcceptance ? 'Approving...' : 'Approve delivery'}<ShieldCheck size={15} aria-hidden="true" /></button>}</div>{acceptance?.status !== 'approved' && <div className="acceptance-form"><label htmlFor="acceptance-summary">Acceptance summary</label><textarea id="acceptance-summary" value={acceptanceSummary} onChange={event => setAcceptanceSummary(event.target.value)} placeholder="Describe what was verified and what remains." maxLength={2000} /><label className="check-row"><input type="checkbox" checked={criteriaConfirmed} onChange={event => setCriteriaConfirmed(event.target.checked)} /> I reviewed every acceptance criterion</label><button className="primary-button" type="button" onClick={() => void submitAcceptance()} disabled={submittingAcceptance}>{submittingAcceptance ? 'Submitting...' : 'Submit acceptance evidence'}<ArrowRight size={15} aria-hidden="true" /></button></div>}</div>}
               {finalDeliveryReport && <div className="final-report"><div className="artifact-heading"><div><p className="eyebrow">Evidence bundle</p><h3>Final Delivery Report</h3></div><button className="icon-button" type="button" onClick={() => selected && void loadFinalDeliveryReport(selected.id)} aria-label="Refresh final delivery report" title="Refresh final delivery report"><RefreshCw size={17} /></button></div><pre className="provider-report">{finalDeliveryReport}</pre></div>}
               <p className="baseline-note">No remote resource has been created. The simulator writes only local generated artifacts and an execution manifest.</p>
@@ -835,6 +889,26 @@ export function App() {
               {accountDiscovery && <div className="discovery-list">{accountDiscovery.accounts.map(account => <article className="connector" key={account.id}>
                 <div><h3>{account.title}</h3><p>{account.identity ?? 'No identity returned'}</p><small>{account.detail}</small><em>{account.nextAction}</em></div><span className={`connector-status ${account.status}`}>{account.status === 'authenticated' ? 'Authenticated' : account.status === 'manual' ? 'Manual' : account.status === 'missing' ? 'Install required' : 'Sign in required'}</span>
               </article>)}</div>}
+            </section>
+            <section className="agent-catalog-panel" id="agents">
+              <div className="panel-title"><div><p className="eyebrow">Local runtime</p><h2>Agent Catalog</h2></div><button className="icon-button" type="button" onClick={() => void loadAgents()} disabled={loadingAgents} aria-label="Refresh agents" title="Refresh agents"><RefreshCw size={17} /></button></div>
+              <p className="form-note">Detected Agents can be selected for Runtime execution. Custom Agents are persisted in .agent-dev/agents.yaml.</p>
+              {loadingAgents && agents.length === 0 ? <p className="empty-state">Detecting local Agents...</p> : agents.length === 0 ? <p className="empty-state">No Agents found.</p> : <div className="agent-list">{agents.map(agent => (
+                <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => setSelectedAgentId(agent.id)} disabled={!agent.detected}>
+                  <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}<code className="agent-command">{agent.launchCommand}</code></div>
+                  <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? 'Detected' : 'Not found'}</span>
+                </button>
+              ))}</div>}
+              <details className="agent-form-toggle">
+                <summary>Add a custom Agent</summary>
+                <div className="agent-form">
+                  <label htmlFor="custom-agent-name">Agent name</label>
+                  <input id="custom-agent-name" value={customAgentName} onChange={event => setCustomAgentName(event.target.value)} placeholder="e.g. My Custom Agent" maxLength={80} />
+                  <label htmlFor="custom-agent-command">Launch command</label>
+                  <input id="custom-agent-command" value={customAgentCommand} onChange={event => setCustomAgentCommand(event.target.value)} placeholder="e.g. my-agent" maxLength={200} />
+                  <button className="primary-button" type="button" onClick={() => void addCustomAgent()} disabled={savingAgent}>{savingAgent ? 'Registering...' : 'Register Agent'}<ArrowRight size={15} aria-hidden="true" /></button>
+                </div>
+              </details>
             </section>
             <section className="activity-panel" id="activity"><div className="panel-title"><h2>Activity</h2><Activity size={18} aria-hidden="true" /></div><ol>{activity.map(item => <li key={item.id}><span>{item.text}</span><time>{item.time}</time></li>)}</ol></section>
           </aside>

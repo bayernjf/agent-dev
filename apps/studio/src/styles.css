@@ -34,3 +34,29 @@ button, input, textarea { font: inherit; } button { cursor: pointer; }
 .runtime-panel { margin-top: 14px; padding: 13px 14px; border: 1px solid #d4ddd5; border-radius: 5px; background: #fff; }.runtime-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }.runtime-heading h3 { margin: 2px 0 4px; color: #35453a; font-size: 13px; text-transform: capitalize; }.runtime-heading p:not(.eyebrow) { margin: 0; color: #68746d; font-size: 12px; line-height: 1.45; }.runtime-heading .secondary-button { width: auto; flex: 0 0 auto; }.git-evidence { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-top: 12px; }.git-evidence span { display: grid; gap: 3px; color: #7a867d; font-size: 10px; }.git-evidence strong { overflow-wrap: anywhere; color: #35453a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-weight: 500; }
 .acceptance-panel { margin-top: 14px; padding: 13px 14px; border: 1px solid #d4ddd5; border-radius: 5px; background: #fff; }.acceptance-panel.blocked { border-color: #ecc9bd; background: #fff7f3; }.acceptance-panel.ready { border-color: #c6dccb; background: #f2f8f3; }.acceptance-panel.approved { border-color: #c6dccb; background: #f2f8f3; }.acceptance-form { display: grid; gap: 8px; margin-top: 13px; }.acceptance-form label:not(.check-row) { color: #4d5d52; font-size: 12px; font-weight: 700; }.acceptance-form textarea { min-height: 70px; resize: vertical; width: 100%; box-sizing: border-box; border: 1px solid #d4ddd5; border-radius: 4px; padding: 9px 10px; color: #35453a; background: #fff; font: inherit; font-size: 12px; }.check-row { display: flex; align-items: center; gap: 7px; color: #4d5d52; font-size: 12px; }.acceptance-form .primary-button { width: auto; justify-self: start; padding: 0 13px; }
 .final-report { margin-top: 18px; padding-top: 18px; border-top: 1px solid #dce3dd; }.final-report .artifact-heading { margin-top: 0; }.final-report .provider-report { max-height: 360px; }
+.agent-catalog-panel { border: 1px solid #d4ddd5; border-radius: 6px; background: #fff; padding: 20px; }
+.agent-list { display: grid; gap: 8px; margin-top: 12px; }
+.agent-item { display: flex; justify-content: space-between; gap: 10px; text-align: left; border: 1px solid #dce3dd; border-radius: 5px; padding: 12px; background: #fff; color: #1d2823; transition: border-color .15s, background .15s; }
+.agent-item:hover:not(:disabled) { border-color: #4a7c58; background: #edf6ef; }
+.agent-item.selected { border-color: #36774f; background: #edf6ef; }
+.agent-item:disabled { opacity: .55; cursor: not-allowed; }
+.agent-info { display: grid; gap: 3px; min-width: 0; }
+.agent-header { display: flex; align-items: center; gap: 8px; }
+.agent-header strong { font-size: 13px; }
+.agent-source { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; text-transform: uppercase; }
+.agent-source.built-in { color: #475c70; background: #e9eef2; }
+.agent-source.custom { color: #9c4d17; background: #fff0df; }
+.agent-version { color: #5d7563; font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agent-detail { color: #68746d; font-size: 11px; line-height: 1.4; }
+.agent-command { color: #35453a; font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.agent-status { flex: 0 0 auto; height: fit-content; padding: 4px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+.agent-status.detected { color: #286b43; background: #e5f2e8; }
+.agent-status.missing { color: #9c4d17; background: #fff0df; }
+.agent-form-toggle { margin-top: 14px; border-top: 1px solid #e2e7e2; padding-top: 12px; }
+.agent-form-toggle summary { cursor: pointer; color: #286b43; font-size: 12px; font-weight: 700; }
+.agent-form { display: grid; gap: 8px; margin-top: 10px; }
+.agent-form label { color: #4d5d52; font-size: 12px; font-weight: 700; }
+.agent-form input { width: 100%; box-sizing: border-box; border: 1px solid #d4ddd5; border-radius: 4px; padding: 9px 10px; color: #35453a; background: #fff; font: inherit; font-size: 12px; }
+.agent-form .primary-button { width: auto; justify-self: start; padding: 0 13px; }
+.agent-caps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.agent-cap { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; color: #475c70; background: #e9eef2; text-transform: lowercase; }
