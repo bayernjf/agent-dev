@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 
 export type DaemonEvent = {
-  type: 'project.created' | 'blueprint.revised' | 'baseline.approved' | 'apply.completed' | 'apply.failed';
+  type: 'project.created' | 'blueprint.revised' | 'baseline.approved' | 'apply.completed' | 'apply.failed' | 'providers.applied';
   projectId: string;
   projectName: string;
   occurredAt: string;

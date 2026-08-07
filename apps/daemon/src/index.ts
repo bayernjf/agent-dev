@@ -10,8 +10,8 @@ export type StartDaemonOptions = {
 };
 
 export async function startDaemon(options: StartDaemonOptions = {}) {
-  const port = options.port ?? 3737;
-  const databasePath = options.databasePath ?? join(process.cwd(), '.agent-dev', 'agent-dev.sqlite');
+  const port = options.port ?? Number(process.env.AGENT_DEV_PORT ?? 3737);
+  const databasePath = options.databasePath ?? process.env.AGENT_DEV_DATABASE_PATH ?? join(process.cwd(), '.agent-dev', 'agent-dev.sqlite');
   const dataDirectory = dirname(databasePath);
   const store = await AgentDevStore.open(databasePath);
   const { app, events } = createDaemonApp(store, new DaemonEventBus(), {}, dataDirectory);

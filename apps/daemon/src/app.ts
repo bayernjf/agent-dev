@@ -7,8 +7,9 @@ import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { buildCodexExecutionPlan, discoverAgentRuntimes, probeCodexRuntime, type CustomAgentInput } from '@agent-dev/agent-runtime';
+import { RealProviderRegistry } from '@agent-dev/provider-cli';
 import { DaemonEventBus } from './events.js';
-import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint } from './providers.js';
+import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
 import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
 
 const createProjectSchema = z.object({
@@ -84,6 +85,15 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
   const fakeProviders = new FakeProviderRegistry();
+  const realProviders = new RealProviderRegistry({
+    resolveContext: async (projectId: string) => {
+      const project = store.getProject(projectId);
+      if (!project) return null;
+      const run = store.getLatestApplyRun(projectId, project.blueprint.metadata.revision);
+      if (!run || run.status !== 'completed') return null;
+      return { workspacePath: run.workspacePath, projectName: project.name };
+    },
+  });
 
   app.get('/api/health', context =>
     context.json({ service: 'agent-dev-daemon', status: 'ok', version: '0.1.0-alpha.0' }),
@@ -420,6 +430,50 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const providerReport = buildProviderSimulationReport(project.name, plans, verification);
     const localApply = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
     return context.json({ projectId: project.id, verification, verified: verification.every(item => item.verified), deliveryReport: providerReport, unifiedDeliveryReport: buildUnifiedDeliveryReport(project.name, localApply, providerReport) });
+  });
+
+  app.get('/api/projects/:projectId/providers/plan', async context => {
+    const projectId = context.req.param('projectId');
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const plans = await realProviders.plan(projectId, providerSpecsFromBlueprint(project.blueprint));
+      return context.json({ projectId, real: true, plans });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to plan real providers.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/providers/apply', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ confirmation: z.literal('APPLY_REAL_PROVIDERS') }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Real Provider Apply requires confirmation APPLY_REAL_PROVIDERS.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const approval = store.getBaselineApproval(projectId, project.blueprint.metadata.revision);
+    if (!approval) return context.json({ error: 'Approve the baseline before applying real providers.' }, 409);
+    try {
+      const plans = await realProviders.plan(projectId, providerSpecsFromBlueprint(project.blueprint));
+      const results = await realProviders.apply(projectId, plans, { id: `${approval.projectId}:${approval.blueprintRevision}`, status: approval.status, approvedAt: approval.approvedAt });
+      events.emit({ type: 'providers.applied', projectId, projectName: project.name, occurredAt: new Date().toISOString() });
+      return context.json({ projectId, real: true, results });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to apply real providers.' }, 409);
+    }
+  });
+
+  app.get('/api/projects/:projectId/providers/verify', async context => {
+    const projectId = context.req.param('projectId');
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const verification = await realProviders.verify(projectId, providerSpecsFromBlueprint(project.blueprint));
+      const plans = await realProviders.plan(projectId, providerSpecsFromBlueprint(project.blueprint));
+      const report = buildRealProviderReport(project.name, plans, verification);
+      return context.json({ projectId, real: true, verification, verified: verification.filter(v => v.providerId !== 'supabase').every(item => item.verified), report });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to verify real providers.' }, 409);
+    }
   });
 
   app.post('/api/projects', async context => {
