@@ -42,6 +42,7 @@
 
 - 导入现有仓库；
 - Local Claude Runtime；
+- Agent Runtime Catalog、内置 Agent Discovery 和自定义 Agent 最小配置；
 - GA4、Clarity接入与隐私 Gate；
 - Infisical Adapter；
 - 更完善的失败分类和修复建议；

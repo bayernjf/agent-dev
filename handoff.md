@@ -30,7 +30,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 技术 Spike | Workflow Resume、macOS Secret Boundary 已通过；Codex 部分通过；Dual Preview 真实执行阻塞；Supabase Auth 前置阻塞 |
 | Git 仓库 | 已初始化；Phase 0 提交已完成 |
 | package.json / 代码骨架 | npm workspaces、Studio、Daemon、Blueprint、Policy、Provider Core、Storage、Workflow 已实现 |
-| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、带合法 npm 包名和 TypeScript/Vite 质量配置的固定 Web SaaS 模板、隔离工作区 Git baseline 与本地 feature branch、显式依赖安装与准备状态、Feature Task 与人工 Approval、Codex Runtime dry-run 与显式 Execute 计划、受限子进程执行、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、可恢复/可重试的 Local Apply Simulator、XState 状态推进、Fake Provider Adapter 计划/Apply/Verify 及 Studio 展示；只读与临时 fixture workspace-write Probe 已通过；真实功能任务已启动但首个任务超时，失败恢复/续跑尚未完成 |
+| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、带合法 npm 包名和 TypeScript/Vite 质量配置的固定 Web SaaS 模板、隔离工作区 Git baseline 与本地 feature branch、显式依赖安装与准备状态、Feature Task 与人工 Approval、Codex Runtime dry-run 与显式 Execute 计划、受限子进程执行、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、可恢复/可重试的 Local Apply Simulator、XState 状态推进、Fake Provider Adapter 计划/Apply/Verify 及 Studio 展示；只读与临时 fixture workspace-write Probe 已通过；真实功能任务已启动但首个任务超时，失败恢复/续跑尚未完成；多 Agent Catalog 和自定义 Agent 仍未实现 |
 | 测试、构建和部署 | 本地单元测试与 Studio build 已通过；真实云端部署未运行 |
 
 不要把文档中的设计描述为已实现能力。
@@ -109,6 +109,7 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 8. [对话决策记录](docs/decision-log.md)
 9. [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)
 10. [通用开发 SOP](ai-agent-development-sop.md)
+11. [Agent Runtime Catalog](docs/agent-runtime-catalog.md)
 
 市场判断和长期范围见 [市场分析](docs/market-analysis.md) 与 [路线图](docs/roadmap.md)。现有项目事实依据见 [项目组合复盘](portfolio-development-review.md)。
 

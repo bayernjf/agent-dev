@@ -32,6 +32,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - [v0.1 实施计划](docs/implementation-plan-v0.1.md)：Agent-Dev 自身技术选型、PRD 工程拆解、完成定义和开发顺序。
 - [Product Blueprint 规范](docs/blueprint-spec.md)：模块化问卷、候选项、自定义答案、继承、版本和生成物。
 - [环境变量与平台连接](docs/environment-and-connectors.md)：Env Contract、Secrets、Provider Adapter 和最小人工步骤。
+- [Agent Runtime Catalog](docs/agent-runtime-catalog.md)：内置 Agent 自动识别、自定义 Agent 最小配置和 Runtime 选择策略。
 
 ### 规划与依据
 

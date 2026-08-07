@@ -124,7 +124,7 @@ stateDiagram-v2
 
 ## 7. Agent Runtime
 
-首版只实现 `LocalCodexRuntime`，不将 Codex 本身作为不可替换依赖：
+首版只实现 `LocalCodexRuntime`，不将 Codex 本身作为不可替换依赖。后续通过 Agent Runtime Catalog 注册内置和自定义 Adapter：
 
 ```ts
 interface AgentRuntime {
@@ -136,6 +136,8 @@ interface AgentRuntime {
   collectEvidence(sessionId: string): Promise<Evidence[]>;
 }
 ```
+
+Runtime Catalog 负责保存 Agent ID、来源（`built-in`/`custom`）、本地命令、版本探测、能力 Probe 和适配器版本。用户在新手模式只输入名称和启动命令，Daemon 自动生成并校验内部配置；专业模式才显示命令模板、输出解析和取消/恢复策略。
 
 运行约束：
 
