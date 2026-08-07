@@ -9,6 +9,7 @@ import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { buildCodexExecutionPlan, discoverAgentRuntimes, probeCodexRuntime, type CustomAgentInput } from '@agent-dev/agent-runtime';
 import { DaemonEventBus } from './events.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint } from './providers.js';
+import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -77,9 +78,9 @@ export type DaemonDependencies = {
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
 };
 
-export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}) {
+export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}, dataDirectory?: string) {
   const app = new Hono();
-  const customAgents: CustomAgentInput[] = [];
+  const customAgents: CustomAgentInput[] = dataDirectory ? loadCustomAgents(dataDirectory) : [];
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
   const fakeProviders = new FakeProviderRegistry();
@@ -237,6 +238,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!parsed.success) return context.json({ error: 'Custom Agent requires a name and launchCommand.' }, 400);
     if (customAgents.some(agent => agent.name.toLowerCase() === parsed.data.name.toLowerCase())) return context.json({ error: 'An Agent with this name already exists.' }, 409);
     customAgents.push(parsed.data);
+    if (dataDirectory) saveCustomAgents(dataDirectory, customAgents);
     return context.json({ agent: discoverAgentRuntimes(customAgents).at(-1) }, 201);
   });
 
@@ -251,8 +253,14 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.post('/api/projects/:projectId/runtime/run', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
-    const body = await context.req.json().catch(() => null) as { confirmation?: string } | null;
+    const body = await context.req.json().catch(() => null) as { confirmation?: string; agentId?: string } | null;
     if (body?.confirmation !== 'PREPARE_RUNTIME_RUN') return context.json({ error: 'Runtime preparation requires confirmation PREPARE_RUNTIME_RUN.' }, 400);
+    if (body.agentId) {
+      const catalog = discoverAgentRuntimes(customAgents);
+      const agent = catalog.find(a => a.id === body.agentId);
+      if (!agent) return context.json({ error: 'The selected Agent was not found in the catalog.' }, 404);
+      if (!agent.detected) return context.json({ error: `Agent "${agent.name}" is not detected on PATH.` }, 409);
+    }
     try {
       const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision);
       return context.json({ run, probe: probeCodexRuntime() }, 201);
