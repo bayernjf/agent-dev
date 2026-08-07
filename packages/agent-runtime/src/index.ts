@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-export { discoverAgentRuntimes, type AgentDescriptor, type CustomAgentInput, type AgentSource } from './catalog.js';
+export { discoverAgentRuntimes, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource } from './catalog.js';
 
 const SAFE_ENV_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'TMP', 'TEMP', 'NO_COLOR'];
 const MAX_OUTPUT_LENGTH = 2_000_000;
@@ -65,7 +65,7 @@ export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: strin
     mode: execute ? 'execute' : 'dry-run',
     taskId: task.id,
     workspacePath,
-    command: ['codex', '--ask-for-approval', 'never', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', workspacePath, prompt],
+    command: ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', workspacePath, prompt],
     forbiddenPaths: ['.env', '.env.*', '.git/config', '~/.codex', '~/.ssh', 'production secrets'],
     acceptanceCriteria: task.acceptanceCriteria,
     noExternalChanges: !execute,
