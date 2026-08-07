@@ -98,7 +98,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 当前阻塞：
 
-- 本机 Codex 只读 Runtime Probe 已通过；workspace-write 真实功能交付仍未验证；
+- 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；真实功能任务已能启动并产生隔离 workspace 改动，但首个任务在 180 秒上限内超时，失败恢复/续跑仍未完成；
 - Vercel Preview 公网访问超时，Cloudflare/Vercel 联合 Preview 尚未通过；
 - Supabase CLI 的本地状态目录与当前文件边界冲突，Auth Redirect 尚未进行真实平台验证。
 

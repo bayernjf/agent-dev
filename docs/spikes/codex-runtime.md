@@ -119,7 +119,9 @@ Probe 创建独立临时 Git 仓库并执行两种模式：
 
 Agent-Dev 当前已实现显式 `EXECUTE_RUNTIME_RUN` 路径：仅已批准 Feature Task、隔离 workspace、`workspace-write` sandbox、`--ask-for-approval never` 和环境变量白名单可以进入子进程执行。执行结果以退出码、超时、输出和 Git evidence 持久化；dry-run 仍是默认路径。该实现通过了注入式 Runtime Runner 测试，但没有把测试替代为真实模型成功证据。
 
-2026-08-07 的只读 Probe 使用当前用户 Codex 配置成功完成：退出码为 0，观察到 `thread.started`、`turn.started`、`item.started`、`item.completed` 和 `turn.completed`，最终输出符合 Schema，且 fixture 没有文件修改。此前带有隔离用户配置的 Probe 失败结果不再作为当前认证状态依据。
+2026-08-07 的只读 Probe 使用当前用户 Codex 配置成功完成：退出码为 0，观察到 `thread.started`、`turn.started`、`item.started`、`item.completed` 和 `turn.completed`，最终输出符合 Schema，且 fixture 没有文件修改。随后运行 workspace-write fixture Probe，Codex 成功创建并由脚本验证固定内容的 `RESULT.txt`。
+
+同日通过 Agent-Dev Execute API 启动了已批准的 `Receipt Test / Add receipt list` 任务。Codex 成功进入隔离 workspace 并产生了 API、Vite 配置和前端文件改动，但在 180 秒 Runtime 上限内未完成最终总结，进程被终止并记录为 `failed`；没有 PR、Preview、Provider 写入或 Acceptance 伪通过。该结果证明真实 Runtime 已接通，也暴露了失败工作区恢复和 resume 是进入下一阶段的前置任务。
 
 此前追加只读 Probe 使用了与当前用户配置隔离的参数，结果不能代表用户正常 CLI 会话。2026-08-07 使用当前用户配置执行同等只读调用已返回结构化 `READY`，证明本机 Codex CLI 的认证、模型请求和 JSONL 通道可用；该调用未修改项目文件。剩余验证是通过 Agent-Dev Runtime 的受限 workspace-write 路径完成一次真实功能任务。
 
