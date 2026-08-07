@@ -633,6 +633,7 @@ export class AgentDevStore {
     await writeFile(join(task.workspacePath, 'TASK_APPROVAL.md'), `# Feature Task Approval\n\n- Task: ${approved.title}\n- Approved by: ${approved.approvedBy}\n- Approved at: ${approved.approvedAt}\n- Blueprint revision: ${approved.blueprintRevision}\n\nThe acceptance criteria in FEATURE_TASK.md are the governing human approval boundary for this task.\n`, 'utf8');
     await execFileAsync('git', ['add', 'feature-task.json', 'FEATURE_TASK.md', 'TASK_APPROVAL.md'], { cwd: task.workspacePath });
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `task: approve ${approved.title}`], { cwd: task.workspacePath });
+    await this.advanceDelivery(projectId, [{ type: 'START_IMPLEMENTATION' }]);
     return approved;
   }
 
@@ -709,6 +710,9 @@ export class AgentDevStore {
       history: run.history.map(item => item.attempt === attemptNumber ? { ...item, status: result.exitCode === 0 && !result.timedOut ? 'completed' : 'failed', result, completedAt: result.completedAt } : item),
     };
     await this.writeRuntimeRun(completed, `runtime: ${completed.status}`);
+    if (completed.status === 'completed') {
+      await this.advanceDelivery(task.projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }]);
+    }
     return completed;
   }
 
@@ -785,6 +789,7 @@ export class AgentDevStore {
     await writeFile(join(run.workspacePath, 'ACCEPTANCE_REPORT.md'), this.buildAcceptanceReport(record), 'utf8');
     await execFileAsync('git', ['add', 'acceptance.json', 'ACCEPTANCE_REPORT.md'], { cwd: run.workspacePath });
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `acceptance: approve delivery`], { cwd: run.workspacePath });
+    await this.advanceDelivery(projectId, [{ type: 'VERIFY_COMPLETE' }]);
     return record;
   }
 
