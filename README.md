@@ -98,7 +98,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 当前阻塞：
 
-- 本机 Codex 认证无效，Runtime 成功路径尚未验证；
+- 本机 Codex 只读 Runtime Probe 已通过；workspace-write 真实功能交付仍未验证；
 - Vercel Preview 公网访问超时，Cloudflare/Vercel 联合 Preview 尚未通过；
 - Supabase CLI 的本地状态目录与当前文件边界冲突，Auth Redirect 尚未进行真实平台验证。
 

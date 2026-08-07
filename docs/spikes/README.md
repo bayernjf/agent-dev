@@ -1,11 +1,11 @@
 # Phase 0 技术 Spike 状态
 
-> 更新时间：2026-08-02
+> 更新时间：2026-08-07
 > 原则：未取得真实平台 Evidence 的项目不能标记通过。
 
 | Spike | 当前状态 | 已取得证据 | 下一动作 |
 | --- | --- | --- | --- |
-| [Codex Runtime](codex-runtime.md) | 部分通过/认证阻塞 | CLI 非交互、JSONL、Schema、sandbox、resume 入口已确认；真实请求进入事件流后认证失败 | 用户恢复 Codex 认证，再跑只读、写入、resume、cancel |
+| [Codex Runtime](codex-runtime.md) | 只读通过/写入待验证 | 当前用户配置下只读 `codex exec`、JSONL、最终 Schema 和零文件修改已验证；受限 Execute 路径已实现 | 运行 workspace-write Probe，再验证真实功能、cancel 和 resume |
 | [Workflow Resume](workflow-resume.md) | 已通过 | XState 5.32.5 快照跨四个独立进程恢复，SQLite 历史连续 | Phase A 改用 Drizzle/正式驱动并补 lease、幂等和 crash 测试 |
 | [Secret Boundary](secret-boundary.md) | 已通过（macOS） | 临时 Keychain、引用存储、Provider 单次注入、Agent allowlist、日志脱敏均实测 | 提取共享库，补 Windows/Linux Adapter |
 | [Dual Preview](dual-preview.md) | 真实执行阻塞 | Vercel 项目创建、部署、就绪、失败清理已验证；公网 Preview 超时，Cloudflare 未创建 | 核对 Vercel 团队级 Preview Protection/Firewall；建议降级为稳定 dev API + PR API 人工 Gate，待用户确认 |
@@ -14,7 +14,7 @@
 ## 当前本机前置状态
 
 ```text
-Codex CLI      installed, authentication invalid for real execution
+Codex CLI      installed, read-only execution verified; workspace-write pending
 GitHub CLI     installed, authenticated
 Vercel CLI     installed, authenticated
 Wrangler       locally installed, authenticated
