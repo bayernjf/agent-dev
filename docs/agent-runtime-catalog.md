@@ -1,6 +1,6 @@
 # Agent Runtime Catalog
 
-> 状态：规划基线
+> 状态：阶段 A 已有 API 实现，Studio 与持久化待完成
 > 日期：2026-08-07
 
 ## 1. 目标
@@ -122,12 +122,12 @@ runtime:
 
 ## 7. 分阶段实施
 
-### 阶段 A：Catalog 和 Discovery
+### 阶段 A：Catalog 和 Discovery（部分完成）
 
-- 定义 `AgentDescriptor` 和 `AgentRuntime` 接口；
-- 将当前 `LocalCodexRuntime` 注册为第一个内置 Adapter；
-- 增加 Daemon 多 Agent Preflight API；
-- Studio 展示 Built-in、Custom、状态和能力。
+- [x] 定义 `AgentDescriptor` 和 custom 输入契约；
+- [x] 注册 Codex、Claude Code、OpenClaw、Pi Agent、CodeBuddy 内置目录；
+- [x] 增加 Daemon `/api/runtime/catalog` 查询与 custom 登记 API；
+- [ ] 将 Catalog 接入 Studio 展示和 Runtime 选择。
 
 ### 阶段 B：自定义最小配置
 
@@ -146,4 +146,4 @@ runtime:
 
 ## 8. 当前实现边界
 
-当前代码已提供本地 Agent Catalog API：内置 Agent 会自动探测本地 PATH，用户可以用名称和启动命令添加 custom Agent。Studio 的 Agent 选择器和持久化配置仍未实现；当前 custom 配置只在 daemon 进程生命周期内保存，重启后需要重新添加。
+当前代码已提供本地 Agent Catalog API：内置 Agent 会自动探测本地 PATH，用户可以用名称和启动命令添加 custom Agent。最近提交为 `35f7eaf`。Studio 的 Agent 选择器、只读 Capability Probe 和持久化配置仍未实现；当前 custom 配置只在 daemon 进程生命周期内保存，重启后需要重新添加。

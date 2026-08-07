@@ -4,6 +4,13 @@
 > 当前阶段：Local Delivery Control Plane 已实现；真实 Provider Apply 与联合 Preview 仍处于技术验证阶段
 > 工作目录：仓库根目录
 
+## 最近进度
+
+- `823affa feat: add runtime retry history`：Runtime 失败运行现在保留 attempt 历史，提供显式 Retry API/UI，报告不会覆盖之前的失败证据。
+- `35f7eaf feat: add local agent runtime catalog`：Daemon 已能探测内置 Agent，并接受名称 + 启动命令的 custom Agent 配置。
+- 最近验证：全 workspace typecheck、Agent Runtime 6 tests、Daemon API 2 tests、Storage 5 tests 均通过。
+- 当前工作分支：`feature/20260802`。
+
 ## 1. 项目摘要
 
 Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。它位于 Codex、Claude Code 等 coding agent 上层，负责 Product Blueprint、Policy、平台连接、交付状态机、人工 Gate 和真实验收证据。
@@ -133,12 +140,13 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 
 ## 8. 下一步执行顺序
 
-1. 用一次真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Acceptance Gate 的成功路径；
-2. 在真实任务超时后验证 Studio `Retry Codex`、attempt 历史和报告恢复；
-3. 将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联，但不把本地批准误标记为生产交付；
-4. 完成 Dual Preview 与 Supabase Auth 的真实平台验证，或由用户确认明确降级路径；
-5. 在真实授权边界下接入 GitHub、Vercel、Cloudflare、Supabase Provider Adapter；
-6. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。
+1. 将 Agent Catalog 接入 Studio，增加 Agent 选择和 custom Agent 表单；
+2. 为 Catalog 增加 `.agent-dev/agents.yaml` 本地持久化和只读 Capability Probe；
+3. 用一次真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Acceptance Gate 的成功路径；
+4. 将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联，但不把本地批准误标记为生产交付；
+5. 完成 Dual Preview 与 Supabase Auth 的真实平台验证，或由用户确认明确降级路径；
+6. 在真实授权边界下接入 GitHub、Vercel、Cloudflare、Supabase Provider Adapter；
+7. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。
 
 ## 9. 尚待用户决策
 

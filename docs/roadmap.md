@@ -42,7 +42,7 @@
 
 - 导入现有仓库；
 - Local Claude Runtime；
-- Agent Runtime Catalog、内置 Agent Discovery 和自定义 Agent 最小配置；
+- Agent Runtime Catalog、内置 Agent Discovery 和自定义 Agent 最小配置（阶段 A API 已提前落地，Studio 选择器与持久化仍属于 v0.2）；
 - GA4、Clarity接入与隐私 Gate；
 - Infisical Adapter；
 - 更完善的失败分类和修复建议；
