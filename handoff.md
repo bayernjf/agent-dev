@@ -30,7 +30,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 技术 Spike | Workflow Resume、macOS Secret Boundary 已通过；Codex 部分通过；Dual Preview 真实执行阻塞；Supabase Auth 前置阻塞 |
 | Git 仓库 | 已初始化；Phase 0 提交已完成 |
 | package.json / 代码骨架 | npm workspaces、Studio、Daemon、Blueprint、Policy、Provider Core、Storage、Workflow 已实现 |
-| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、带合法 npm 包名和 TypeScript/Vite 质量配置的固定 Web SaaS 模板、隔离工作区 Git baseline 与本地 feature branch、显式依赖安装与准备状态、Feature Task 与人工 Approval、Codex Runtime dry-run 与显式 Execute 计划、受限子进程执行、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、可恢复/可重试的 Local Apply Simulator、XState 状态推进、Fake Provider Adapter 计划/Apply/Verify 及 Studio 展示；只读与临时 fixture workspace-write Probe 已通过；真实功能任务已启动但首个任务超时，失败恢复/续跑尚未完成；多 Agent Catalog 和自定义 Agent 仍未实现 |
+| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、带合法 npm 包名和 TypeScript/Vite 质量配置的固定 Web SaaS 模板、隔离工作区 Git baseline 与本地 feature branch、显式依赖安装与准备状态、Feature Task 与人工 Approval、Codex Runtime dry-run 与显式 Execute 计划、受限子进程执行、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、可恢复/可重试的 Local Apply Simulator、XState 状态推进、Fake Provider Adapter 计划/Apply/Verify 及 Studio 展示；Runtime 现在保留每次 attempt 历史并提供显式 Retry API/UI；只读与临时 fixture workspace-write Probe 已通过；真实功能任务首个任务超时但已正确记录失败；多 Agent Catalog 和自定义 Agent 仍未实现 |
 | 测试、构建和部署 | 本地单元测试与 Studio build 已通过；真实云端部署未运行 |
 
 不要把文档中的设计描述为已实现能力。
@@ -133,8 +133,8 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 
 ## 8. 下一步执行顺序
 
-1. 在用户恢复 Codex 状态目录权限和认证后，完成只读 Probe、受限写入 Probe、取消/恢复 Probe；
-2. 用一次真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Acceptance Gate 的成功路径；
+1. 用一次真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Acceptance Gate 的成功路径；
+2. 在真实任务超时后验证 Studio `Retry Codex`、attempt 历史和报告恢复；
 3. 将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联，但不把本地批准误标记为生产交付；
 4. 完成 Dual Preview 与 Supabase Auth 的真实平台验证，或由用户确认明确降级路径；
 5. 在真实授权边界下接入 GitHub、Vercel、Cloudflare、Supabase Provider Adapter；

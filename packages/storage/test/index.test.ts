@@ -130,8 +130,13 @@ describe('AgentDevStore', () => {
       await expect(readFile(join(completed.workspacePath, 'RUNTIME_RUN_REPORT.md'), 'utf8')).resolves.toContain('No Codex process was started');
       const evidence = await store.getGitEvidence(created.id, 1);
       expect(evidence.branch).toBe('feature/agent-dev/revision-1');
-      const cancelled = await store.cancelRuntimeRun(created.id, 1);
-      expect(cancelled.status).toBe('cancelled');
+      const failedRuntime = await store.executeRuntimeRun(created.id, 1, async () => ({ exitCode: 1, signal: null, timedOut: false, output: 'fixture failure', startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }));
+      expect(failedRuntime).toMatchObject({ status: 'failed', attempts: 1, history: [{ attempt: 1, status: 'failed' }] });
+      await expect(readFile(join(completed.workspacePath, 'RUNTIME_RUN_REPORT.md'), 'utf8')).resolves.toContain('Attempt 1');
+      const retriedRuntime = await store.retryRuntimeRun(created.id, 1, async () => ({ exitCode: 0, signal: null, timedOut: false, output: 'fixture success', startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }));
+      expect(retriedRuntime).toMatchObject({ status: 'completed', attempts: 2, history: [{ status: 'failed' }, { attempt: 2, status: 'completed' }] });
+      await expect(readFile(join(completed.workspacePath, 'RUNTIME_RUN_REPORT.md'), 'utf8')).resolves.toContain('Attempt 1');
+      await expect(store.retryRuntimeRun(created.id, 1)).rejects.toThrow('Only a failed Runtime run can be retried.');
       const acceptance = await store.submitAcceptance(created.id, 1, 'The feature task is defined and ready for review.', true);
       expect(acceptance).toMatchObject({ status: 'blocked', qualityStatus: 'failed', criteriaConfirmed: true });
       await expect(store.approveAcceptance(created.id, 1, 'test-user')).rejects.toThrow('Acceptance is blocked');

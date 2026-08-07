@@ -77,8 +77,8 @@ Agent Runtime  -> 用户电脑中的 Codex
 - Local Apply 完成后可在 Studio 创建 Feature Task，提交目标、验收标准和任务边界；人工批准后生成 `TASK_APPROVAL.md` 并提交到本地 feature 分支；
 - 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；默认仍先生成 dry-run 计划。
 - Runtime Adapter 已能生成受 sandbox、workspace 和禁止路径约束的 Codex 计划，并通过环境变量白名单启动显式批准的 `workspace-write` 执行；认证和真实写入成功路径仍未验证前，不应宣称功能已交付。
-- Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence 和 `RUNTIME_RUN_REPORT.md`。
-- Studio 已展示 Runtime Run 状态、取消动作、显式 `Run Codex` 按钮和 Git evidence；Execute 只接受 `EXECUTE_RUNTIME_RUN` 确认，不允许绕过任务批准。
+- Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence、attempt 历史和 `RUNTIME_RUN_REPORT.md`；失败运行可通过 `RETRY_RUNTIME_RUN` 显式重试，历史不会被覆盖。
+- Studio 已展示 Runtime Run 状态、取消动作、显式 `Run Codex`/`Retry Codex` 按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
 - Acceptance Gate 已接入 Studio：提交验收总结和标准确认后，根据 Quality Gate/Git evidence 生成 `ACCEPTANCE_REPORT.md`；blocked 状态不能批准交付。
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
@@ -99,7 +99,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 当前阻塞：
 
-- 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；真实功能任务已能启动并产生隔离 workspace 改动，但首个任务在 180 秒上限内超时，失败恢复/续跑仍未完成；
+- 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；真实功能任务已能启动并产生隔离 workspace 改动，首个任务在 180 秒上限内超时并被正确记录；失败重试和 attempt 历史已实现，但真正的 Codex session resume 仍未接入；
 - Vercel Preview 公网访问超时，Cloudflare/Vercel 联合 Preview 尚未通过；
 - Supabase CLI 的本地状态目录与当前文件边界冲突，Auth Redirect 尚未进行真实平台验证。
 

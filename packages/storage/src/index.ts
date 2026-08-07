@@ -129,8 +129,19 @@ export type RuntimeRun = {
   status: 'planned' | 'running' | 'completed' | 'failed' | 'cancelled';
   plan: CodexExecutionPlan;
   result?: CodexExecutionResult;
+  attempts: number;
+  history: RuntimeAttempt[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type RuntimeAttempt = {
+  attempt: number;
+  status: 'running' | 'completed' | 'failed';
+  plan: CodexExecutionPlan;
+  result?: CodexExecutionResult;
+  startedAt: string;
+  completedAt?: string;
 };
 
 export type GitEvidence = {
@@ -631,7 +642,7 @@ export class AgentDevStore {
     const existing = await this.getRuntimeRun(projectId, blueprintRevision);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, status: 'planned', plan: buildCodexExecutionPlan(task, task.workspacePath), createdAt: now, updatedAt: now };
+    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, status: 'planned', plan: buildCodexExecutionPlan(task, task.workspacePath), attempts: 0, history: [], createdAt: now, updatedAt: now };
     await writeFile(join(task.workspacePath, 'runtime-run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8');
     await writeFile(join(task.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(run, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
     await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: task.workspacePath });
@@ -647,12 +658,33 @@ export class AgentDevStore {
     if (existing.status === 'completed') return existing;
     if (existing.status === 'running') throw new Error('A Runtime run is already executing.');
     if (existing.status === 'cancelled') throw new Error('A cancelled Runtime run cannot be executed. Prepare a new run.');
+    if (existing.status === 'failed') throw new Error('A failed Runtime run must be retried explicitly.');
+
+    return this.executeRuntimeAttempt(task, existing, runner);
+  }
+
+  async retryRuntimeRun(projectId: string, blueprintRevision: number, runner?: CodexProcessRunner): Promise<RuntimeRun> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task || task.status !== 'approved') throw new Error('Approve a Feature Task before retrying Runtime.');
+    const existing = await this.getRuntimeRun(projectId, blueprintRevision);
+    if (!existing) throw new Error('No Runtime run is prepared.');
+    if (existing.status !== 'failed') throw new Error('Only a failed Runtime run can be retried.');
+    return this.executeRuntimeAttempt(task, existing, runner);
+  }
+
+  private async executeRuntimeAttempt(task: FeatureTask, existing: RuntimeRun, runner?: CodexProcessRunner): Promise<RuntimeRun> {
+    const attemptNumber = existing.attempts + 1;
+    const plan = buildCodexExecutionPlan(task, task.workspacePath, { execute: true });
+    const startedAt = new Date().toISOString();
+    const attempt: RuntimeAttempt = { attempt: attemptNumber, status: 'running', plan, startedAt };
 
     const run: RuntimeRun = {
       ...existing,
       status: 'running',
-      plan: buildCodexExecutionPlan(task, task.workspacePath, { execute: true }),
-      updatedAt: new Date().toISOString(),
+      plan,
+      attempts: attemptNumber,
+      history: [...existing.history, attempt],
+      updatedAt: startedAt,
     };
     await this.writeRuntimeRun(run, 'runtime: start Codex execution');
 
@@ -665,7 +697,7 @@ export class AgentDevStore {
         signal: null,
         timedOut: false,
         output: error instanceof Error ? error.message : String(error),
-        startedAt: run.updatedAt,
+        startedAt,
         completedAt: new Date().toISOString(),
       };
     }
@@ -674,6 +706,7 @@ export class AgentDevStore {
       status: result.exitCode === 0 && !result.timedOut ? 'completed' : 'failed',
       result,
       updatedAt: result.completedAt,
+      history: run.history.map(item => item.attempt === attemptNumber ? { ...item, status: result.exitCode === 0 && !result.timedOut ? 'completed' : 'failed', result, completedAt: result.completedAt } : item),
     };
     await this.writeRuntimeRun(completed, `runtime: ${completed.status}`);
     return completed;
@@ -683,7 +716,8 @@ export class AgentDevStore {
     const task = await this.getFeatureTask(projectId, blueprintRevision);
     if (!task) return null;
     try {
-      return JSON.parse(await readFile(join(task.workspacePath, 'runtime-run.json'), 'utf8')) as RuntimeRun;
+      const parsed = JSON.parse(await readFile(join(task.workspacePath, 'runtime-run.json'), 'utf8')) as RuntimeRun;
+      return { ...parsed, attempts: parsed.attempts ?? (parsed.result ? 1 : 0), history: parsed.history ?? (parsed.result ? [{ attempt: 1, status: parsed.status === 'completed' ? 'completed' : 'failed', plan: parsed.plan, result: parsed.result, startedAt: parsed.result.startedAt, completedAt: parsed.result.completedAt }] : []) };
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
       throw error;
@@ -858,7 +892,8 @@ export class AgentDevStore {
     const boundary = run.status === 'planned' || run.status === 'cancelled'
       ? 'This run records a guarded dry-run plan only. No Codex process was started and no feature code was changed.'
       : 'Codex execution was explicitly requested for this approved task. Quality Gate and human acceptance are still required.';
-    return `# Runtime Run Report\n\n- Run: ${run.id}\n- Task: ${run.taskId}\n- Status: ${run.status}\n- Mode: ${run.plan.mode}\n- Execution allowed: ${run.plan.executionAllowed}\n- No external changes: ${run.plan.noExternalChanges}\n\n## Planned command\n\n\`\`\`text\n${run.plan.command.join(' ')}\n\`\`\`\n${result}\n## Git evidence\n\n- Branch: ${evidence.branch}\n- HEAD: ${evidence.head}\n- Working tree: ${evidence.status || 'clean'}\n- Diff stat: ${evidence.diffStat || 'no changes'}\n\n## Boundary\n\n${boundary}\n`;
+    const history = run.history.length ? `\n## Attempt history\n\n${run.history.map(item => `### Attempt ${item.attempt}\n\n- Status: ${item.status}\n- Started: ${item.startedAt}\n- Completed: ${item.completedAt ?? 'in progress'}\n- Exit code: ${item.result?.exitCode ?? 'none'}\n- Timed out: ${item.result?.timedOut ?? false}\n`).join('\n')}` : '';
+    return `# Runtime Run Report\n\n- Run: ${run.id}\n- Task: ${run.taskId}\n- Status: ${run.status}\n- Attempts: ${run.attempts}\n- Mode: ${run.plan.mode}\n- Execution allowed: ${run.plan.executionAllowed}\n- No external changes: ${run.plan.noExternalChanges}\n\n## Planned command\n\n\`\`\`text\n${run.plan.command.join(' ')}\n\`\`\`\n${history}${result}\n## Git evidence\n\n- Branch: ${evidence.branch}\n- HEAD: ${evidence.head}\n- Working tree: ${evidence.status || 'clean'}\n- Diff stat: ${evidence.diffStat || 'no changes'}\n\n## Boundary\n\n${boundary}\n`;
   }
 
   private async writeRuntimeRun(run: RuntimeRun, commitMessage: string) {
