@@ -150,7 +150,36 @@ export class DeploymentComposer {
     }
 
     this.apiBaseUrl = this.parseDeploymentUrl(deployResult.stdout);
+
+    // Disable Vercel Deployment Protection (SSO/password) for this disposable preview project.
+    // Without this, the *.vercel.app URL returns 403/timeouts on public access, blocking health verification.
+    await this.disableVercelDeploymentProtection();
+
     step.detail = `Deployed to ${this.apiBaseUrl}`;
+  }
+
+  private async disableVercelDeploymentProtection(): Promise<void> {
+    const env = providerCredentialEnv();
+    const token = env.VERCEL_TOKEN;
+    if (!token) throw new Error('VERCEL_TOKEN is not set; cannot disable deployment protection via Vercel API.');
+
+    const response = await fetch(`https://api.vercel.com/v9/projects/${this.vercelProjectName}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ssoProtection: null,
+        passwordProtection: null,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => 'unreadable');
+      throw new Error(`Failed to disable Vercel deployment protection (HTTP ${response.status}): ${body}`);
+    }
   }
 
   private async verifyApiHealth(step: PreviewStep): Promise<void> {

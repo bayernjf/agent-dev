@@ -98,11 +98,12 @@ describe('DeploymentComposer', () => {
     });
 
     it('handles already-existing project gracefully', async () => {
-      // Mock fetch to respond to health checks
+      // Mock fetch to respond to Vercel API PATCH and health checks
       const mockFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
         headers: { 'content-type': 'application/json', 'access-control-allow-origin': 'https://feature-x.test-project-web-feature-x.pages.dev' },
       }));
       vi.stubGlobal('fetch', mockFetch);
+      vi.stubEnv('VERCEL_TOKEN', 'test-token');
 
       const runner = createMockRunner({
         'vercel project add': { stdout: '', stderr: 'Project already exists', exitCode: 1, success: false },
@@ -130,6 +131,7 @@ describe('DeploymentComposer', () => {
         headers: { 'content-type': 'application/json', 'access-control-allow-origin': 'https://feature-x.test-project-web-feature-x.pages.dev' },
       }));
       vi.stubGlobal('fetch', mockFetch);
+      vi.stubEnv('VERCEL_TOKEN', 'test-token');
 
       const runner = createMockRunner({
         'vercel project add': { stdout: 'Created', stderr: '', exitCode: 0, success: true },
@@ -158,6 +160,7 @@ describe('DeploymentComposer', () => {
         headers: { 'content-type': 'application/json', 'access-control-allow-origin': 'https://feature-x.test-project-web-feature-x.pages.dev' },
       }));
       vi.stubGlobal('fetch', mockFetch);
+      vi.stubEnv('VERCEL_TOKEN', 'test-token');
 
       const runner = createMockRunner({
         'vercel project add': { stdout: 'Created', stderr: '', exitCode: 0, success: true },
