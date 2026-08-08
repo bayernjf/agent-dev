@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-export { discoverAgentRuntimes, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource } from './catalog.js';
+export { discoverAgentRuntimes, probeAgentCapabilities, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource, type CapabilityProbe } from './catalog.js';
 
 const SAFE_ENV_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'TMP', 'TEMP', 'NO_COLOR'];
 const MAX_OUTPUT_LENGTH = 2_000_000;
@@ -53,14 +53,7 @@ export function probeCodexRuntime(): CodexRuntimeProbe {
 
 export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: string, options: { execute?: boolean } = {}): CodexExecutionPlan {
   const execute = options.execute === true;
-  const prompt = [
-    `Implement the approved feature task: ${task.title}`,
-    `Objective: ${task.objective}`,
-    'Acceptance criteria:',
-    ...task.acceptanceCriteria.map((criterion, index) => `${index + 1}. ${criterion}`),
-    'Work only in this task workspace. Do not access secrets, production systems, or paths outside the workspace.',
-    'After implementation, summarize changed files and remaining risks. Do not claim acceptance without evidence.',
-  ].join('\n');
+  const prompt = buildTaskPrompt(task);
   return {
     mode: execute ? 'execute' : 'dry-run',
     taskId: task.id,
@@ -71,6 +64,46 @@ export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: strin
     noExternalChanges: !execute,
     executionAllowed: execute,
   };
+}
+
+const AGENT_COMMAND_BUILDERS: Record<string, (prompt: string, workspacePath: string) => string[]> = {
+  codex: (prompt, cwd) => ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', cwd, prompt],
+  'claude-code': (prompt, cwd) => ['claude', '-p', prompt, '--allowedTools', 'Read,Write,Edit,Bash', '--cwd', cwd],
+  aider: (prompt, cwd) => ['aider', '--message', prompt, '--yes', '--cwd', cwd],
+  opencode: (prompt, cwd) => ['opencode', '-p', prompt, '--cwd', cwd],
+  openclaw: (prompt, cwd) => ['openclaw', 'exec', '--json', '--sandbox', 'workspace-write', '--cd', cwd, prompt],
+};
+
+export function buildAgentExecutionPlan(task: ApprovedTask, workspacePath: string, agentId: string, options: { execute?: boolean } = {}): CodexExecutionPlan {
+  const execute = options.execute === true;
+  const prompt = buildTaskPrompt(task);
+  const builder = AGENT_COMMAND_BUILDERS[agentId];
+  if (!builder) throw new Error(`Agent "${agentId}" does not have a verified non-interactive execution adapter.`);
+  return {
+    mode: execute ? 'execute' : 'dry-run',
+    taskId: task.id,
+    workspacePath,
+    command: builder(prompt, workspacePath),
+    forbiddenPaths: ['.env', '.env.*', '.git/config', '~/.ssh', 'production secrets'],
+    acceptanceCriteria: task.acceptanceCriteria,
+    noExternalChanges: !execute,
+    executionAllowed: execute,
+  };
+}
+
+export function isAgentExecutable(agentId: string): boolean {
+  return agentId in AGENT_COMMAND_BUILDERS;
+}
+
+function buildTaskPrompt(task: ApprovedTask): string {
+  return [
+    `Implement the approved feature task: ${task.title}`,
+    `Objective: ${task.objective}`,
+    'Acceptance criteria:',
+    ...task.acceptanceCriteria.map((criterion, index) => `${index + 1}. ${criterion}`),
+    'Work only in this task workspace. Do not access secrets, production systems, or paths outside the workspace.',
+    'After implementation, summarize changed files and remaining risks. Do not claim acceptance without evidence.',
+  ].join('\n');
 }
 
 function boundedAppend(current: string, chunk: string) {
@@ -114,7 +147,7 @@ export const runCodexProcess: CodexProcessRunner = (command, arguments_, options
 
 export async function executeCodexPlan(plan: CodexExecutionPlan, runner: CodexProcessRunner = runCodexProcess, timeoutMs = 180_000) {
   if (!plan.executionAllowed || plan.mode !== 'execute' || plan.noExternalChanges) {
-    throw new Error('Codex execution requires an explicitly approved execute plan.');
+    throw new Error('Agent execution requires an explicitly approved execute plan.');
   }
-  return runner('codex', plan.command.slice(1), { cwd: plan.workspacePath, env: safeEnvironment(), timeoutMs });
+  return runner(plan.command[0], plan.command.slice(1), { cwd: plan.workspacePath, env: safeEnvironment(), timeoutMs });
 }

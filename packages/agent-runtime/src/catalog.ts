@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 
 export type AgentSource = 'built-in' | 'custom';
 
-export type AgentCapability = 'workspace-write' | 'read-only' | 'version-detection';
+export type AgentCapability = 'workspace-write' | 'read-only' | 'version-detection' | 'non-interactive';
 
 export type AgentDescriptor = {
   id: string;
@@ -39,11 +39,22 @@ function loadBuiltInAgents() {
 }
 
 const BUILT_IN_CAPABILITIES: Record<string, AgentCapability[]> = {
-  codex: ['workspace-write', 'version-detection'],
-  'claude-code': ['workspace-write', 'version-detection'],
-  openclaw: ['workspace-write', 'version-detection'],
-  'pi-agent': ['read-only', 'version-detection'],
+  codex: ['workspace-write', 'version-detection', 'non-interactive'],
+  'claude-code': ['workspace-write', 'version-detection', 'non-interactive'],
+  aider: ['workspace-write', 'version-detection', 'non-interactive'],
+  opencode: ['workspace-write', 'version-detection', 'non-interactive'],
+  openclaw: ['workspace-write', 'version-detection', 'non-interactive'],
   codebuddy: ['read-only', 'version-detection'],
+  pi: ['read-only', 'version-detection'],
+  hermes: ['read-only', 'version-detection'],
+};
+
+const NON_INTERACTIVE_FLAGS: Record<string, string[]> = {
+  codex: ['exec', '--json'],
+  'claude-code': ['-p', '--print'],
+  aider: ['--message', '--yes'],
+  opencode: ['-p', '--print'],
+  openclaw: ['exec', '--json'],
 };
 
 function detect(command: string) {
@@ -67,6 +78,44 @@ function detect(command: string) {
 }
 
 const detectionCache = new Map<string, { detected: boolean; version: string | null }>();
+const helpCache = new Map<string, string>();
+
+function probeHelp(command: string): string {
+  const cached = helpCache.get(command);
+  if (cached !== undefined) return cached;
+  for (const flag of ['--help', '-h']) {
+    const result = spawnSync(command, [flag], { encoding: 'utf8', timeout: 2_000 });
+    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
+    if (output.length > 0) {
+      helpCache.set(command, output);
+      return output;
+    }
+  }
+  helpCache.set(command, '');
+  return '';
+}
+
+export type CapabilityProbe = {
+  agentId: string;
+  nonInteractive: boolean;
+  nonInteractiveFlags: string[];
+  workspaceWrite: boolean;
+  helpAvailable: boolean;
+};
+
+export function probeAgentCapabilities(agentId: string, launchCommand: string): CapabilityProbe {
+  const expectedFlags = NON_INTERACTIVE_FLAGS[agentId] ?? [];
+  const helpOutput = probeHelp(launchCommand);
+  const nonInteractive = expectedFlags.length > 0 && expectedFlags.every(flag => helpOutput.includes(flag));
+  const workspaceWrite = (BUILT_IN_CAPABILITIES[agentId] ?? []).includes('workspace-write');
+  return {
+    agentId,
+    nonInteractive,
+    nonInteractiveFlags: expectedFlags,
+    workspaceWrite,
+    helpAvailable: helpOutput.length > 0,
+  };
+}
 
 export function discoverAgentRuntimes(custom: CustomAgentInput[] = []): AgentDescriptor[] {
   const builtIns = loadBuiltInAgents().flatMap(agent => {
