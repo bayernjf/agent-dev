@@ -1,7 +1,7 @@
 # 凭证与环境变量管理方案
 
 > 创建时间：2026-08-08
-> 状态：Phase 1 本地文件/API 已实现；Studio 凭证面板和真实 Supabase Adapter 待完成
+> 状态：Phase 1 本地文件/API 已实现；Phase 2 Studio 凭证面板已实现（当前面板增强形式：引导模式 + 验证 + Supabase 手动配置 + 自定义 Key）；真实 Supabase 自动 Adapter 按用户决策不做，保持 Manual 引导
 > 前置依赖：Real Provider Adapter 已验证通过（GitHub、Vercel、Cloudflare 真实接入，Supabase Manual 降级）
 
 ## 1. 问题背景
@@ -1058,25 +1058,27 @@ const DEFAULT_SUPABASE_REASON = 'Supabase manages irreversible data resources (d
 - `.env` 自动生成，应用代码可直接使用
 - Supabase 能真实创建项目（有 token 时）或降级为 Manual（无 token 时）
 
-### 11.2 Phase 2：UI 凭证面板
+### 11.2 Phase 2：UI 凭证面板（已于 2026-08-08 完成）
 
 **目标**：新手引导流程 + 凭证管理 UI
 
-**改动文件**：
+**实际实现**（与计划的文件结构有差异，采用当前面板增强形式而非独立页面）：
 
 | 文件 | 操作 | 内容 |
 |------|------|------|
-| `apps/studio/src/pages/Credentials.tsx` | 新增 | 凭证管理面板 |
-| `apps/studio/src/pages/CredentialGuide.tsx` | 新增 | 新手引导流程 |
-| `apps/studio/src/components/ProviderConnect.tsx` | 新增 | 单个 Provider 连接组件 |
-| `apps/studio/src/api/credentials.ts` | 新增 | 凭证 API 客户端 |
+| `packages/provider-cli/src/credentials.ts` | 修改 | 新增 `verifyCredentials()`，通过 CLI（gh/vercel/wrangler/supabase）验证 Token 有效性 |
+| `apps/daemon/src/app.ts` | 修改 | 新增 `POST /api/credentials/verify` 路由 |
+| `apps/studio/src/App.tsx` | 修改 | 凭证面板增强：首次引导模式、凭证验证、Supabase 手动配置区块、自定义第三方 API Key 管理 |
+| `apps/studio/src/styles.css` | 修改 | 引导、验证、Supabase 手动配置、自定义 Key 样式 |
 
-**验收标准**：
-- 新手首次使用时弹出凭证填写引导
-- 每个 Provider 旁边有教程链接
-- 凭证面板可查看连接状态、修改、删除
-- 可查看当前项目资源清单
-- 可手动重新生成 .env
+**验收标准达成情况**：
+- ✅ 新手首次使用时进入凭证填写引导（无凭证时自动进入分步引导，可 Skip）
+- ✅ 每个 Provider 旁边有教程链接
+- ✅ 凭证面板可查看连接状态（验证）、修改、删除
+- ✅ 可查看当前项目资源清单
+- ✅ 可手动重新生成 .env
+- ✅ 额外：Supabase 手动配置引导（4 步教程 + 填入 URL/Key，遵循用户决策不做自动化）
+- ✅ 额外：自定义第三方 API Key 管理（key 名自动规范化，重名检查）
 
 ### 11.3 Phase 3：安全增强
 
