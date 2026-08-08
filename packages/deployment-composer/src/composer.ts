@@ -160,7 +160,7 @@ export class DeploymentComposer {
 
   private async disableVercelDeploymentProtection(): Promise<void> {
     const env = providerCredentialEnv();
-    const token = env.VERCEL_TOKEN;
+    const token = env.VERCEL_TOKEN ?? process.env.VERCEL_TOKEN;
     if (!token) throw new Error('VERCEL_TOKEN is not set; cannot disable deployment protection via Vercel API.');
 
     const response = await fetch(`https://api.vercel.com/v9/projects/${this.vercelProjectName}`, {
