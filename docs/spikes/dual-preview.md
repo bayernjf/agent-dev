@@ -1,8 +1,9 @@
 # Dual Preview Spike 记录
 
 > 日期：2026-08-02
-> 状态：已通过真实云端验证
+> 状态：已通过真实云端验证，部署编排已实现为正式产品代码
 > 实验代码：[`spikes/dual-preview`](../../spikes/dual-preview/)
+> 正式实现：[`packages/deployment-composer`](../../packages/deployment-composer/)
 > 最近验证：2026-08-08，项目 `e2e-test-real`
 
 ## 1. 目标
@@ -116,4 +117,12 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
 
 Dual Preview 联合部署编排契约已通过真实云端验证：Vercel API 部署、Cloudflare Pages 部署、跨域通信和数据依赖注入均已取得真实 Evidence。该验证结果已用于 Provider Adapter 端到端验证（详见 [交接文档](../../handoff.md)）。
 
-生产实现的下一步是将本 Spike 验证的部署编排实现为 Provider Adapter 的幂等 Step，包括精确 CORS origin（替换当前的 `*`）和临时项目的自动清理。
+2026-08-09，本 Spike 验证的部署编排已实现为正式产品代码 `packages/deployment-composer`：
+
+- `DeploymentComposer` 按 7 步幂等编排（Vercel Preview → API 健康验证 → URL 注入 → 前端构建 → Cloudflare Pages Preview → 联合 Smoke → Evidence）；
+- 精确 CORS origin（`https://<branch>.<project>-web-<branch>.pages.dev`）已替换 Spike 中的 `*`；
+- `cleanupPreviewProjects()` 支持删除 Vercel/Cloudflare 临时项目，失败时返回未清理项目名供 Manual Action；
+- Daemon 提供 `POST /api/projects/:projectId/preview/deploy`、`GET .../preview/plan`、`POST .../preview/cleanup` 三个路由；
+- Studio 在 Quality Gate 通过后展示 Dual Preview 部署区块。
+
+下一步是用真实云端跑通 Composer 端到端，并补充 PR 关闭时自动触发清理的编排。
