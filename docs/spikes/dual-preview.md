@@ -119,10 +119,12 @@ Dual Preview 联合部署编排契约已通过真实云端验证：Vercel API �
 
 2026-08-09，本 Spike 验证的部署编排已实现为正式产品代码 `packages/deployment-composer`：
 
-- `DeploymentComposer` 按 7 步幂等编排（Vercel Preview → API 健康验证 → URL 注入 → 前端构建 → Cloudflare Pages Preview → 联合 Smoke → Evidence）；
+- `DeploymentComposer` 按 7 步幂等编排（Vercel Preview → 关闭 SSO/Password Protection → API 健康验证 → URL 注入 → 前端构建 → Cloudflare Pages Preview → 联合 Smoke → Evidence）；
+- Vercel SSO/Password Protection 关闭步骤已纳入正式代码：`deployVercelPreview` 成功后通过 Vercel REST API `PATCH /v9/projects/{name}` 将 `ssoProtection` 和 `passwordProtection` 设为 `null`，确保 `*.vercel.app` URL 公网可访问；
 - 精确 CORS origin（`https://<branch>.<project>-web-<branch>.pages.dev`）已替换 Spike 中的 `*`；
 - `cleanupPreviewProjects()` 支持删除 Vercel/Cloudflare 临时项目，失败时返回未清理项目名供 Manual Action；
 - Daemon 提供 `POST /api/projects/:projectId/preview/deploy`、`GET .../preview/plan`、`POST .../preview/cleanup` 三个路由；
-- Studio 在 Quality Gate 通过后展示 Dual Preview 部署区块。
+- Studio 在 Quality Gate 通过后展示 Dual Preview 部署区块；
+- 10 个单元测试全部通过（含 SSO Protection 关闭路径的 mock fetch + `VERCEL_TOKEN` 环境变量注入）。
 
-下一步是用真实云端跑通 Composer 端到端，并补充 PR 关闭时自动触发清理的编排。
+下一步是在安装了 Vercel/Wrangler CLI 的机器上用真实云端跑通 Composer 端到端，并补充 PR 关闭时自动触发清理的编排。
