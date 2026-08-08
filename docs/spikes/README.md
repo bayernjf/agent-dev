@@ -1,6 +1,6 @@
 # Phase 0 技术 Spike 状态
 
-> 更新时间：2026-08-07
+> 更新时间：2026-08-08
 > 原则：未取得真实平台 Evidence 的项目不能标记通过。
 
 | Spike | 当前状态 | 已取得证据 | 下一动作 |
@@ -8,8 +8,8 @@
 | [Codex Runtime](codex-runtime.md) | Probe 通过/真实任务超时 | 当前用户配置下只读和临时 fixture workspace-write、JSONL、最终 Schema 与确定性写入验证已通过；真实功能任务已启动但在 180 秒上限内超时 | 失败工作区恢复、Codex resume/cancel 和可控的真实功能重跑 |
 | [Workflow Resume](workflow-resume.md) | 已通过 | XState 5.32.5 快照跨四个独立进程恢复，SQLite 历史连续 | Phase A 改用 Drizzle/正式驱动并补 lease、幂等和 crash 测试 |
 | [Secret Boundary](secret-boundary.md) | 已通过（macOS） | 临时 Keychain、引用存储、Provider 单次注入、Agent allowlist、日志脱敏均实测 | 提取共享库，补 Windows/Linux Adapter |
-| [Dual Preview](dual-preview.md) | 真实执行阻塞 | Vercel 项目创建、部署、就绪、失败清理已验证；公网 Preview 超时，Cloudflare 未创建 | 核对 Vercel 团队级 Preview Protection/Firewall；建议降级为稳定 dev API + PR API 人工 Gate，待用户确认 |
-| [Supabase Auth](supabase-auth.md) | 前置阻塞 | CLI 已局部安装，但会尝试创建 `~/.supabase`，当前文件边界下不可用 | 用户选择 Management API/OAuth、授权 CLI 状态目录或稳定 dev Redirect |
+| [Dual Preview](dual-preview.md) | 已通过 | Vercel API 部署、Cloudflare Pages 部署、跨域通信、API URL 注入均已取得真实云端 Evidence | 将部署编排实现为 Provider Adapter 幂等 Step，替换 CORS `*` 为精确 origin |
+| [Supabase Auth](supabase-auth.md) | 已确认降级 | CLI 写入项目边界外状态，已确认采用 Manual 降级路径（路径 C）；RealProviderRegistry 已实现自动降级 | 后续实现 Management API 自动基础设施 + 人工敏感配置审批的分阶段方案 |
 
 ## 当前本机前置状态
 
