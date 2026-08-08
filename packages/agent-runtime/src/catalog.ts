@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 export type AgentSource = 'built-in' | 'custom';
 
@@ -20,13 +21,22 @@ export type CustomAgentInput = {
   launchCommand: string;
 };
 
-const BUILT_IN_AGENTS: Omit<AgentDescriptor, 'detected' | 'version' | 'detail' | 'capabilities'>[] = [
-  { id: 'codex', name: 'Codex', source: 'built-in', launchCommand: 'codex' },
-  { id: 'claude-code', name: 'Claude Code', source: 'built-in', launchCommand: 'claude' },
-  { id: 'openclaw', name: 'OpenClaw', source: 'built-in', launchCommand: 'openclaw' },
-  { id: 'pi-agent', name: 'Pi Agent', source: 'built-in', launchCommand: 'pi' },
-  { id: 'codebuddy', name: 'CodeBuddy', source: 'built-in', launchCommand: 'codebuddy' },
-];
+function parseKeyValueCatalog(content: string): { name: string; launchCommand: string }[] {
+  return content.split(/\r?\n/).flatMap(line => {
+    const match = /^\s*"([^"]+)"\s*=\s*"([^"]+)"\s*$/.exec(line);
+    return match ? [{ name: match[1], launchCommand: match[2] }] : [];
+  });
+}
+
+function loadBuiltInAgents() {
+  const content = readFileSync(new URL('../agents.builtin.conf', import.meta.url), 'utf8');
+  return parseKeyValueCatalog(content).map((agent, index) => ({
+    id: agent.launchCommand === 'claude' ? 'claude-code' : agent.launchCommand,
+    ...agent,
+    source: 'built-in' as const,
+    order: index,
+  }));
+}
 
 const BUILT_IN_CAPABILITIES: Record<string, AgentCapability[]> = {
   codex: ['workspace-write', 'version-detection'],
@@ -37,23 +47,37 @@ const BUILT_IN_CAPABILITIES: Record<string, AgentCapability[]> = {
 };
 
 function detect(command: string) {
-  const result = spawnSync(command, ['--version'], { encoding: 'utf8', timeout: 3_000 });
+  const cached = detectionCache.get(command);
+  if (cached) return cached;
+  const executable = command.trim().split(/\s+/)[0];
+  const lookup = spawnSync('which', [executable], { encoding: 'utf8', timeout: 300 });
+  if (lookup.status !== 0 || lookup.error) {
+    const result = { detected: false, version: null };
+    detectionCache.set(command, result);
+    return result;
+  }
+  const result = spawnSync(command, ['--version'], { encoding: 'utf8', timeout: command === 'codex' ? 2_000 : 500 });
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
-  return {
+  const detected = {
     detected: !result.error && result.status === 0,
     version: output ? output.split('\n')[0] : null,
   };
+  detectionCache.set(command, detected);
+  return detected;
 }
 
+const detectionCache = new Map<string, { detected: boolean; version: string | null }>();
+
 export function discoverAgentRuntimes(custom: CustomAgentInput[] = []): AgentDescriptor[] {
-  const builtIns = BUILT_IN_AGENTS.map(agent => {
+  const builtIns = loadBuiltInAgents().flatMap(agent => {
     const result = detect(agent.launchCommand);
-    return {
+    if (!result.detected) return [];
+    return [{
       ...agent,
       ...result,
       capabilities: BUILT_IN_CAPABILITIES[agent.id] ?? ['version-detection'],
       detail: result.detected ? 'Detected on local PATH.' : `Install ${agent.launchCommand} or add a custom launch command.`,
-    };
+    }];
   });
   const customAgents = custom.map((agent, index) => {
     const result = detect(agent.launchCommand);

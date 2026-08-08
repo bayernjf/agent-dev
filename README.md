@@ -79,7 +79,8 @@ Agent Runtime  -> 用户电脑中的 Codex
 - Runtime Adapter 已能生成受 sandbox、workspace 和禁止路径约束的 Codex 计划，并通过环境变量白名单启动显式批准的 `workspace-write` 执行；认证和真实写入成功路径仍未验证前，不应宣称功能已交付。
 - Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence、attempt 历史和 `RUNTIME_RUN_REPORT.md`；失败运行可通过 `RETRY_RUNTIME_RUN` 显式重试，历史不会被覆盖。
 - Studio 已展示 Runtime Run 状态、取消动作、显式 `Run Codex`/`Retry Codex` 按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
-- Daemon 已提供 `/api/runtime/catalog`，可检测内置 Agent 并登记名称 + 启动命令的 custom Agent；当前配置仅保存在 daemon 进程内。
+- Daemon 已提供 `/api/runtime/catalog`，内置 Agent 来自 `agents.builtin.conf`，可登记名称 + 启动命令的 custom Agent；内置未安装项隐藏，custom 未安装项置灰并保存到 `.agent-dev/agents.conf`。
+- 凭证管理 Phase 1 已提供本地凭证文件、连接元数据、项目资源清单、`.env` 生成器和 daemon API；Secret 不返回 API、不写入数据库。Studio 凭证面板和 Supabase 真实 Adapter 尚未实现。
 - Acceptance Gate 已接入 Studio：提交验收总结和标准确认后，根据 Quality Gate/Git evidence 生成 `ACCEPTANCE_REPORT.md`；blocked 状态不能批准交付。
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；

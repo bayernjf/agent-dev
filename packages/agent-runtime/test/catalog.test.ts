@@ -4,8 +4,8 @@ import { discoverAgentRuntimes } from '../src/index.js';
 describe('agent runtime catalog', () => {
   it('returns built-in runtimes with detection status', () => {
     const agents = discoverAgentRuntimes();
-    expect(agents.map(agent => agent.id)).toEqual(['codex', 'claude-code', 'openclaw', 'pi-agent', 'codebuddy']);
     expect(agents.every(agent => agent.source === 'built-in')).toBe(true);
+    expect(agents.some(agent => agent.id === 'codex')).toBe(true);
     expect(agents.find(agent => agent.id === 'codex')).toMatchObject({ launchCommand: 'codex' });
   });
 
