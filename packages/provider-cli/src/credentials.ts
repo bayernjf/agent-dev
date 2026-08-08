@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { defaultRunner } from './cli.js';
 
 export type Credentials = Record<string, string>;
 export type CredentialMeta = { version: 1; updatedAt: string; keys: string[] };
@@ -43,4 +44,45 @@ export function getCredentialMeta(): CredentialMeta {
 export function providerCredentialEnv() {
   const credentials = loadCredentials();
   return Object.fromEntries(Object.entries(credentials).filter(([key]) => ['GITHUB_TOKEN', 'VERCEL_TOKEN', 'CLOUDFLARE_API_TOKEN', 'SUPABASE_ACCESS_TOKEN'].includes(key)));
+}
+
+export type CredentialVerifyResult = {
+  providerId: string;
+  status: 'valid' | 'invalid' | 'not_set';
+  detail: string;
+};
+
+const PROVIDER_CHECKS: { providerId: string; envKey: string; command: string; args: string[]; successCheck?: (stdout: string, stderr: string) => boolean }[] = [
+  { providerId: 'github', envKey: 'GITHUB_TOKEN', command: 'gh', args: ['auth', 'status'] },
+  { providerId: 'vercel', envKey: 'VERCEL_TOKEN', command: 'vercel', args: ['whoami'], successCheck: (stdout) => stdout.length > 0 },
+  { providerId: 'cloudflare', envKey: 'CLOUDFLARE_API_TOKEN', command: 'npx', args: ['wrangler', 'whoami'], successCheck: (stdout, stderr) => !stdout.includes('not authenticated') && !stderr.includes('not authenticated') },
+  { providerId: 'supabase', envKey: 'SUPABASE_ACCESS_TOKEN', command: 'supabase', args: ['projects', 'list'] },
+];
+
+export async function verifyCredentials(credentials: Credentials): Promise<CredentialVerifyResult[]> {
+  const results: CredentialVerifyResult[] = [];
+  for (const check of PROVIDER_CHECKS) {
+    const token = credentials[check.envKey];
+    if (!token) {
+      results.push({ providerId: check.providerId, status: 'not_set', detail: `${check.envKey} is not configured.` });
+      continue;
+    }
+    try {
+      const result = await defaultRunner(check.command, check.args, {
+        timeout: 15_000,
+        env: { ...process.env, [check.envKey]: token } as Record<string, string>,
+      });
+      const success = result.success && (check.successCheck ? check.successCheck(result.stdout, result.stderr) : true);
+      results.push({
+        providerId: check.providerId,
+        status: success ? 'valid' : 'invalid',
+        detail: success
+          ? `Token is valid. Identity: ${(result.stdout || result.stderr).split('\n')[0] ?? 'confirmed'}`
+          : `Token validation failed: ${(result.stderr || result.stdout).split('\n')[0] ?? 'unknown error'}`,
+      });
+    } catch {
+      results.push({ providerId: check.providerId, status: 'invalid', detail: `${check.command} is not installed or not accessible.` });
+    }
+  }
+  return results;
 }
