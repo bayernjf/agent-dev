@@ -1,6 +1,7 @@
 import type { ProviderAdapter, ProviderPlan, ProviderPlanResource, ProviderState, ProviderVerification, ProviderDrift, ProviderApplyResult, ProviderApproval, ProviderResourceSpec } from '@agent-dev/provider-core';
 import type { CommandRunner } from './cli.js';
 import { defaultRunner } from './cli.js';
+import { providerCredentialEnv } from './credentials.js';
 
 export class CloudflareAdapter implements ProviderAdapter {
   readonly providerId = 'cloudflare';
@@ -16,7 +17,7 @@ export class CloudflareAdapter implements ProviderAdapter {
   }
 
   async discover(): Promise<ProviderState> {
-    const result = await this.runner('npx', ['wrangler', 'pages', 'project', 'list'], { cwd: this.workspacePath, timeout: 60_000 });
+    const result = await this.runner('npx', ['wrangler', 'pages', 'project', 'list'], { cwd: this.workspacePath, timeout: 60_000, env: providerCredentialEnv() });
     if (!result.success) return { providerId: this.providerId, resources: [] };
     const exists = result.stdout.split('\n').some(line => line.trim().includes(this.projectName));
     if (!exists) return { providerId: this.providerId, resources: [] };
@@ -52,9 +53,9 @@ export class CloudflareAdapter implements ProviderAdapter {
     if (approval.status !== 'approved') throw new Error('Provider Apply requires an approved plan.');
     for (const resource of plan.resources) {
       if (resource.action === 'noop') continue;
-      const createResult = await this.runner('npx', ['wrangler', 'pages', 'project', 'create', this.projectName, '--production-branch', 'main'], { cwd: this.workspacePath, timeout: 60_000 });
+      const createResult = await this.runner('npx', ['wrangler', 'pages', 'project', 'create', this.projectName, '--production-branch', 'main'], { cwd: this.workspacePath, timeout: 60_000, env: providerCredentialEnv() });
       if (!createResult.success) throw new Error(`Cloudflare Pages project creation failed: ${createResult.stderr || createResult.stdout}`);
-      const deployResult = await this.runner('npx', ['wrangler', 'pages', 'deploy', this.distPath, '--project-name', this.projectName], { cwd: this.workspacePath, timeout: 180_000 });
+      const deployResult = await this.runner('npx', ['wrangler', 'pages', 'deploy', this.distPath, '--project-name', this.projectName], { cwd: this.workspacePath, timeout: 180_000, env: providerCredentialEnv() });
       if (!deployResult.success) throw new Error(`Cloudflare Pages deployment failed: ${deployResult.stderr || deployResult.stdout}`);
     }
     return { providerId: this.providerId, idempotencyKey: plan.idempotencyKey, applied: true, state: await this.discover() };

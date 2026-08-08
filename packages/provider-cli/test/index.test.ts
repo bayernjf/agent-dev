@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { GitHubAdapter, VercelAdapter, CloudflareAdapter, ManualProviderAdapter, RealProviderRegistry, type CommandRunner, type CliResult } from '../src/index.js';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { GitHubAdapter, VercelAdapter, CloudflareAdapter, ManualProviderAdapter, RealProviderRegistry, getCredentialMeta, loadCredentials, saveCredentials, writeProjectResources, loadProjectResources, generateEnvFile, type CommandRunner, type CliResult } from '../src/index.js';
 
 const mockRunner = (responses: Record<string, CliResult>): CommandRunner => {
   return async (command, args) => {
@@ -165,7 +168,7 @@ describe('RealProviderRegistry', () => {
     expect(plans).toHaveLength(4);
     expect(plans.find(p => p.providerId === 'github')!.resources[0].action).toBe('create');
     expect(plans.find(p => p.providerId === 'supabase')!.resources[0].action).toBe('noop');
-    expect(plans.find(p => p.providerId === 'supabase')!.resources[0].reason).toContain('manual');
+    expect(plans.find(p => p.providerId === 'supabase')!.resources[0].reason).toContain('irreversible');
   });
 
   it('degrades to manual when CLI is not authenticated', async () => {
@@ -195,5 +198,37 @@ describe('RealProviderRegistry', () => {
       resolveContext: async () => null,
     });
     await expect(registry.plan('proj-1', {})).rejects.toThrow('No workspace context');
+  });
+});
+
+describe('local credential and resource files', () => {
+  it('writes credentials with metadata without exposing values in metadata', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-credentials-'));
+    const previous = process.env.AGENT_DEV_CREDENTIALS_PATH;
+    process.env.AGENT_DEV_CREDENTIALS_PATH = join(directory, 'credentials.txt');
+    try {
+      saveCredentials({ GITHUB_TOKEN: 'fixture-secret', OPENAI_API_KEY: 'fixture-key' });
+      expect(loadCredentials()).toEqual({ GITHUB_TOKEN: 'fixture-secret', OPENAI_API_KEY: 'fixture-key' });
+      expect(getCredentialMeta()).toMatchObject({ version: 1, keys: ['GITHUB_TOKEN', 'OPENAI_API_KEY'] });
+      await expect(readFile(join(directory, 'credentials.txt.meta.json'), 'utf8')).resolves.not.toContain('fixture-secret');
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_DEV_CREDENTIALS_PATH;
+      else process.env.AGENT_DEV_CREDENTIALS_PATH = previous;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('persists project resources and generates an application env file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-resources-'));
+    try {
+      writeProjectResources(directory, 'demo', 'project-1', 1, 'vercel', { projectId: 'prj_demo', productionUrl: 'https://demo.example' });
+      const resources = loadProjectResources(directory);
+      expect(resources?.providers.vercel).toMatchObject({ projectId: 'prj_demo' });
+      generateEnvFile(directory, { OPENAI_API_KEY: 'fixture-key' }, resources, 'demo');
+      await expect(readFile(join(directory, '.env'), 'utf8')).resolves.toContain('OPENAI_API_KEY=fixture-key');
+      await expect(readFile(join(directory, '.env'), 'utf8')).resolves.toContain('VERCEL_PROJECT_ID=prj_demo');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

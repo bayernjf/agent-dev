@@ -1,6 +1,7 @@
 import type { ProviderAdapter, ProviderPlan, ProviderPlanResource, ProviderState, ProviderVerification, ProviderDrift, ProviderApplyResult, ProviderApproval, ProviderResourceSpec } from '@agent-dev/provider-core';
 import type { CommandRunner } from './cli.js';
 import { defaultRunner, runCliJson } from './cli.js';
+import { providerCredentialEnv } from './credentials.js';
 
 type GhRepo = {
   name: string;
@@ -68,7 +69,7 @@ export class GitHubAdapter implements ProviderAdapter {
     for (const resource of plan.resources) {
       if (resource.action === 'noop') continue;
       const repoName = owner ? `${owner}/${this.projectName}` : this.projectName;
-      const result = await this.runner('gh', ['repo', 'create', repoName, '--private', '--source', this.workspacePath, '--push'], { cwd: this.workspacePath });
+      const result = await this.runner('gh', ['repo', 'create', repoName, '--private', '--source', this.workspacePath, '--push'], { cwd: this.workspacePath, env: providerCredentialEnv() });
       if (!result.success) throw new Error(`GitHub repository creation failed: ${result.stderr || result.stdout}`);
     }
     return { providerId: this.providerId, idempotencyKey: plan.idempotencyKey, applied: true, state: await this.discover() };
