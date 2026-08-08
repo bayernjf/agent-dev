@@ -7,7 +7,9 @@ import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { buildAgentExecutionPlan, discoverAgentRuntimes, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
-import { RealProviderRegistry, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials } from '@agent-dev/provider-cli';
+import { RealProviderRegistry, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
+import { DeploymentComposer, cleanupPreviewProjects } from '@agent-dev/deployment-composer';
+import type { PreviewDeploymentResult } from '@agent-dev/deployment-composer';
 import { DaemonEventBus } from './events.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
 import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
@@ -125,6 +127,12 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     delete credentials[key];
     saveCredentials(credentials);
     return context.json({ saved: true, meta: getCredentialMeta() });
+  });
+
+  app.post('/api/credentials/verify', async context => {
+    const creds = loadCredentials();
+    const results = await verifyCredentials(creds);
+    return context.json({ results });
   });
 
   app.get('/api/projects', context => context.json({ projects: store.listProjects() }));
@@ -522,6 +530,76 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!run) return context.json({ error: 'No workspace found.' }, 404);
     generateEnvFile(run.workspacePath, loadCredentials(), loadProjectResources(run.workspacePath), project.name);
     return context.json({ generated: true, workspacePath: run.workspacePath });
+  });
+
+  // --- Preview Deployment Composer ---
+
+  const previewSchema = z.object({
+    confirmation: z.literal('DEPLOY_PREVIEW'),
+    previewBranch: z.string().trim().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Branch name must be lowercase alphanumeric with hyphens.'),
+  });
+
+  app.post('/api/projects/:projectId/preview/deploy', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = previewSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Preview deployment requires confirmation DEPLOY_PREVIEW and a valid previewBranch.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    if (!run || run.status !== 'completed') return context.json({ error: 'Complete the baseline Apply before deploying a preview.' }, 409);
+
+    try {
+      const composer = new DeploymentComposer({
+        workspacePath: run.workspacePath,
+        projectName: project.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+        previewBranch: parsed.data.previewBranch,
+      });
+      const result = await composer.execute();
+      events.emit({
+        type: result.status === 'completed' ? 'preview.deployed' : 'preview.failed',
+        projectId,
+        projectName: project.name,
+        occurredAt: new Date().toISOString(),
+      });
+      return context.json({ result }, result.status === 'completed' ? 200 : 422);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to execute preview deployment.' }, 409);
+    }
+  });
+
+  app.get('/api/projects/:projectId/preview/plan', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    if (!run || run.status !== 'completed') return context.json({ error: 'Complete the baseline Apply before planning a preview.' }, 409);
+    const composer = new DeploymentComposer({
+      workspacePath: run.workspacePath,
+      projectName: project.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      previewBranch: 'preview',
+    });
+    return context.json({ steps: composer.plan(), idempotencyKey: composer.idempotencyKey });
+  });
+
+  app.post('/api/projects/:projectId/preview/cleanup', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ confirmation: z.literal('CLEANUP_PREVIEW'), vercelProject: z.string().optional(), cloudflareProject: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Preview cleanup requires confirmation CLEANUP_PREVIEW.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    if (!run) return context.json({ error: 'No workspace found.' }, 404);
+
+    try {
+      const { defaultRunner } = await import('@agent-dev/provider-cli');
+      const result = await cleanupPreviewProjects(defaultRunner, {
+        vercelProject: parsed.data.vercelProject,
+        cloudflareProject: parsed.data.cloudflareProject,
+        workspacePath: run.workspacePath,
+      });
+      return context.json({ cleanup: result });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to cleanup preview projects.' }, 409);
+    }
   });
 
   app.post('/api/projects', async context => {
