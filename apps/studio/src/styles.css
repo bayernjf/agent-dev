@@ -60,3 +60,23 @@ button, input, textarea { font: inherit; } button { cursor: pointer; }
 .agent-form .primary-button { width: auto; justify-self: start; padding: 0 13px; }
 .agent-caps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .agent-cap { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; color: #475c70; background: #e9eef2; text-transform: lowercase; }
+.credential-panel { border: 1px solid #d4ddd5; border-radius: 6px; background: #fff; padding: 20px; }
+.credential-panel code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #4d5d52; }
+.credential-list { display: grid; gap: 10px; margin-top: 12px; }
+.credential-item { border: 1px solid #e2e7e2; border-radius: 5px; padding: 11px; display: grid; gap: 6px; }
+.credential-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.credential-header strong { font-size: 12px; color: #35453a; }
+.credential-status { flex: 0 0 auto; padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+.credential-status.connected { color: #286b43; background: #e5f2e8; }
+.credential-status.missing { color: #9c4d17; background: #fff0df; }
+.credential-hint { color: #68746d; font-size: 11px; line-height: 1.4; }
+.credential-tutorial { color: #286b43; font-size: 11px; font-weight: 600; text-decoration: none; }
+.credential-tutorial:hover { text-decoration: underline; }
+.credential-input { width: 100%; box-sizing: border-box; border: 1px solid #d4ddd5; border-radius: 4px; padding: 8px 10px; color: #35453a; background: #fff; font: inherit; font-size: 12px; }
+.credential-delete { width: auto; padding: 5px 10px; font-size: 11px; justify-self: start; }
+.credential-updated { display: block; margin-top: 8px; color: #7a867d; font-size: 10px; }
+.credential-resources { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2e7e2; }
+.credential-resources .resource-list { display: grid; gap: 6px; margin: 8px 0 10px; }
+.resource-item { display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid #e2e7e2; border-radius: 4px; background: #f8faf7; }
+.resource-item strong { font-size: 11px; color: #35453a; text-transform: capitalize; }
+.resource-item code { font-size: 10px; overflow-wrap: anywhere; }

@@ -5,10 +5,15 @@ import { CloudflareAdapter } from './cloudflare.js';
 import { ManualProviderAdapter } from './manual.js';
 import type { CommandRunner } from './cli.js';
 import { defaultRunner } from './cli.js';
+import { generateEnvFile } from './env-generator.js';
+import { loadCredentials, providerCredentialEnv } from './credentials.js';
+import { loadProjectResources, writeProjectResources } from './project-resources.js';
 
 export type ProviderContext = {
   workspacePath: string;
   projectName: string;
+  projectId?: string;
+  blueprintRevision?: number;
 };
 
 export type RealProviderOptions = {
@@ -17,7 +22,7 @@ export type RealProviderOptions = {
   supabaseReason?: string;
 };
 
-const DEFAULT_SUPABASE_REASON = 'Supabase is intentionally manual because its CLI writes state outside the project boundary. Create the project through the Supabase dashboard and enter the organization in the Blueprint.';
+const DEFAULT_SUPABASE_REASON = 'Supabase manages irreversible data resources (database, auth, RLS). Create the project through the Supabase dashboard, then enter the project URL and keys in the Credentials panel so Agent-Dev can wire them into the environment.';;
 
 type AdapterFactory = (spec: ProviderResourceSpec, ctx: ProviderContext, runner: CommandRunner) => ProviderAdapter;
 
@@ -64,7 +69,7 @@ export class RealProviderRegistry {
     if (cached !== undefined) return cached;
     const config = ADAPTER_FACTORIES[providerId];
     if (!config) return true;
-    const result = await this.runner(config.checkCommand[0], config.checkCommand[1], { timeout: 15_000 });
+    const result = await this.runner(config.checkCommand[0], config.checkCommand[1], { timeout: 15_000, env: providerCredentialEnv() });
     const available = config.checkResult ? config.checkResult(result) : result.success;
     this.cliAvailability.set(providerId, available);
     return available;
@@ -103,7 +108,9 @@ export class RealProviderRegistry {
         const spec = specs[plan.providerId]?.[0];
         if (!spec) throw new Error(`No spec found for provider ${plan.providerId}.`);
         const adapter = await this.createAdapter(plan.providerId, spec, ctx);
-        return adapter.apply(plan, approval);
+        const result = await adapter.apply(plan, approval);
+        if (ctx.projectId && ctx.blueprintRevision) writeProjectResources(ctx.workspacePath, ctx.projectName, ctx.projectId, ctx.blueprintRevision, plan.providerId, result.state as unknown as Record<string, unknown>);
+        return result;
       }),
     );
     const results: ProviderApplyResult[] = [];
@@ -124,6 +131,7 @@ export class RealProviderRegistry {
     if (errors.length > 0) {
       console.warn(`Provider apply partial failures: ${errors.join('; ')}`);
     }
+    generateEnvFile(ctx.workspacePath, loadCredentials(), loadProjectResources(ctx.workspacePath), ctx.projectName);
     return results;
   }
 

@@ -6,8 +6,8 @@ import { blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryR
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { buildCodexExecutionPlan, discoverAgentRuntimes, probeCodexRuntime, type CustomAgentInput } from '@agent-dev/agent-runtime';
-import { RealProviderRegistry } from '@agent-dev/provider-cli';
+import { buildAgentExecutionPlan, discoverAgentRuntimes, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
+import { RealProviderRegistry, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials } from '@agent-dev/provider-cli';
 import { DaemonEventBus } from './events.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
 import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
@@ -74,6 +74,8 @@ const customAgentSchema = z.object({
   launchCommand: z.string().trim().min(1).max(200),
 });
 
+const credentialsSchema = z.record(z.string().regex(/^[A-Z][A-Z0-9_]*$/), z.string().min(1).max(10_000));
+
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
@@ -91,7 +93,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       if (!project) return null;
       const run = store.getLatestApplyRun(projectId, project.blueprint.metadata.revision);
       if (!run || run.status !== 'completed') return null;
-      return { workspacePath: run.workspacePath, projectName: project.name };
+      return { workspacePath: run.workspacePath, projectName: project.name, projectId, blueprintRevision: project.blueprint.metadata.revision };
     },
   });
 
@@ -106,6 +108,24 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.get('/api/connectors/discovery', async context =>
     context.json(await (dependencies.runAccountDiscovery ?? runAccountDiscovery)()),
   );
+
+  app.get('/api/credentials', context => context.json({ meta: getCredentialMeta() }));
+
+  app.post('/api/credentials', async context => {
+    const parsed = credentialsSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Credentials must be an object of uppercase key/value pairs.' }, 400);
+    saveCredentials({ ...loadCredentials(), ...parsed.data });
+    return context.json({ saved: true, meta: getCredentialMeta() });
+  });
+
+  app.delete('/api/credentials/:key', context => {
+    const key = context.req.param('key');
+    const credentials = loadCredentials();
+    if (!(key in credentials)) return context.json({ error: 'Credential not found.' }, 404);
+    delete credentials[key];
+    saveCredentials(credentials);
+    return context.json({ saved: true, meta: getCredentialMeta() });
+  });
 
   app.get('/api/projects', context => context.json({ projects: store.listProjects() }));
 
@@ -241,6 +261,14 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.get('/api/runtime/probe', context => context.json({ probe: probeCodexRuntime() }));
 
+  app.get('/api/runtime/probe/:agentId', context => {
+    const agentId = context.req.param('agentId');
+    const catalog = discoverAgentRuntimes(customAgents);
+    const agent = catalog.find(a => a.id === agentId);
+    if (!agent) return context.json({ error: 'Agent not found in catalog.' }, 404);
+    return context.json({ probe: probeAgentCapabilities(agent.id, agent.launchCommand), executable: isAgentExecutable(agent.id) });
+  });
+
   app.get('/api/runtime/catalog', context => context.json({ agents: discoverAgentRuntimes(customAgents) }));
 
   app.post('/api/runtime/catalog', async context => {
@@ -257,7 +285,10 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     const task = await store.getFeatureTask(project.id, project.blueprint.metadata.revision);
     if (!task || task.status !== 'approved') return context.json({ error: 'Approve a Feature Task before preparing a Runtime plan.' }, 409);
-    return context.json({ probe: probeCodexRuntime(), plan: buildCodexExecutionPlan(task, task.workspacePath), run: await store.getRuntimeRun(project.id, project.blueprint.metadata.revision) });
+    const run = await store.getRuntimeRun(project.id, project.blueprint.metadata.revision);
+    const agentId = run?.agentId ?? 'codex';
+    const plan = isAgentExecutable(agentId) ? buildAgentExecutionPlan(task, task.workspacePath, agentId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
+    return context.json({ probe: probeCodexRuntime(), plan, run });
   });
 
   app.post('/api/projects/:projectId/runtime/run', async context => {
@@ -270,9 +301,10 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       const agent = catalog.find(a => a.id === body.agentId);
       if (!agent) return context.json({ error: 'The selected Agent was not found in the catalog.' }, 404);
       if (!agent.detected) return context.json({ error: `Agent "${agent.name}" is not detected on PATH.` }, 409);
+      if (!isAgentExecutable(agent.id)) return context.json({ error: `Agent "${agent.name}" is detected, but does not have a verified non-interactive execution adapter.` }, 409);
     }
     try {
-      const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision);
+      const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision, body.agentId ?? 'codex');
       return context.json({ run, probe: probeCodexRuntime() }, 201);
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to prepare the Runtime run.' }, 409);
@@ -474,6 +506,22 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to verify real providers.' }, 409);
     }
+  });
+
+  app.get('/api/projects/:projectId/resources', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    return context.json({ resources: run ? loadProjectResources(run.workspacePath) : null });
+  });
+
+  app.post('/api/projects/:projectId/env/regenerate', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    if (!run) return context.json({ error: 'No workspace found.' }, 404);
+    generateEnvFile(run.workspacePath, loadCredentials(), loadProjectResources(run.workspacePath), project.name);
+    return context.json({ generated: true, workspacePath: run.workspacePath });
   });
 
   app.post('/api/projects', async context => {

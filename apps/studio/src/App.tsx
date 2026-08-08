@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles,
+  Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, KeyRound, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles,
 } from 'lucide-react';
 import { getBlueprintDecisions, type BaselinePlan, type BlueprintAnswers, type DryRunPlan, type ProductBlueprint } from '@agent-dev/blueprint';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
@@ -24,12 +24,21 @@ type QualityGateResult = { status: 'passed' | 'failed'; command: string; exitCod
 type DependencyInstallResult = { status: 'installed' | 'failed'; exitCode: number; output: string; completedAt: string };
 type FeatureTask = { id: string; blueprintRevision: number; title: string; objective: string; acceptanceCriteria: string[]; status: 'draft' | 'approved'; approvedBy?: string; approvedAt?: string };
 type RuntimeAttempt = { attempt: number; status: 'running' | 'completed' | 'failed'; startedAt: string; completedAt?: string; result?: { exitCode: number | null; signal: string | null; timedOut: boolean; output: string } };
-type RuntimeRun = { id: string; status: 'planned' | 'running' | 'completed' | 'failed' | 'cancelled'; taskId: string; blueprintRevision: number; attempts: number; history: RuntimeAttempt[]; plan: { mode: 'dry-run' | 'execute'; executionAllowed: boolean; noExternalChanges: boolean; command: string[] }; result?: { exitCode: number | null; signal: string | null; timedOut: boolean; output: string } };
+type RuntimeRun = { id: string; status: 'planned' | 'running' | 'completed' | 'failed' | 'cancelled'; taskId: string; blueprintRevision: number; agentId: string; attempts: number; history: RuntimeAttempt[]; plan: { mode: 'dry-run' | 'execute'; executionAllowed: boolean; noExternalChanges: boolean; command: string[] }; result?: { exitCode: number | null; signal: string | null; timedOut: boolean; output: string } };
 type GitEvidence = { branch: string; head: string; status: string; diffStat: string };
 type AcceptanceRecord = { status: 'blocked' | 'ready' | 'approved'; summary: string; criteriaConfirmed: boolean; qualityStatus: 'passed' | 'failed' | 'missing'; approvedBy?: string; approvedAt?: string };
 type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
 type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
 type AgentDescriptor = { id: string; name: string; source: 'built-in' | 'custom'; launchCommand: string; detected: boolean; version: string | null; detail: string; capabilities: string[] };
+type CredentialMeta = { version: 1; updatedAt: string; keys: string[] };
+type ProjectResources = { version: number; projectName: string; projectId: string; blueprintRevision: number; updatedAt: string; providers: Record<string, Record<string, unknown>> } | null;
+
+const PROVIDER_FIELDS = [
+  { key: 'GITHUB_TOKEN', label: 'GitHub Token', tutorial: 'https://github.com/settings/tokens', hint: 'Generate a classic token with repo and workflow scopes.' },
+  { key: 'VERCEL_TOKEN', label: 'Vercel Token', tutorial: 'https://vercel.com/account/tokens', hint: 'Create a token with Full Account scope.' },
+  { key: 'CLOUDFLARE_API_TOKEN', label: 'Cloudflare API Token', tutorial: 'https://dash.cloudflare.com/profile/api-tokens', hint: 'Use the Edit Cloudflare Workers template.' },
+  { key: 'SUPABASE_ACCESS_TOKEN', label: 'Supabase Access Token', tutorial: 'https://supabase.com/dashboard/account/tokens', hint: 'Generate a new access token.' },
+] as const;
 
 const defaultAnswers: BlueprintAnswers = {
   mode: 'beginner',
@@ -110,6 +119,11 @@ export function App() {
   const [customAgentName, setCustomAgentName] = useState('');
   const [customAgentCommand, setCustomAgentCommand] = useState('');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [credentialMeta, setCredentialMeta] = useState<CredentialMeta | null>(null);
+  const [credentialInputs, setCredentialInputs] = useState<Record<string, string>>({});
+  const [savingCredentials, setSavingCredentials] = useState(false);
+  const [projectResources, setProjectResources] = useState<ProjectResources>(null);
+  const [regeneratingEnv, setRegeneratingEnv] = useState(false);
 
   const decisions = useMemo(() => selected ? getBlueprintDecisions(selected.blueprint) : [], [selected]);
   const selectedArtifact = useMemo(
@@ -150,6 +164,7 @@ export function App() {
       void loadAcceptance(projectId);
       void loadFinalDeliveryReport(projectId);
       void loadProviderPlan(projectId);
+      void loadProjectResources(projectId);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load this Blueprint.');
@@ -328,6 +343,76 @@ export function App() {
       setError(cause instanceof Error ? cause.message : 'Unable to register the custom Agent.');
     } finally {
       setSavingAgent(false);
+    }
+  };
+
+  const loadCredentials = async () => {
+    try {
+      const response = await fetch('/api/credentials');
+      if (!response.ok) throw new Error('Unable to load credential status.');
+      const payload = await response.json() as { meta: CredentialMeta };
+      setCredentialMeta(payload.meta);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load credential status.');
+    }
+  };
+
+  const saveCredentialValues = async () => {
+    const entries = Object.entries(credentialInputs).filter(([, value]) => value.trim().length > 0);
+    if (entries.length === 0) { setError('Fill in at least one token before saving.'); return; }
+    setSavingCredentials(true);
+    try {
+      const response = await fetch('/api/credentials', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(entries.map(([key, value]) => [key, value.trim()]))),
+      });
+      const payload = await response.json() as { saved?: boolean; meta?: CredentialMeta; error?: string };
+      if (!response.ok || !payload.saved) throw new Error(payload.error ?? 'Unable to save credentials.');
+      setCredentialMeta(payload.meta ?? null);
+      setCredentialInputs({});
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to save credentials.');
+    } finally {
+      setSavingCredentials(false);
+    }
+  };
+
+  const deleteCredential = async (key: string) => {
+    if (!window.confirm(`Delete ${key} from the local credential file?`)) return;
+    try {
+      const response = await fetch(`/api/credentials/${key}`, { method: 'DELETE' });
+      const payload = await response.json() as { saved?: boolean; meta?: CredentialMeta; error?: string };
+      if (!response.ok || !payload.saved) throw new Error(payload.error ?? 'Unable to delete credential.');
+      setCredentialMeta(payload.meta ?? null);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to delete credential.');
+    }
+  };
+
+  const loadProjectResources = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/resources`);
+      if (!response.ok) throw new Error('Unable to load project resources.');
+      const payload = await response.json() as { resources: ProjectResources };
+      setProjectResources(payload.resources);
+    } catch {
+      setProjectResources(null);
+    }
+  };
+
+  const regenerateEnv = async () => {
+    if (!selected) return;
+    setRegeneratingEnv(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/env/regenerate`, { method: 'POST' });
+      if (!response.ok) throw new Error('Unable to regenerate .env.');
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to regenerate .env.');
+    } finally {
+      setRegeneratingEnv(false);
     }
   };
 
@@ -698,6 +783,7 @@ export function App() {
   useEffect(() => {
     void loadProjects();
     void loadAgents();
+    void loadCredentials();
     const source = new EventSource('/events');
     const onEvent = (event: Event) => {
       const payload = JSON.parse((event as MessageEvent<string>).data) as { type: string; projectId: string; projectName: string; occurredAt: string };
@@ -770,6 +856,7 @@ export function App() {
           <a className="nav-item active" href="#projects"><FolderKanban size={18} aria-hidden="true" />Projects</a>
           <a className="nav-item" href="#decisions"><ShieldCheck size={18} aria-hidden="true" />Decisions</a>
           <a className="nav-item" href="#connections"><PlugZap size={18} aria-hidden="true" />Connections</a>
+          <a className="nav-item" href="#credentials"><KeyRound size={18} aria-hidden="true" />Credentials</a>
           <a className="nav-item" href="#agents"><CircleDot size={18} aria-hidden="true" />Agents</a>
           <a className="nav-item" href="#activity"><Activity size={18} aria-hidden="true" />Activity</a>
           <a className="nav-item" href="#standards"><Settings2 size={18} aria-hidden="true" />Standards</a>
@@ -889,6 +976,58 @@ export function App() {
               {accountDiscovery && <div className="discovery-list">{accountDiscovery.accounts.map(account => <article className="connector" key={account.id}>
                 <div><h3>{account.title}</h3><p>{account.identity ?? 'No identity returned'}</p><small>{account.detail}</small><em>{account.nextAction}</em></div><span className={`connector-status ${account.status}`}>{account.status === 'authenticated' ? 'Authenticated' : account.status === 'manual' ? 'Manual' : account.status === 'missing' ? 'Install required' : 'Sign in required'}</span>
               </article>)}</div>}
+            </section>
+            <section className="credential-panel" id="credentials">
+              <div className="panel-title"><div><p className="eyebrow">Local only</p><h2>Credentials</h2></div><KeyRound size={19} aria-hidden="true" /></div>
+              <p className="form-note">Tokens are stored only in <code>~/.agent-dev/credentials.txt</code> on your machine. They are never uploaded to any server.</p>
+              <div className="credential-list">
+                {PROVIDER_FIELDS.map(field => {
+                  const connected = credentialMeta?.keys.includes(field.key) ?? false;
+                  return (
+                    <article className="credential-item" key={field.key}>
+                      <div className="credential-header">
+                        <strong>{field.label}</strong>
+                        <span className={`credential-status ${connected ? 'connected' : 'missing'}`}>{connected ? 'Connected' : 'Not set'}</span>
+                      </div>
+                      <small className="credential-hint">{field.hint}</small>
+                      <a className="credential-tutorial" href={field.tutorial} target="_blank" rel="noopener noreferrer">How to get this token</a>
+                      {connected ? (
+                        <button className="quiet-button credential-delete" type="button" onClick={() => void deleteCredential(field.key)}>Delete</button>
+                      ) : (
+                        <input
+                          type="password"
+                          className="credential-input"
+                          value={credentialInputs[field.key] ?? ''}
+                          onChange={event => setCredentialInputs(current => ({ ...current, [field.key]: event.target.value }))}
+                          placeholder={`Paste ${field.label}`}
+                        />
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+              <button className="primary-button" type="button" onClick={() => void saveCredentialValues()} disabled={savingCredentials}>
+                {savingCredentials ? 'Saving...' : 'Save to local'}
+                <KeyRound size={15} aria-hidden="true" />
+              </button>
+              {credentialMeta?.updatedAt && <small className="credential-updated">Last updated: {formatDate(credentialMeta.updatedAt)}</small>}
+              {selected && projectResources && (
+                <div className="credential-resources">
+                  <p className="eyebrow">Project resources</p>
+                  <div className="resource-list">
+                    {Object.entries(projectResources.providers).map(([providerId, state]) => (
+                      <article className="resource-item" key={providerId}>
+                        <strong>{providerId}</strong>
+                        <code>{'url' in state ? String(state.url) : 'projectId' in state ? String(state.projectId) : 'projectRef' in state ? String(state.projectRef) : 'created'}</code>
+                      </article>
+                    ))}
+                  </div>
+                  <button className="secondary-button" type="button" onClick={() => void regenerateEnv()} disabled={regeneratingEnv}>
+                    {regeneratingEnv ? 'Regenerating...' : 'Regenerate .env'}
+                    <RefreshCw size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              )}
             </section>
             <section className="agent-catalog-panel" id="agents">
               <div className="panel-title"><div><p className="eyebrow">Local runtime</p><h2>Agent Catalog</h2></div><button className="icon-button" type="button" onClick={() => void loadAgents()} disabled={loadingAgents} aria-label="Refresh agents" title="Refresh agents"><RefreshCw size={17} /></button></div>
