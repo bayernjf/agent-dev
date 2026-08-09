@@ -22,7 +22,7 @@
 - Agent 检测采用打开 Studio 时一次检测 + 用户点击刷新按钮主动检测，不做实时监控、文件监听或后台轮询。
 - 当前本机 CLI 状态：`gh`、`vercel`、`codex`、项目本地 `wrangler@4.120.0` 已安装；`supabase` 未安装。Wrangler OAuth 已授权。
 - 2026-08-09 真实双 Preview 尝试：Cloudflare OAuth 已授权；Vercel 临时项目可创建且部署状态为 `READY`，项目级 `ssoProtection/passwordProtection` 均已置空，但 `*.vercel.app` 公网域名在当前网络连续返回超时/ECONNREFUSED；每次 Vercel 临时项目均已自动清理，Cloudflare 项目未创建。需要在可访问 Vercel Deployment Domain 的网络重新验证。
-- 最近验证：`npm run typecheck`、`npm test`、`npm run build` 均应作为本地验收门槛；本轮改动新增 GitHub token 注入、Provider cache invalidation、Cloudflare CLI URL evidence 的回归覆盖。真实云端写操作未在本轮运行。
+- 最近验证：`npm run typecheck`、`npm test`、`npm run build` 均应作为本地验收门槛；`npm test` 最近一次为 13 个测试文件、58 个用例全通过。本轮新增 GitHub token 注入、Provider cache invalidation、Cloudflare CLI URL evidence 的回归覆盖；真实云端尝试的完整边界见下一条。
 - 当前工作分支：`feature/20260802`，开始本轮修复时与 `origin/feature/20260802` 一致；提交前应重新确认状态。
 
 ## 1. 项目摘要

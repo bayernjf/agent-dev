@@ -103,7 +103,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 当前阻塞：
 
 - 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；真实功能任务已能启动并产生隔离 workspace 改动，首个任务在 180 秒上限内超时并被正确记录；失败重试和 attempt 历史已实现，但真正的 Codex session resume 仍未接入；
-- Deployment Composer 已包含 Vercel Deployment Protection 关闭、精确 CORS、Cloudflare Pages URL 证据和清理逻辑；本机仍缺 Wrangler，Cloudflare/Vercel 联合 Preview 尚未在当前环境重新执行；
+- Deployment Composer 已包含 Vercel Deployment Protection 关闭、精确 CORS、Cloudflare Pages URL 证据和清理逻辑；本机已安装并授权 Wrangler。真实尝试确认当前网络无法访问新建 `*.vercel.app` Deployment Domain，因此 Cloudflare/Vercel 联合 Preview 尚未在当前环境完成；
 - Supabase CLI 的本地状态目录与当前文件边界冲突，Auth Redirect 尚未进行真实平台验证。
 
 事实、降级候选和下一项 Gate 见 [Phase 0 技术 Spike 状态](docs/spikes/README.md)。文档中的 `v0.1` 是计划目标，不代表对应连接器和交付能力已经实现。
