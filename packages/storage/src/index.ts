@@ -152,6 +152,19 @@ export type GitEvidence = {
   diffStat: string;
 };
 
+export type PrEvidence = {
+  url: string;
+  checks: string[];
+  recordedAt: string;
+};
+
+export type PreviewEvidence = {
+  apiUrl: string;
+  webUrl: string;
+  smokeTest: string;
+  recordedAt: string;
+};
+
 export type AcceptanceRecord = {
   id: string;
   projectId: string;
@@ -793,6 +806,36 @@ export class AgentDevStore {
     // Local approval closes implementation and local verification only. A real
     // PR, Preview, and production release remain provider-evidenced steps.
     await this.advanceDelivery(projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }, { type: 'VERIFY_COMPLETE' }]);
+    return record;
+  }
+
+  async recordPrEvidence(projectId: string, blueprintRevision: number, evidence: Omit<PrEvidence, 'recordedAt'>): Promise<PrEvidence> {
+    const project = this.getProject(projectId);
+    if (!project || project.blueprint.metadata.revision !== blueprintRevision) throw new Error('PR evidence must target the current Blueprint revision.');
+    if (project.state !== 'LOCAL_ACCEPTED') throw new Error(`PR evidence requires LOCAL_ACCEPTED state, current state is ${project.state}.`);
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before recording PR evidence.');
+    const record: PrEvidence = { ...evidence, recordedAt: new Date().toISOString() };
+    await writeFile(join(run.workspacePath, 'pr-evidence.json'), JSON.stringify(record, null, 2) + '\n', 'utf8');
+    await writeFile(join(run.workspacePath, 'PR_EVIDENCE.md'), `# Pull Request Evidence\n\n- URL: ${record.url}\n- Recorded: ${record.recordedAt}\n\n## Checks\n\n${record.checks.map(check => `- ${check}`).join('\n')}\n\nThis record proves a PR reference was supplied. GitHub review and Actions remain external evidence.\n`, 'utf8');
+    await execFileAsync('git', ['add', 'pr-evidence.json', 'PR_EVIDENCE.md'], { cwd: run.workspacePath });
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', 'delivery: record PR evidence'], { cwd: run.workspacePath });
+    await this.advanceDelivery(projectId, [{ type: 'PR_CREATED' }]);
+    return record;
+  }
+
+  async recordPreviewEvidence(projectId: string, blueprintRevision: number, evidence: Omit<PreviewEvidence, 'recordedAt'>): Promise<PreviewEvidence> {
+    const project = this.getProject(projectId);
+    if (!project || project.blueprint.metadata.revision !== blueprintRevision) throw new Error('Preview evidence must target the current Blueprint revision.');
+    if (project.state !== 'PR_OPEN') throw new Error(`Preview evidence requires PR_OPEN state, current state is ${project.state}.`);
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before recording Preview evidence.');
+    const record: PreviewEvidence = { ...evidence, recordedAt: new Date().toISOString() };
+    await writeFile(join(run.workspacePath, 'preview-evidence.json'), JSON.stringify(record, null, 2) + '\n', 'utf8');
+    await writeFile(join(run.workspacePath, 'PREVIEW_EVIDENCE.md'), `# Preview Evidence\n\n- API URL: ${record.apiUrl}\n- Web URL: ${record.webUrl}\n- Recorded: ${record.recordedAt}\n\n## Smoke test\n\n${record.smokeTest}\n\nThis record proves Preview evidence was supplied. Production deployment remains a separate approved step.\n`, 'utf8');
+    await execFileAsync('git', ['add', 'preview-evidence.json', 'PREVIEW_EVIDENCE.md'], { cwd: run.workspacePath });
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', 'delivery: record preview evidence'], { cwd: run.workspacePath });
+    await this.advanceDelivery(projectId, [{ type: 'PREVIEW_AVAILABLE' }]);
     return record;
   }
 

@@ -25,6 +25,7 @@
 - 2026-08-09 真实 Feature Task 验证：隔离 workspace 已完成 Local Apply、依赖安装、Quality Gate 和 Codex execute（退出码 0）；`/api/health` 返回 200，Runtime/Git Evidence 已写入 Local Delivery Report。该最小任务发现基线已满足要求，未产生源码 diff，且刻意停在 Human Acceptance 前；下一次应验证一个必然产生 Git diff 的真实功能。
 - 2026-08-10 Acceptance Gate 与 Delivery State 已对齐：本地人工验收批准会使状态机从 `IMPLEMENTING` 经 `VERIFYING` 进入 `LOCAL_ACCEPTED`。该状态明确不代表 PR、Preview 或生产发布；这些仍需 Provider Evidence 和独立人工批准。
 - 2026-08-10 Agent Capability Probe 已明确 Adapter 状态：`verified`、`candidate`、`unsupported`。当前仅 Codex 为 `verified`；其他已发现 Agent 只能生成 dry-run，不能执行。
+- 2026-08-10 已增加交付证据推进 API：`POST /api/projects/:projectId/delivery/pr-evidence` 将 `LOCAL_ACCEPTED` 推进到 `PR_OPEN`；`POST .../delivery/preview-evidence` 将 `PR_OPEN` 推进到 `PREVIEW_READY`。两者都会在隔离 workspace 写入 JSON/Markdown 证据并提交本地 Git，不能代表生产发布。
 - 最近验证：`npm test`、`npm run typecheck`、`npm run build` 均已通过；`npm test` 最近一次为 13 个测试文件、61 个用例全通过。Vitest 文件级测试已串行执行，因为 Agent Catalog 会探测本机 CLI，并发探测会造成同步子进程超时假失败。本轮还覆盖 GitHub token 注入、Provider cache invalidation、Cloudflare CLI URL evidence、未验证 Agent 执行阻断和 Adapter 状态展示；真实云端尝试的完整边界见上一条。
 - 当前工作分支：`feature/20260802`，开始本轮修复时与 `origin/feature/20260802` 一致；提交前应重新确认状态。
 
@@ -57,7 +58,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 真实 Provider Adapter | GitHub/Vercel/Cloudflare 真实 CLI 接入已验证；Supabase Manual 降级已验证；RealProviderRegistry 统一编排，支持 CLI 可用性自动检测和 Manual 降级；Promise.allSettled 部分失败处理 |
 | 凭证管理方案 | Phase 1 + Phase 2 已实现（详见 [凭证管理方案](docs/credential-management.md)）。凭证/元数据写入 Agent-Dev `.agent-dev` 目录，项目资源清单写入 workspace `.agent-dev`，自动生成 `.env`；Studio 凭证面板（引导模式 + 验证 + Supabase 手动配置 + 自定义 Key）已完成 |
 | Dual Preview 部署编排 | `packages/deployment-composer` 已实现：7 步幂等编排（含 Vercel SSO Protection 关闭）、精确 CORS origin、临时项目清理、Daemon Preview API 和 Studio 部署区块；证据会区分 Wrangler 实测 URL 与推导兜底 URL；仍需在具备 Provider CLI 的机器上重新跑 Composer 全链路 |
-| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、固定 Web SaaS 模板、隔离工作区 Git baseline、Feature Task 与人工 Approval、Codex Runtime dry-run/Execute/Retry、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、Local Apply Simulator、XState 状态推进、Fake Provider Adapter、真实 Provider Adapter（GitHub/Vercel/Cloudflare）及 Studio 展示、凭证管理 UI（含验证和引导）、Dual Preview 部署编排；Agent Catalog 已支持 Key-Value 内置目录、Studio 选择、Custom Agent 弹窗和 `.agent-dev/agents.conf` 持久化、刷新检测和只读 Capability Probe 展示；内置未安装项隐藏、custom 未安装项置灰；多 Agent 真实执行 Adapter、Supabase 真实自动接入尚未实现 |
+| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、固定 Web SaaS 模板、隔离工作区 Git baseline、Feature Task 与人工 Approval、Codex Runtime dry-run/Execute/Retry、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、Local Apply Simulator、XState 状态推进（含 `LOCAL_ACCEPTED`）、PR/Preview 证据推进 API、Fake Provider Adapter、真实 Provider Adapter（GitHub/Vercel/Cloudflare）及 Studio 展示、凭证管理 UI（含验证和引导）、Dual Preview 部署编排；Agent Catalog 已支持 Key-Value 内置目录、Studio 选择、Custom Agent 弹窗和 `.agent-dev/agents.conf` 持久化、刷新检测和只读 Capability Probe 展示；内置未安装项隐藏、custom 未安装项置灰；多 Agent 真实执行 Adapter、Supabase 真实自动接入尚未实现 |
 | 测试、构建和部署 | 本地单元测试与 Studio build 已通过；真实云端部署已通过 GitHub 仓库创建 + Vercel 部署 + Cloudflare Pages 部署验证 |
 
 不要把文档中的设计描述为已实现能力。

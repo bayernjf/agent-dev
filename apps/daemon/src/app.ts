@@ -71,6 +71,19 @@ const acceptanceApprovalSchema = z.object({
   approvedBy: z.string().trim().min(1).max(120).default('local-user'),
 });
 
+const prEvidenceSchema = z.object({
+  confirmation: z.literal('RECORD_PR_EVIDENCE'),
+  url: z.string().url(),
+  checks: z.array(z.string().trim().min(1).max(300)).min(1).max(20),
+});
+
+const previewEvidenceSchema = z.object({
+  confirmation: z.literal('RECORD_PREVIEW_EVIDENCE'),
+  apiUrl: z.string().url(),
+  webUrl: z.string().url(),
+  smokeTest: z.string().trim().min(10).max(2000),
+});
+
 const customAgentSchema = z.object({
   name: z.string().trim().min(1).max(80),
   launchCommand: z.string().trim().min(1).max(200),
@@ -411,6 +424,32 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       return context.json({ acceptance });
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to approve delivery.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/delivery/pr-evidence', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const parsed = prEvidenceSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'PR evidence requires RECORD_PR_EVIDENCE, a URL, and at least one check.' }, 400);
+    try {
+      const evidence = await store.recordPrEvidence(project.id, project.blueprint.metadata.revision, { url: parsed.data.url, checks: parsed.data.checks });
+      return context.json({ evidence, project: store.getProject(project.id) });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to record PR evidence.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/delivery/preview-evidence', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const parsed = previewEvidenceSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Preview evidence requires RECORD_PREVIEW_EVIDENCE, API and Web URLs, and a smoke-test note.' }, 400);
+    try {
+      const evidence = await store.recordPreviewEvidence(project.id, project.blueprint.metadata.revision, { apiUrl: parsed.data.apiUrl, webUrl: parsed.data.webUrl, smokeTest: parsed.data.smokeTest });
+      return context.json({ evidence, project: store.getProject(project.id) });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to record Preview evidence.' }, 409);
     }
   });
 
