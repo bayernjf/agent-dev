@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCodexExecutionPlan, executeCodexPlan, probeCodexRuntime } from '../src/index.js';
+import { buildAgentExecutionPlan, buildCodexExecutionPlan, executeCodexPlan, isAgentExecutable, probeCodexRuntime } from '../src/index.js';
 
 describe('Local Codex Runtime', () => {
   it('builds a non-executing sandboxed plan for an approved task', () => {
@@ -31,5 +31,13 @@ describe('Local Codex Runtime', () => {
       return { exitCode: 0, signal: null, timedOut: false, output: '{"type":"turn.completed"}', startedAt: '2026-08-07T00:00:00.000Z', completedAt: '2026-08-07T00:00:01.000Z' };
     });
     expect(result).toMatchObject({ exitCode: 0, timedOut: false });
+  });
+
+  it('allows candidate adapters to prepare a dry-run but blocks execution', () => {
+    const task = { id: 'task-4', title: 'Add status', objective: 'Show status.', acceptanceCriteria: ['Status renders.'] };
+    const plan = buildAgentExecutionPlan(task, '/tmp/agent-task', 'claude-code');
+    expect(plan).toMatchObject({ mode: 'dry-run', executionAllowed: false });
+    expect(isAgentExecutable('claude-code')).toBe(false);
+    expect(() => buildAgentExecutionPlan(task, '/tmp/agent-task', 'claude-code', { execute: true })).toThrow('has not passed execution verification');
   });
 });

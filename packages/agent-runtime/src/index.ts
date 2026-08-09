@@ -66,24 +66,31 @@ export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: strin
   };
 }
 
-const AGENT_COMMAND_BUILDERS: Record<string, (prompt: string, workspacePath: string) => string[]> = {
-  codex: (prompt, cwd) => ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', cwd, prompt],
-  'claude-code': (prompt, cwd) => ['claude', '-p', prompt, '--allowedTools', 'Read,Write,Edit,Bash', '--cwd', cwd],
-  aider: (prompt, cwd) => ['aider', '--message', prompt, '--yes', '--cwd', cwd],
-  opencode: (prompt, cwd) => ['opencode', '-p', prompt, '--cwd', cwd],
-  openclaw: (prompt, cwd) => ['openclaw', 'exec', '--json', '--sandbox', 'workspace-write', '--cd', cwd, prompt],
+type AgentAdapter = {
+  buildCommand: (prompt: string, workspacePath: string) => string[];
+  status: 'verified' | 'candidate';
+};
+
+const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
+  // Codex is the only adapter with a locally exercised execution contract.
+  codex: { status: 'verified', buildCommand: (prompt, cwd) => ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', cwd, prompt] },
+  'claude-code': { status: 'candidate', buildCommand: (prompt, cwd) => ['claude', '-p', prompt, '--allowedTools', 'Read,Write,Edit,Bash', '--cwd', cwd] },
+  aider: { status: 'candidate', buildCommand: (prompt, cwd) => ['aider', '--message', prompt, '--yes', '--cwd', cwd] },
+  opencode: { status: 'candidate', buildCommand: (prompt, cwd) => ['opencode', '-p', prompt, '--cwd', cwd] },
+  openclaw: { status: 'candidate', buildCommand: (prompt, cwd) => ['openclaw', 'exec', '--json', '--sandbox', 'workspace-write', '--cd', cwd, prompt] },
 };
 
 export function buildAgentExecutionPlan(task: ApprovedTask, workspacePath: string, agentId: string, options: { execute?: boolean } = {}): CodexExecutionPlan {
   const execute = options.execute === true;
   const prompt = buildTaskPrompt(task);
-  const builder = AGENT_COMMAND_BUILDERS[agentId];
-  if (!builder) throw new Error(`Agent "${agentId}" does not have a verified non-interactive execution adapter.`);
+  const adapter = AGENT_ADAPTERS[agentId];
+  if (!adapter) throw new Error(`Agent "${agentId}" does not have a candidate execution adapter.`);
+  if (execute && adapter.status !== 'verified') throw new Error(`Agent "${agentId}" has a candidate adapter but has not passed execution verification.`);
   return {
     mode: execute ? 'execute' : 'dry-run',
     taskId: task.id,
     workspacePath,
-    command: builder(prompt, workspacePath),
+    command: adapter.buildCommand(prompt, workspacePath),
     forbiddenPaths: ['.env', '.env.*', '.git/config', '~/.ssh', 'production secrets'],
     acceptanceCriteria: task.acceptanceCriteria,
     noExternalChanges: !execute,
@@ -92,7 +99,7 @@ export function buildAgentExecutionPlan(task: ApprovedTask, workspacePath: strin
 }
 
 export function isAgentExecutable(agentId: string): boolean {
-  return agentId in AGENT_COMMAND_BUILDERS;
+  return AGENT_ADAPTERS[agentId]?.status === 'verified';
 }
 
 function buildTaskPrompt(task: ApprovedTask): string {
