@@ -26,6 +26,7 @@
 - 2026-08-10 Acceptance Gate 与 Delivery State 已对齐：本地人工验收批准会使状态机从 `IMPLEMENTING` 经 `VERIFYING` 进入 `LOCAL_ACCEPTED`。该状态明确不代表 PR、Preview 或生产发布；这些仍需 Provider Evidence 和独立人工批准。
 - 2026-08-10 Agent Capability Probe 已明确 Adapter 状态：`verified`、`candidate`、`unsupported`。当前仅 Codex 为 `verified`；其他已发现 Agent 只能生成 dry-run，不能执行。
 - 2026-08-10 已增加交付证据推进 API：`POST /api/projects/:projectId/delivery/pr-evidence` 将 `LOCAL_ACCEPTED` 推进到 `PR_OPEN`；`POST .../delivery/preview-evidence` 将 `PR_OPEN` 推进到 `PREVIEW_READY`。两者都会在隔离 workspace 写入 JSON/Markdown 证据并提交本地 Git，不能代表生产发布。
+- Studio 已接入上述两个证据阶段：仅在对应状态显示表单，提交后自动刷新项目状态、证据包和 Final Delivery Report。
 - 最近验证：`npm test`、`npm run typecheck`、`npm run build` 均已通过；`npm test` 最近一次为 13 个测试文件、61 个用例全通过。Vitest 文件级测试已串行执行，因为 Agent Catalog 会探测本机 CLI，并发探测会造成同步子进程超时假失败。本轮还覆盖 GitHub token 注入、Provider cache invalidation、Cloudflare CLI URL evidence、未验证 Agent 执行阻断和 Adapter 状态展示；真实云端尝试的完整边界见上一条。
 - 当前工作分支：`feature/20260802`，开始本轮修复时与 `origin/feature/20260802` 一致；提交前应重新确认状态。
 

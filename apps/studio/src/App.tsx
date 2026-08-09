@@ -117,6 +117,12 @@ export function App() {
   const [featureCriteria, setFeatureCriteria] = useState('');
   const [acceptanceSummary, setAcceptanceSummary] = useState('');
   const [criteriaConfirmed, setCriteriaConfirmed] = useState(false);
+  const [prUrl, setPrUrl] = useState('');
+  const [prChecks, setPrChecks] = useState('');
+  const [previewApiUrl, setPreviewApiUrl] = useState('');
+  const [previewWebUrl, setPreviewWebUrl] = useState('');
+  const [previewSmokeTest, setPreviewSmokeTest] = useState('');
+  const [recordingDeliveryEvidence, setRecordingDeliveryEvidence] = useState(false);
   const [agents, setAgents] = useState<AgentDescriptor[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [savingAgent, setSavingAgent] = useState(false);
@@ -301,6 +307,44 @@ export function App() {
       setFinalDeliveryReport(payload.report);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load the final delivery report.');
+    }
+  };
+
+  const recordPrEvidence = async () => {
+    if (!selected || selected.state !== 'LOCAL_ACCEPTED' || !prUrl.trim() || !prChecks.trim()) return;
+    setRecordingDeliveryEvidence(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/delivery/pr-evidence`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'RECORD_PR_EVIDENCE', url: prUrl.trim(), checks: prChecks.split('\n').map(value => value.trim()).filter(Boolean) }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? 'Unable to record PR evidence.');
+      setPrUrl(''); setPrChecks('');
+      await selectProject(selected.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to record PR evidence.');
+    } finally {
+      setRecordingDeliveryEvidence(false);
+    }
+  };
+
+  const recordPreviewEvidence = async () => {
+    if (!selected || selected.state !== 'PR_OPEN' || !previewApiUrl.trim() || !previewWebUrl.trim() || !previewSmokeTest.trim()) return;
+    setRecordingDeliveryEvidence(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/delivery/preview-evidence`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'RECORD_PREVIEW_EVIDENCE', apiUrl: previewApiUrl.trim(), webUrl: previewWebUrl.trim(), smokeTest: previewSmokeTest.trim() }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? 'Unable to record Preview evidence.');
+      setPreviewApiUrl(''); setPreviewWebUrl(''); setPreviewSmokeTest('');
+      await selectProject(selected.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to record Preview evidence.');
+    } finally {
+      setRecordingDeliveryEvidence(false);
     }
   };
 
@@ -1037,6 +1081,9 @@ export function App() {
               <div className="artifact-list">{dryRun.artifacts.map(artifact => <button className={`artifact-button ${selectedArtifact?.id === artifact.id ? 'selected' : ''}`} type="button" key={artifact.id} onClick={() => setSelectedArtifactId(artifact.id)}><strong>{artifact.title}</strong><span>{artifact.path}</span></button>)}</div>
               {selectedArtifact && <article className="artifact-preview"><div><h3>{selectedArtifact.title}</h3><p>{selectedArtifact.path}</p></div><pre>{selectedArtifact.content}</pre></article>}
             </section>}
+
+            {selected?.state === 'LOCAL_ACCEPTED' && <section className="evidence-section"><div className="section-heading"><div><p className="eyebrow">Delivery evidence</p><h2>Record Pull Request</h2><p>Supply the real PR URL and checks before opening the Preview stage.</p></div><span className="dry-run-tag">LOCAL_ACCEPTED</span></div><div className="evidence-form"><label htmlFor="pr-url">Pull Request URL</label><input id="pr-url" type="url" value={prUrl} onChange={event => setPrUrl(event.target.value)} placeholder="https://github.com/org/repo/pull/42" /><label htmlFor="pr-checks">Checks passed <small>one per line</small></label><textarea id="pr-checks" value={prChecks} onChange={event => setPrChecks(event.target.value)} placeholder="GitHub Actions: quality\nReview approved" /><button className="primary-button" type="button" onClick={() => void recordPrEvidence()} disabled={recordingDeliveryEvidence || !prUrl.trim() || !prChecks.trim()}>{recordingDeliveryEvidence ? 'Recording...' : 'Record PR evidence'}<ArrowRight size={15} aria-hidden="true" /></button></div></section>}
+            {selected?.state === 'PR_OPEN' && <section className="evidence-section"><div className="section-heading"><div><p className="eyebrow">Delivery evidence</p><h2>Record Dual Preview</h2><p>Supply both public URLs and the smoke-test result before Preview is marked ready.</p></div><span className="dry-run-tag">PR_OPEN</span></div><div className="evidence-form"><label htmlFor="preview-api-url">API Preview URL</label><input id="preview-api-url" type="url" value={previewApiUrl} onChange={event => setPreviewApiUrl(event.target.value)} placeholder="https://api-preview.vercel.app" /><label htmlFor="preview-web-url">Web Preview URL</label><input id="preview-web-url" type="url" value={previewWebUrl} onChange={event => setPreviewWebUrl(event.target.value)} placeholder="https://preview.pages.dev" /><label htmlFor="preview-smoke-test">Smoke-test result</label><textarea id="preview-smoke-test" value={previewSmokeTest} onChange={event => setPreviewSmokeTest(event.target.value)} placeholder="Page loaded and API health returned 200 with exact CORS." /><button className="primary-button" type="button" onClick={() => void recordPreviewEvidence()} disabled={recordingDeliveryEvidence || !previewApiUrl.trim() || !previewWebUrl.trim() || !previewSmokeTest.trim()}>{recordingDeliveryEvidence ? 'Recording...' : 'Record Preview evidence'}<ArrowRight size={15} aria-hidden="true" /></button></div></section>}
 
             {selected && baselinePlan && <section className="baseline-section">
               <div className="section-heading"><div><p className="eyebrow">Resource plan · Revision {baselinePlan.blueprintRevision}</p><h2>Baseline resources</h2><p>{baselinePlan.summary}</p></div><span className={`baseline-tag ${baselineApproval ? 'approved' : baselinePlan.readyForApproval ? 'ready' : 'blocked'}`}>{baselineApproval ? 'Approved' : baselinePlan.readyForApproval ? 'Ready for approval' : 'Ownership required'}</span></div>
