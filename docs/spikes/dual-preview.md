@@ -127,4 +127,4 @@ Dual Preview 联合部署编排契约已通过真实云端验证：Vercel API �
 - Studio 在 Quality Gate 通过后展示 Dual Preview 部署区块；
 - 10 个单元测试全部通过（含 SSO Protection 关闭路径的 mock fetch + `VERCEL_TOKEN` 环境变量注入）。
 
-下一步是在安装了 Vercel/Wrangler CLI 的机器上用真实云端跑通 Composer 端到端，并补充 PR 关闭时自动触发清理的编排。
+2026-08-09 已安装并授权 Wrangler，并进行了三次真实 Vercel 诊断/双 Preview 尝试：Vercel 控制面部署为 `READY`，保护字段已置空，但当前网络访问新建 `*.vercel.app` Deployment Domain 超时或 `ECONNREFUSED`；Vercel 临时项目均已清理，Cloudflare 项目未创建。下一步需在可访问 Vercel Deployment Domain 的网络重新运行；Composer 与 Spike 的健康检查已将传播重试窗口扩大到约 2 分钟。

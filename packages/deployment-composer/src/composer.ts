@@ -330,7 +330,7 @@ export class DeploymentComposer {
   }
 }
 
-async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 5): Promise<Response> {
+async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 12): Promise<Response> {
   let lastError: Error | undefined;
   for (let attempt = 0; attempt < maxRetries; attempt += 1) {
     try {
@@ -343,7 +343,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
     }
-    await new Promise(resolve => setTimeout(resolve, 4_000));
+    await new Promise(resolve => setTimeout(resolve, 10_000));
   }
   throw new Error(`Verification failed for ${new URL(url).hostname}: ${lastError?.message ?? 'unknown'}`);
 }

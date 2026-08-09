@@ -20,7 +20,8 @@
 - `35f7eaf feat: add local agent runtime catalog`：Daemon 已能探测内置 Agent，并接受名称 + 启动命令的 custom Agent 配置。
 - 当前 Agent Catalog 已迁移为 Key-Value 配置：内置目录为 `packages/agent-runtime/agents.builtin.conf`，Custom 配置为 `.agent-dev/agents.conf`；内置未安装项隐藏，Custom 未安装项置灰。
 - Agent 检测采用打开 Studio 时一次检测 + 用户点击刷新按钮主动检测，不做实时监控、文件监听或后台轮询。
-- 当前本机 CLI 状态：`gh`、`vercel`、`codex` 已安装；`wrangler`、`supabase` 未安装，因此真实 Cloudflare Preview 尚不能在本机执行。
+- 当前本机 CLI 状态：`gh`、`vercel`、`codex`、项目本地 `wrangler@4.120.0` 已安装；`supabase` 未安装。Wrangler OAuth 已授权。
+- 2026-08-09 真实双 Preview 尝试：Cloudflare OAuth 已授权；Vercel 临时项目可创建且部署状态为 `READY`，项目级 `ssoProtection/passwordProtection` 均已置空，但 `*.vercel.app` 公网域名在当前网络连续返回超时/ECONNREFUSED；每次 Vercel 临时项目均已自动清理，Cloudflare 项目未创建。需要在可访问 Vercel Deployment Domain 的网络重新验证。
 - 最近验证：`npm run typecheck`、`npm test`、`npm run build` 均应作为本地验收门槛；本轮改动新增 GitHub token 注入、Provider cache invalidation、Cloudflare CLI URL evidence 的回归覆盖。真实云端写操作未在本轮运行。
 - 当前工作分支：`feature/20260802`，开始本轮修复时与 `origin/feature/20260802` 一致；提交前应重新确认状态。
 
@@ -159,7 +160,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 
 1. ✅ ~~实现凭证管理 Phase 2~~：已于 2026-08-08 完成（Studio 凭证面板 + 引导模式 + 凭证验证 + Supabase 手动配置）；
 2. ✅ ~~将 Dual Preview 部署编排实现为幂等 Step~~：已于 2026-08-09 完成（`packages/deployment-composer`，精确 CORS + 临时项目清理）；
-3. 用真实云端跑通 Deployment Composer 端到端，验证 Studio 部署区块 → Daemon → Vercel/Cloudflare 的完整链路，并确认资源清单中的外部 ID/URL 与 Provider 控制台一致；
+3. 在可访问 Vercel Deployment Domain 的网络重新跑 Deployment Composer 端到端，验证 Studio 部署区块 → Daemon → Vercel/Cloudflare 的完整链路，并确认资源清单中的外部 ID/URL 与 Provider 控制台一致；
 4. ✅ ~~为 Catalog 增加只读 Capability Probe~~：Daemon API 已提供探测结果，Studio 选择 Agent 后显示非交互、workspace-write 和 Adapter 状态；仍需在各 Agent 实际安装环境逐个验证 Adapter；
 5. 用一次真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Acceptance Gate 的成功路径；
 6. 将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联，但不把本地批准误标记为生产交付；
