@@ -13,4 +13,9 @@ describe('agent runtime catalog', () => {
     const agents = discoverAgentRuntimes([{ name: 'Fixture Agent', launchCommand: 'node' }]);
     expect(agents.at(-1)).toMatchObject({ id: 'custom-1', source: 'custom', name: 'Fixture Agent', launchCommand: 'node', detected: true });
   });
+
+  it('keeps a PATH command visible when its version probe fails', () => {
+    const agents = discoverAgentRuntimes([{ name: 'Shell Fixture', launchCommand: 'sh' }]);
+    expect(agents.at(-1)).toMatchObject({ detected: true, name: 'Shell Fixture' });
+  });
 });

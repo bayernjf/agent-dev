@@ -38,7 +38,7 @@ Daemon 读取目录后执行最小本地检查：
 4. 运行只读 Capability Probe；
 5. 记录能力、认证状态和失败原因。
 
-发现结果必须区分：`missing`、`available`、`unauthorized`、`unsupported` 和 `error`。
+发现结果必须区分：`missing`、`available`、`unauthorized`、`unsupported` 和 `error`。命令存在但 `--version` 失败时仍显示为已发现，并将版本标为未知，不能误判为未安装。
 
 ### 自定义 Agent
 

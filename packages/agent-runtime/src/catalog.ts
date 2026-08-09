@@ -57,27 +57,33 @@ const NON_INTERACTIVE_FLAGS: Record<string, string[]> = {
   openclaw: ['exec', '--json'],
 };
 
-function detect(command: string) {
+type DetectionResult = { detected: boolean; version: string | null; detail: string };
+
+function detect(command: string): DetectionResult {
   const cached = detectionCache.get(command);
   if (cached) return cached;
   const executable = command.trim().split(/\s+/)[0];
   const lookup = spawnSync('which', [executable], { encoding: 'utf8', timeout: 300 });
   if (lookup.status !== 0 || lookup.error) {
-    const result = { detected: false, version: null };
+    const result = { detected: false, version: null, detail: 'Command not found on local PATH.' };
     detectionCache.set(command, result);
     return result;
   }
   const result = spawnSync(command, ['--version'], { encoding: 'utf8', timeout: command === 'codex' ? 2_000 : 500 });
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
   const detected = {
-    detected: !result.error && result.status === 0,
+    // PATH presence is discovery; a failing version probe must not hide an installed Agent.
+    detected: true,
     version: output ? output.split('\n')[0] : null,
+    detail: !result.error && result.status === 0
+      ? 'Detected on local PATH.'
+      : 'Command found on local PATH; version probe failed.',
   };
   detectionCache.set(command, detected);
   return detected;
 }
 
-const detectionCache = new Map<string, { detected: boolean; version: string | null }>();
+const detectionCache = new Map<string, DetectionResult>();
 const helpCache = new Map<string, string>();
 
 function probeHelp(command: string): string {
@@ -125,7 +131,7 @@ export function discoverAgentRuntimes(custom: CustomAgentInput[] = []): AgentDes
       ...agent,
       ...result,
       capabilities: BUILT_IN_CAPABILITIES[agent.id] ?? ['version-detection'],
-      detail: result.detected ? 'Detected on local PATH.' : `Install ${agent.launchCommand} or add a custom launch command.`,
+      detail: result.detail,
     }];
   });
   const customAgents = custom.map((agent, index) => {
@@ -136,7 +142,7 @@ export function discoverAgentRuntimes(custom: CustomAgentInput[] = []): AgentDes
       source: 'custom' as const,
       ...result,
       capabilities: ['version-detection'] as AgentCapability[],
-      detail: result.detected ? 'Custom command detected on local PATH.' : 'Command not detected. Check the launch command.',
+      detail: result.detail,
     };
   });
   return [...builtIns, ...customAgents];
