@@ -1,6 +1,6 @@
 # Agent Runtime Catalog
 
-> 状态：Key-Value Catalog、Studio 选择和 Custom 持久化已实现；多 Agent 执行 Adapter 仍按能力逐个验证
+> 状态：Key-Value Catalog、Studio 选择、Custom 持久化和只读 Capability Probe 展示已实现；多 Agent 执行 Adapter 仍按能力逐个验证
 > 日期：2026-08-07
 
 ## 1. 目标
@@ -149,7 +149,7 @@ runtime:
 - 名称 + 启动命令表单；
 - 本地可执行文件选择；
 - 自动版本检测和只读 Probe；
-- 自动生成 `.agent-dev/agents.yaml`；
+- 自动生成 `.agent-dev/agents.conf`；
 - 专业模式补充命令模板和能力声明。
 
 ### 阶段 C：多 Runtime 交付
