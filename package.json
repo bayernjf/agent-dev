@@ -17,7 +17,7 @@
     "dev": "concurrently -k -n daemon,studio -c cyan,magenta \"npm run dev -w @agent-dev/daemon\" \"npm run dev -w @agent-dev/studio\"",
     "build": "npm run typecheck && npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "test": "vitest run",
     "doctor": "npm run doctor -w @agent-dev/cli",
     "start": "npm run start -w @agent-dev/cli"
   },
