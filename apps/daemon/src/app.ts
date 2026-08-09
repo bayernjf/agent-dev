@@ -440,6 +440,12 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
+  app.get('/api/projects/:projectId/delivery/pr-evidence', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    return context.json({ evidence: await store.getPrEvidence(project.id, project.blueprint.metadata.revision) });
+  });
+
   app.post('/api/projects/:projectId/delivery/preview-evidence', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
@@ -451,6 +457,12 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to record Preview evidence.' }, 409);
     }
+  });
+
+  app.get('/api/projects/:projectId/delivery/preview-evidence', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    return context.json({ evidence: await store.getPreviewEvidence(project.id, project.blueprint.metadata.revision) });
   });
 
   app.post('/api/projects/:projectId/feature-task', async context => {

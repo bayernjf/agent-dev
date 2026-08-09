@@ -824,6 +824,13 @@ export class AgentDevStore {
     return record;
   }
 
+  async getPrEvidence(projectId: string, blueprintRevision: number): Promise<PrEvidence | null> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run) return null;
+    try { return JSON.parse(await readFile(join(run.workspacePath, 'pr-evidence.json'), 'utf8')) as PrEvidence; }
+    catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null; throw error; }
+  }
+
   async recordPreviewEvidence(projectId: string, blueprintRevision: number, evidence: Omit<PreviewEvidence, 'recordedAt'>): Promise<PreviewEvidence> {
     const project = this.getProject(projectId);
     if (!project || project.blueprint.metadata.revision !== blueprintRevision) throw new Error('Preview evidence must target the current Blueprint revision.');
@@ -837,6 +844,13 @@ export class AgentDevStore {
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', 'delivery: record preview evidence'], { cwd: run.workspacePath });
     await this.advanceDelivery(projectId, [{ type: 'PREVIEW_AVAILABLE' }]);
     return record;
+  }
+
+  async getPreviewEvidence(projectId: string, blueprintRevision: number): Promise<PreviewEvidence | null> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run) return null;
+    try { return JSON.parse(await readFile(join(run.workspacePath, 'preview-evidence.json'), 'utf8')) as PreviewEvidence; }
+    catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null; throw error; }
   }
 
   async close() {

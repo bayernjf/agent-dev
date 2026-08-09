@@ -86,6 +86,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。
 - 本地验收批准后，可通过显式 PR/Preview Evidence API 逐步推进到 `PR_OPEN` 和 `PREVIEW_READY`；接口会校验前置状态并把证据写入隔离 workspace，不能跳过生产审批。
 - Studio 会根据当前状态显示对应的 PR 或 Dual Preview 证据表单，避免用户手工调用接口或跳过交付阶段。
+- 已记录的 PR/Preview 证据可通过只读 API 和 Studio 历史区恢复查看。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
 - 模板基线带有根 TypeScript/Vite 配置，可执行 `npm run quality` 和 `npm run build` 作为生成工程的质量入口；
 - Apply 步骤按状态持久化，支持失败后显式重试（最多 3 次）并对已完成 Run 保持幂等；
