@@ -23,7 +23,7 @@ function createFullSuccessRunner(): CommandRunner {
     if (key.includes('vercel deploy')) return { stdout: JSON.stringify({ url: 'https://test-api-preview.vercel.app' }), stderr: '', exitCode: 0, success: true };
     if (key.includes('npm run build')) return { stdout: 'Build complete', stderr: '', exitCode: 0, success: true };
     if (key.includes('wrangler pages project create')) return { stdout: 'Created', stderr: '', exitCode: 0, success: true };
-    if (key.includes('wrangler pages deploy')) return { stdout: 'Deployed', stderr: '', exitCode: 0, success: true };
+    if (key.includes('wrangler pages deploy')) return { stdout: 'Deployed: https://feature-x.test-project-web-feature-x.pages.dev', stderr: '', exitCode: 0, success: true };
     return { stdout: '', stderr: 'not found', exitCode: 1, success: false };
   };
 }
@@ -77,6 +77,23 @@ describe('DeploymentComposer', () => {
   });
 
   describe('execute()', () => {
+    it('records the Cloudflare Pages URL emitted by Wrangler', async () => {
+      const mockFetch = vi.fn().mockImplementation((url: string) => Promise.resolve(new Response(
+        url.includes('.pages.dev') ? '<script>https://test-api-preview.vercel.app</script>' : JSON.stringify({ ok: true }),
+        { headers: { 'content-type': 'application/json', 'access-control-allow-origin': 'https://feature-x.test-project-web-feature-x.pages.dev' } },
+      )));
+      vi.stubGlobal('fetch', mockFetch);
+      vi.stubEnv('VERCEL_TOKEN', 'test-token');
+      const composer = new DeploymentComposer({ workspacePath: tempDir, projectName: 'test-project', previewBranch: 'feature-x' }, createFullSuccessRunner());
+      const result = await composer.execute();
+      expect(result.status).toBe('completed');
+      expect(result.pagesUrl).toBe('https://feature-x.test-project-web-feature-x.pages.dev');
+      expect(result.pagesUrlSource).toBe('cli-output');
+      const evidence = await readFile(join(tempDir, '.agent-dev/previews/test-project-feature-x.json'), 'utf8');
+      expect(JSON.parse(evidence).pagesUrlSource).toBe('cli-output');
+      vi.unstubAllGlobals();
+    });
+
     it('fails gracefully when vercel deploy fails', async () => {
       const runner = createMockRunner({
         'vercel project add': { stdout: 'Created', stderr: '', exitCode: 0, success: true },

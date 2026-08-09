@@ -26,6 +26,7 @@ export class DeploymentComposer {
   private steps: PreviewStep[];
   private apiBaseUrl: string | undefined;
   private pagesUrl: string | undefined;
+  private pagesUrlSource: 'cli-output' | 'derived-fallback' | undefined;
   private vercelProjectName: string | undefined;
   private cloudflareProjectName: string | undefined;
 
@@ -76,6 +77,7 @@ export class DeploymentComposer {
       steps: this.steps.map(s => ({ ...s })),
       apiBaseUrl: this.apiBaseUrl,
       pagesUrl: this.pagesUrl,
+      pagesUrlSource: this.pagesUrlSource,
       corsOrigin: this.corsOrigin,
     };
 
@@ -251,8 +253,10 @@ export class DeploymentComposer {
       throw new Error(`Cloudflare Pages deployment failed: ${deployResult.stderr || deployResult.stdout}`);
     }
 
-    this.pagesUrl = this.corsOrigin;
-    step.detail = `Deployed to ${this.pagesUrl}`;
+    const actualPagesUrl = this.parsePagesUrl(deployResult.stdout) ?? this.parsePagesUrl(deployResult.stderr);
+    this.pagesUrl = actualPagesUrl ?? this.corsOrigin;
+    this.pagesUrlSource = actualPagesUrl ? 'cli-output' : 'derived-fallback';
+    step.detail = `Deployed to ${this.pagesUrl} (${this.pagesUrlSource})`;
   }
 
   private async verifyJointSmoke(step: PreviewStep): Promise<void> {
@@ -286,6 +290,7 @@ export class DeploymentComposer {
       previewBranch: this.previewBranch,
       apiBaseUrl: this.apiBaseUrl,
       pagesUrl: this.pagesUrl,
+      pagesUrlSource: this.pagesUrlSource ?? 'derived-fallback',
       corsOrigin: this.corsOrigin,
       apiHealth: 'passed',
       exactCors: 'passed',
@@ -317,6 +322,11 @@ export class DeploymentComposer {
     const match = output.match(/https:\/\/[^\s"']+\.vercel\.app/);
     if (match) return match[0];
     throw new Error('Could not parse deployment URL from Vercel output.');
+  }
+
+  private parsePagesUrl(output: string): string | undefined {
+    const match = output.match(/https:\/\/[^\s"']+\.pages\.dev/);
+    return match?.[0];
   }
 }
 
