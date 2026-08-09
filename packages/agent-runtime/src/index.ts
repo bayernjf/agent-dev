@@ -66,9 +66,11 @@ export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: strin
   };
 }
 
+export type AgentAdapterStatus = 'verified' | 'candidate' | 'unsupported';
+
 type AgentAdapter = {
   buildCommand: (prompt: string, workspacePath: string) => string[];
-  status: 'verified' | 'candidate';
+  status: Exclude<AgentAdapterStatus, 'unsupported'>;
 };
 
 const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
@@ -100,6 +102,10 @@ export function buildAgentExecutionPlan(task: ApprovedTask, workspacePath: strin
 
 export function isAgentExecutable(agentId: string): boolean {
   return AGENT_ADAPTERS[agentId]?.status === 'verified';
+}
+
+export function getAgentAdapterStatus(agentId: string): AgentAdapterStatus {
+  return AGENT_ADAPTERS[agentId]?.status ?? 'unsupported';
 }
 
 function buildTaskPrompt(task: ApprovedTask): string {

@@ -30,7 +30,7 @@ type AcceptanceRecord = { status: 'blocked' | 'ready' | 'approved'; summary: str
 type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
 type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
 type AgentDescriptor = { id: string; name: string; source: 'built-in' | 'custom'; launchCommand: string; detected: boolean; version: string | null; detail: string; capabilities: string[] };
-type AgentCapabilityProbe = { agentId: string; nonInteractive: boolean; nonInteractiveFlags: string[]; workspaceWrite: boolean; helpAvailable: boolean; executable: boolean };
+type AgentCapabilityProbe = { agentId: string; nonInteractive: boolean; nonInteractiveFlags: string[]; workspaceWrite: boolean; helpAvailable: boolean; adapterStatus: 'verified' | 'candidate' | 'unsupported' };
 type CredentialMeta = { version: 1; updatedAt: string; keys: string[] };
 type ProjectResources = { version: number; projectName: string; projectId: string; blueprintRevision: number; updatedAt: string; providers: Record<string, Record<string, unknown>> } | null;
 type CredentialVerifyResult = { providerId: string; status: 'valid' | 'invalid' | 'not_set'; detail: string };
@@ -342,9 +342,9 @@ export function App() {
     setProbingAgentId(agent.id);
     try {
       const response = await fetch(`/api/runtime/probe/${encodeURIComponent(agent.id)}`);
-      const payload = await response.json() as { probe?: Omit<AgentCapabilityProbe, 'executable'>; executable?: boolean; error?: string };
+      const payload = await response.json() as { probe?: Omit<AgentCapabilityProbe, 'adapterStatus'>; adapterStatus?: AgentCapabilityProbe['adapterStatus']; error?: string };
       if (!response.ok || !payload.probe) throw new Error(payload.error ?? 'Unable to probe Agent capabilities.');
-      setAgentProbes(current => ({ ...current, [agent.id]: { ...payload.probe!, executable: payload.executable === true } }));
+      setAgentProbes(current => ({ ...current, [agent.id]: { ...payload.probe!, adapterStatus: payload.adapterStatus ?? 'unsupported' } }));
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to probe Agent capabilities.');
@@ -1262,10 +1262,10 @@ export function App() {
             </section>
             <section className="agent-catalog-panel" id="agents">
               <div className="panel-title"><div><p className="eyebrow">Local runtime</p><h2>Agent Catalog</h2></div><button className="icon-button" type="button" onClick={() => void loadAgents()} disabled={loadingAgents} aria-label="Refresh agents" title="Refresh agents"><RefreshCw size={17} /></button></div>
-              <p className="form-note">Detected Agents can be selected for Runtime execution. Custom Agents are persisted in .agent-dev/agents.conf.</p>
+              <p className="form-note">Detected Agents can be inspected here. Only verified execution adapters can run tasks. Custom Agents are persisted in .agent-dev/agents.conf.</p>
               {loadingAgents && agents.length === 0 ? <p className="empty-state">Detecting local Agents...</p> : agents.length === 0 ? <p className="empty-state">No Agents found.</p> : <div className="agent-list">{agents.map(agent => (
                 <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => void probeAgent(agent)} disabled={!agent.detected || probingAgentId !== null}>
-                  <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? 'Running read-only capability probe...' : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{agentProbes[agent.id] && <div className="agent-caps"><span className="agent-cap">{agentProbes[agent.id].nonInteractive ? 'non-interactive: yes' : 'non-interactive: unknown'}</span><span className="agent-cap">{agentProbes[agent.id].workspaceWrite ? 'workspace-write: yes' : 'workspace-write: no'}</span><span className="agent-cap">{agentProbes[agent.id].executable ? 'adapter: verified' : 'adapter: unavailable'}</span></div>}<code className="agent-command">{agent.launchCommand}</code></div>
+                  <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? 'Running read-only capability probe...' : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{agentProbes[agent.id] && <div className="agent-caps"><span className="agent-cap">{agentProbes[agent.id].nonInteractive ? 'non-interactive: yes' : 'non-interactive: unknown'}</span><span className="agent-cap">{agentProbes[agent.id].workspaceWrite ? 'workspace-write: yes' : 'workspace-write: no'}</span><span className="agent-cap">{`adapter: ${agentProbes[agent.id].adapterStatus}`}</span></div>}<code className="agent-command">{agent.launchCommand}</code></div>
                   <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? 'Detected' : 'Not found'}</span>
                 </button>
               ))}</div>}

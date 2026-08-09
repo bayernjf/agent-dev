@@ -80,7 +80,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence、attempt 历史和 `RUNTIME_RUN_REPORT.md`；失败运行可通过 `RETRY_RUNTIME_RUN` 显式重试，历史不会被覆盖。
 - Studio 已展示 Runtime Run 状态、取消动作、显式 `Run Codex`/`Retry Codex` 按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
 - Daemon 已提供 `/api/runtime/catalog`，内置 Agent 来自 `agents.builtin.conf`，可登记名称 + 启动命令的 custom Agent；内置未安装项隐藏，custom 未安装项置灰并保存到 `.agent-dev/agents.conf`。
-- Studio Agent Catalog 支持主动刷新和只读 Capability Probe，展示非交互、workspace-write 和已验证 Adapter 状态；未知能力不会被自动宣称为可执行。
+- Studio Agent Catalog 支持主动刷新和只读 Capability Probe，展示非交互、workspace-write 及 `verified`、`candidate`、`unsupported` Adapter 状态；未知能力不会被自动宣称为可执行。
 - 凭证管理 Phase 1 + Phase 2 已提供本地凭证文件、连接元数据、项目资源清单、`.env` 生成器、daemon API 和 Studio 引导/验证面板；Secret 不返回 API、不写入数据库。Supabase 自动 Adapter 按决策保持 Manual。
 - Acceptance Gate 已接入 Studio：提交验收总结和标准确认后，根据 Quality Gate/Git evidence 生成 `ACCEPTANCE_REPORT.md`；blocked 状态不能批准交付。
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。

@@ -6,7 +6,7 @@ import { blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryR
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { buildAgentExecutionPlan, discoverAgentRuntimes, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
+import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
 import { RealProviderRegistry, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
 import { DeploymentComposer, cleanupPreviewProjects } from '@agent-dev/deployment-composer';
 import type { PreviewDeploymentResult } from '@agent-dev/deployment-composer';
@@ -276,7 +276,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const catalog = discoverAgentRuntimes(customAgents);
     const agent = catalog.find(a => a.id === agentId);
     if (!agent) return context.json({ error: 'Agent not found in catalog.' }, 404);
-    return context.json({ probe: probeAgentCapabilities(agent.id, agent.launchCommand), executable: isAgentExecutable(agent.id) });
+    return context.json({ probe: probeAgentCapabilities(agent.id, agent.launchCommand), adapterStatus: getAgentAdapterStatus(agent.id) });
   });
 
   app.get('/api/runtime/catalog', context => context.json({ agents: discoverAgentRuntimes(customAgents) }));
