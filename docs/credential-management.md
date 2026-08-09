@@ -236,7 +236,7 @@ const CREDENTIALS_PATH = process.env.AGENT_DEV_CREDENTIALS_PATH
 
 ### 4.2 写入时机
 
-Provider Apply 成功后，立即将返回的 `state` 写入此文件：
+Provider Apply 成功后，立即将资源级事实写入此文件：资源 ID、URL 和非敏感元数据会被保留；无法由 CLI 确认的字段不得伪装为已验证事实。
 
 ```typescript
 // Provider apply 返回值
