@@ -23,5 +23,8 @@ export default defineConfig({
   },
   test: {
     include: ['packages/**/test/**/*.test.ts', 'apps/**/test/**/*.test.ts'],
+    // Runtime catalog tests probe real local CLIs; parallel files can starve
+    // synchronous child-process probes and create false timeout failures.
+    fileParallelism: false,
   },
 });
