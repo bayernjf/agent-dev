@@ -20,6 +20,7 @@
 - `35f7eaf feat: add local agent runtime catalog`：Daemon 已能探测内置 Agent，并接受名称 + 启动命令的 custom Agent 配置。
 - 当前 Agent Catalog 已迁移为 Key-Value 配置：内置目录为 `packages/agent-runtime/agents.builtin.conf`，Custom 配置为 `.agent-dev/agents.conf`；内置未安装项隐藏，Custom 未安装项置灰。
 - Agent 检测采用打开 Studio 时一次检测 + 用户点击刷新按钮主动检测，不做实时监控、文件监听或后台轮询。
+- 当前本机 CLI 状态：`gh`、`vercel`、`codex` 已安装；`wrangler`、`supabase` 未安装，因此真实 Cloudflare Preview 尚不能在本机执行。
 - 最近验证：`npm run typecheck`、`npm test`、`npm run build` 均应作为本地验收门槛；本轮改动新增 GitHub token 注入、Provider cache invalidation、Cloudflare CLI URL evidence 的回归覆盖。真实云端写操作未在本轮运行。
 - 当前工作分支：`feature/20260802`，开始本轮修复时与 `origin/feature/20260802` 一致；提交前应重新确认状态。
 
