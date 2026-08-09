@@ -80,7 +80,8 @@ Agent Runtime  -> 用户电脑中的 Codex
 - Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence、attempt 历史和 `RUNTIME_RUN_REPORT.md`；失败运行可通过 `RETRY_RUNTIME_RUN` 显式重试，历史不会被覆盖。
 - Studio 已展示 Runtime Run 状态、取消动作、显式 `Run Codex`/`Retry Codex` 按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
 - Daemon 已提供 `/api/runtime/catalog`，内置 Agent 来自 `agents.builtin.conf`，可登记名称 + 启动命令的 custom Agent；内置未安装项隐藏，custom 未安装项置灰并保存到 `.agent-dev/agents.conf`。
-- 凭证管理 Phase 1 已提供本地凭证文件、连接元数据、项目资源清单、`.env` 生成器和 daemon API；Secret 不返回 API、不写入数据库。Studio 凭证面板和 Supabase 真实 Adapter 尚未实现。
+- Studio Agent Catalog 支持主动刷新和只读 Capability Probe，展示非交互、workspace-write 和已验证 Adapter 状态；未知能力不会被自动宣称为可执行。
+- 凭证管理 Phase 1 + Phase 2 已提供本地凭证文件、连接元数据、项目资源清单、`.env` 生成器、daemon API 和 Studio 引导/验证面板；Secret 不返回 API、不写入数据库。Supabase 自动 Adapter 按决策保持 Manual。
 - Acceptance Gate 已接入 Studio：提交验收总结和标准确认后，根据 Quality Gate/Git evidence 生成 `ACCEPTANCE_REPORT.md`；blocked 状态不能批准交付。
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
@@ -90,7 +91,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 身份发现只读取本机 CLI 已有登录状态；资源基线计划只显示阻塞项和待批准的创建意图。审批当前只是一条本地审计记录；Apply Simulator 只写入本仓库忽略的本地工作区，绝不写入 GitHub、Supabase、Vercel 或 Cloudflare。
 
-尚未实现：将生成物写入目标产品仓库、Provider 资源创建、Secret 连接、模板代码生成、Codex 执行、PR/Preview 编排与交付报告。它们仍受下方 Phase 0 技术验证结论约束。
+已实现本地生成物物化、Provider 计划与真实 CLI Adapter、凭证连接、模板代码生成、受控 Codex 执行、Dual Preview 编排和交付报告；真实云端 Preview、生产发布、PR/Actions 全链路仍需在具备对应 CLI 和账号授权的环境中取得 Evidence。
 
 已经取得本地 Evidence：
 
@@ -102,7 +103,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 当前阻塞：
 
 - 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；真实功能任务已能启动并产生隔离 workspace 改动，首个任务在 180 秒上限内超时并被正确记录；失败重试和 attempt 历史已实现，但真正的 Codex session resume 仍未接入；
-- Vercel Preview 公网访问超时，Cloudflare/Vercel 联合 Preview 尚未通过；
+- Deployment Composer 已包含 Vercel Deployment Protection 关闭、精确 CORS、Cloudflare Pages URL 证据和清理逻辑；本机仍缺 Wrangler，Cloudflare/Vercel 联合 Preview 尚未在当前环境重新执行；
 - Supabase CLI 的本地状态目录与当前文件边界冲突，Auth Redirect 尚未进行真实平台验证。
 
 事实、降级候选和下一项 Gate 见 [Phase 0 技术 Spike 状态](docs/spikes/README.md)。文档中的 `v0.1` 是计划目标，不代表对应连接器和交付能力已经实现。
