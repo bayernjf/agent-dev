@@ -117,6 +117,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const parsed = credentialsSchema.safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Credentials must be an object of uppercase key/value pairs.' }, 400);
     saveCredentials({ ...loadCredentials(), ...parsed.data });
+    realProviders.invalidateCredentials();
     return context.json({ saved: true, meta: getCredentialMeta() });
   });
 
@@ -126,6 +127,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!(key in credentials)) return context.json({ error: 'Credential not found.' }, 404);
     delete credentials[key];
     saveCredentials(credentials);
+    realProviders.invalidateCredentials();
     return context.json({ saved: true, meta: getCredentialMeta() });
   });
 

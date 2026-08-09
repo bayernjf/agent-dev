@@ -6,6 +6,12 @@ export type ProviderResourceSpec = {
 
 export type ProviderResourceState = ProviderResourceSpec & {
   createdAt: string;
+  /** Provider-native identifier, when the adapter can discover one. */
+  externalId?: string;
+  /** Canonical public or console URL, when available. */
+  url?: string;
+  /** Non-secret provider facts such as branch or account name. */
+  metadata?: Record<string, string>;
 };
 
 export type ProviderState = {

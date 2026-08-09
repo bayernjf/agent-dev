@@ -58,6 +58,28 @@ describe('GitHubAdapter', () => {
     expect(result.applied).toBe(true);
   });
 
+  it('uses the saved GitHub token for owner and repository discovery', async () => {
+    const previous = process.env.AGENT_DEV_CREDENTIALS_PATH;
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-github-token-'));
+    process.env.AGENT_DEV_CREDENTIALS_PATH = join(directory, 'credentials.txt');
+    saveCredentials({ GITHUB_TOKEN: 'fixture-token' });
+    const receivedTokens: Array<string | undefined> = [];
+    const runner: CommandRunner = async (_command, args, options) => {
+      receivedTokens.push(options?.env?.GITHUB_TOKEN);
+      if (args[0] === 'api') return { stdout: 'bayernjf', stderr: '', exitCode: 0, success: true };
+      return { stdout: JSON.stringify({ id: 'R_1', name: 'test-project', owner: { login: 'bayernjf' }, isPrivate: true, url: 'https://github.com/bayernjf/test-project' }), stderr: '', exitCode: 0, success: true };
+    };
+    try {
+      const state = await new GitHubAdapter('', 'test-project', '/tmp/workspace', runner).discover();
+      expect(receivedTokens).toEqual(['fixture-token', 'fixture-token']);
+      expect(state.resources[0]).toMatchObject({ externalId: 'R_1', url: 'https://github.com/bayernjf/test-project' });
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_DEV_CREDENTIALS_PATH;
+      else process.env.AGENT_DEV_CREDENTIALS_PATH = previous;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('detects owner drift', async () => {
     const runner = mockRunner({
       'gh api user --jq .login': { stdout: 'bayernjf', stderr: '', exitCode: 0, success: true },
@@ -90,6 +112,15 @@ describe('VercelAdapter', () => {
     const plan = await adapter.plan(vercelResources);
     expect(plan.resources[0].action).toBe('noop');
   });
+
+  it('keeps Vercel project facts returned by the CLI', async () => {
+    const runner = mockRunner({
+      'vercel project ls': { stdout: 'test-project', stderr: '', exitCode: 0, success: true },
+      'vercel project inspect': { stdout: JSON.stringify({ id: 'prj_123', name: 'test-project', accountId: 'team_123', targets: { production: { url: 'https://test-project.vercel.app' } } }), stderr: '', exitCode: 0, success: true },
+    });
+    const state = await new VercelAdapter('bayernjf', 'test-project', '/tmp/workspace', runner).discover();
+    expect(state.resources[0]).toMatchObject({ externalId: 'prj_123', url: 'https://test-project.vercel.app', metadata: { orgId: 'team_123' } });
+  });
 });
 
 describe('CloudflareAdapter', () => {
@@ -111,6 +142,15 @@ describe('CloudflareAdapter', () => {
     const adapter = new CloudflareAdapter('bayernjf', 'test-project', '/tmp/workspace', runner);
     const plan = await adapter.plan(cfResources);
     expect(plan.resources[0].action).toBe('noop');
+  });
+
+  it('keeps Cloudflare Pages facts returned by Wrangler', async () => {
+    const runner = mockRunner({
+      'wrangler pages project list --json': { stdout: JSON.stringify([{ id: 'cf_123', name: 'test-project', subdomain: 'test-project.pages.dev', production_branch: 'main', account_id: 'account_123', created_on: '2026-08-09T00:00:00.000Z' }]), stderr: '', exitCode: 0, success: true },
+      'wrangler pages project list': { stdout: 'test-project', stderr: '', exitCode: 0, success: true },
+    });
+    const state = await new CloudflareAdapter('bayernjf', 'test-project', '/tmp/workspace', runner).discover();
+    expect(state.resources[0]).toMatchObject({ externalId: 'cf_123', url: 'https://test-project.pages.dev', metadata: { accountId: 'account_123', productionBranch: 'main' } });
   });
 });
 
@@ -191,6 +231,23 @@ describe('RealProviderRegistry', () => {
     expect(plans.every(p => p.resources[0].action === 'noop')).toBe(true);
     expect(plans.find(p => p.providerId === 'github')!.resources[0].reason).toContain('not authenticated');
     expect(plans.find(p => p.providerId === 'cloudflare')!.resources[0].reason).toContain('wrangler');
+  });
+
+  it('rechecks provider availability after credentials are updated', async () => {
+    let authenticated = false;
+    const registry = new RealProviderRegistry({
+      resolveContext: async () => ({ workspacePath: '/tmp/workspace', projectName: 'test-project' }),
+      runner: async (command, args) => {
+        if (command === 'gh' && args[0] === 'auth') return { stdout: authenticated ? 'Logged in' : '', stderr: authenticated ? '' : 'not logged in', exitCode: authenticated ? 0 : 1, success: authenticated };
+        if (command === 'gh' && args[0] === 'repo') return { stdout: '', stderr: 'not found', exitCode: 1, success: false };
+        return { stdout: '', stderr: 'not found', exitCode: 1, success: false };
+      },
+    });
+    const specs = { github: [{ id: 'github-repository', kind: 'repository', owner: 'bayernjf' }] };
+    expect((await registry.plan('proj-1', specs))[0].resources[0].action).toBe('noop');
+    authenticated = true;
+    registry.invalidateCredentials();
+    expect((await registry.plan('proj-1', specs))[0].resources[0].action).toBe('create');
   });
 
   it('throws when context cannot be resolved', async () => {
