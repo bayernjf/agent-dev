@@ -161,4 +161,4 @@ runtime:
 
 ## 8. 当前实现边界
 
-当前代码已提供本地 Agent Catalog API 和 Studio 面板：内置 Agent 来自 Key-Value 文件，本机未安装的内置 Agent 不显示；用户可以通过弹窗添加 custom Agent，未安装的 custom Agent 置灰并持久化到 `.agent-dev/agents.conf`。当前仅 Codex Adapter 已验证真实执行，其他 Agent 仅允许检测和生成候选计划，不能自动执行。
+当前代码已提供本地 Agent Catalog API 和 Studio 面板：内置 Agent 来自 Key-Value 文件，本机未安装的内置 Agent 不显示；用户可以通过弹窗添加 custom Agent，未安装的 custom Agent 置灰并持久化到 `.agent-dev/agents.conf`。当前仅 Codex Adapter 已完成隔离 workspace 的真实执行验证；其他 Agent 仅允许检测和生成 candidate dry-run，不能自动执行。`isAgentExecutable()` 只会为已验证 Adapter 返回 `true`。

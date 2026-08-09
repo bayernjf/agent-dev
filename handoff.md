@@ -22,6 +22,7 @@
 - Agent 检测采用打开 Studio 时一次检测 + 用户点击刷新按钮主动检测，不做实时监控、文件监听或后台轮询。
 - 当前本机 CLI 状态：`gh`、`vercel`、`codex`、项目本地 `wrangler@4.120.0` 已安装；`supabase` 未安装。Wrangler OAuth 已授权。
 - 2026-08-09 真实双 Preview 尝试：Cloudflare OAuth 已授权；Vercel 临时项目可创建且部署状态为 `READY`，项目级 `ssoProtection/passwordProtection` 均已置空，但 `*.vercel.app` 公网域名在当前网络连续返回超时/ECONNREFUSED；每次 Vercel 临时项目均已自动清理，Cloudflare 项目未创建。需要在可访问 Vercel Deployment Domain 的网络重新验证。
+- 2026-08-09 真实 Feature Task 验证：隔离 workspace 已完成 Local Apply、依赖安装、Quality Gate 和 Codex execute（退出码 0）；`/api/health` 返回 200，Runtime/Git Evidence 已写入 Local Delivery Report。该最小任务发现基线已满足要求，未产生源码 diff，且刻意停在 Human Acceptance 前；下一次应验证一个必然产生 Git diff 的真实功能。
 - 最近验证：`npm run typecheck`、`npm test`、`npm run build` 均应作为本地验收门槛；`npm test` 最近一次为 13 个测试文件、58 个用例全通过。本轮新增 GitHub token 注入、Provider cache invalidation、Cloudflare CLI URL evidence 的回归覆盖；真实云端尝试的完整边界见下一条。
 - 当前工作分支：`feature/20260802`，开始本轮修复时与 `origin/feature/20260802` 一致；提交前应重新确认状态。
 
@@ -162,7 +163,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 2. ✅ ~~将 Dual Preview 部署编排实现为幂等 Step~~：已于 2026-08-09 完成（`packages/deployment-composer`，精确 CORS + 临时项目清理）；
 3. 在可访问 Vercel Deployment Domain 的网络重新跑 Deployment Composer 端到端，验证 Studio 部署区块 → Daemon → Vercel/Cloudflare 的完整链路，并确认资源清单中的外部 ID/URL 与 Provider 控制台一致；
 4. ✅ ~~为 Catalog 增加只读 Capability Probe~~：Daemon API 已提供探测结果，Studio 选择 Agent 后显示非交互、workspace-write 和 Adapter 状态；仍需在各 Agent 实际安装环境逐个验证 Adapter；
-5. 用一次真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Acceptance Gate 的成功路径；
+5. 用一次必然产生 Git diff 的真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Human Acceptance Gate 的完整成功路径；
 6. 将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联，但不把本地批准误标记为生产交付；
 7. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。
 
