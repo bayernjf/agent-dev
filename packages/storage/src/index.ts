@@ -790,7 +790,9 @@ export class AgentDevStore {
     await writeFile(join(run.workspacePath, 'ACCEPTANCE_REPORT.md'), this.buildAcceptanceReport(record), 'utf8');
     await execFileAsync('git', ['add', 'acceptance.json', 'ACCEPTANCE_REPORT.md'], { cwd: run.workspacePath });
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `acceptance: approve delivery`], { cwd: run.workspacePath });
-    await this.advanceDelivery(projectId, [{ type: 'VERIFY_COMPLETE' }]);
+    // Local approval closes implementation and local verification only. A real
+    // PR, Preview, and production release remain provider-evidenced steps.
+    await this.advanceDelivery(projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }, { type: 'VERIFY_COMPLETE' }]);
     return record;
   }
 
