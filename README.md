@@ -76,7 +76,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 依赖安装是独立的显式动作（`INSTALL_DEPENDENCIES`）：只在用户确认后运行 `npm install`，并生成 `dependency-install.json` 与 `DEPENDENCY_INSTALL_REPORT.md`；
 - Local Apply 完成后可在 Studio 创建 Feature Task，提交目标、验收标准和任务边界；人工批准后生成 `TASK_APPROVAL.md` 并提交到本地 feature 分支；
 - 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；默认仍先生成 dry-run 计划。
-- Runtime Adapter 能生成受 sandbox、workspace 和禁止路径约束的 Codex 计划，并通过环境变量白名单启动显式批准的 `workspace-write` 执行；2026-08-09 已在隔离生成工作区完成一次真实 Codex execute、质量门和 API health 验证。该验证任务不需要源码改动，仍需以一次产生 Git diff 的真实功能任务补足交付 Evidence。
+- Runtime Adapter 能生成受 sandbox、workspace 和禁止路径约束的 Codex 计划，并通过环境变量白名单启动显式批准的 `workspace-write` 执行；2026-08-11 已在隔离生成工作区完成一次产生实际源码 diff 的真实 Codex feature task、质量门和 Git evidence 验证。Human Acceptance 仍由用户明确批准。
 - Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence、attempt 历史和 `RUNTIME_RUN_REPORT.md`；失败运行可通过 `RETRY_RUNTIME_RUN` 显式重试，历史不会被覆盖。
 - Studio 已展示 Runtime Run 状态、取消动作、显式 `Run Codex`/`Retry Codex` 按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
 - Daemon 已提供 `/api/runtime/catalog`，内置 Agent 来自 `agents.builtin.conf`，可登记名称 + 启动命令的 custom Agent；内置未安装项隐藏，custom 未安装项置灰并保存到 `.agent-dev/agents.conf`。
@@ -105,7 +105,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 当前阻塞：
 
-- 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；真实功能任务已能启动并产生隔离 workspace 改动，首个任务在 180 秒上限内超时并被正确记录；失败重试和 attempt 历史已实现，但真正的 Codex session resume 仍未接入；
+- 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；首个真实功能任务曾在 180 秒上限内超时并被正确记录，随后在 2026-08-11 完成了产生源码 diff 且通过 Quality Gate 的真实功能任务；失败重试和 attempt 历史已实现，但真正的 Codex session resume 仍未接入；
 - Deployment Composer 已包含 Vercel Deployment Protection 关闭、精确 CORS、Cloudflare Pages URL 证据和清理逻辑；本机已安装并授权 Wrangler。真实尝试确认当前网络无法访问新建 `*.vercel.app` Deployment Domain，因此 Cloudflare/Vercel 联合 Preview 尚未在当前环境完成；
 - Supabase CLI 的本地状态目录与当前文件边界冲突，Auth Redirect 尚未进行真实平台验证。
 

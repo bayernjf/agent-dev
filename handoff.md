@@ -1,6 +1,6 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-10
+> 更新时间：2026-08-11
 > 当前阶段：Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；Dual Preview 部署编排已实现为 Deployment Composer（精确 CORS + 临时项目清理）；凭证管理 Phase 2 已实现（Studio 凭证面板 + 引导模式 + 凭证验证）
 > 工作目录：仓库根目录
 
@@ -22,7 +22,7 @@
 - Agent 检测采用打开 Studio 时一次检测 + 用户点击刷新按钮主动检测，不做实时监控、文件监听或后台轮询。
 - 当前本机 CLI 状态：`gh`、`vercel`、`codex`、项目本地 `wrangler@4.120.0` 已安装；`supabase` 未安装。Wrangler OAuth 已授权。
 - 2026-08-09 真实双 Preview 尝试：Cloudflare OAuth 已授权；Vercel 临时项目可创建且部署状态为 `READY`，项目级 `ssoProtection/passwordProtection` 均已置空，但 `*.vercel.app` 公网域名在当前网络连续返回超时/ECONNREFUSED；每次 Vercel 临时项目均已自动清理，Cloudflare 项目未创建。需要在可访问 Vercel Deployment Domain 的网络重新验证。
-- 2026-08-09 真实 Feature Task 验证：隔离 workspace 已完成 Local Apply、依赖安装、Quality Gate 和 Codex execute（退出码 0）；`/api/health` 返回 200，Runtime/Git Evidence 已写入 Local Delivery Report。该最小任务发现基线已满足要求，未产生源码 diff，且刻意停在 Human Acceptance 前；下一次应验证一个必然产生 Git diff 的真实功能。
+- 2026-08-11 真实 Feature Task 验证：在新的隔离 workspace 中执行了一个要求修改 `apps/web/src/main.tsx` 的小功能，Codex 退出码为 0，Runtime 状态为 `completed`，Git evidence 记录 `1 insertion, 1 deletion`，Quality Gate `npm run quality` 通过，交付状态停在 `VERIFYING`。未代替用户执行 Human Acceptance，也未产生任何远程 Provider 写入。
 - 2026-08-10 Acceptance Gate 与 Delivery State 已对齐：本地人工验收批准会使状态机从 `IMPLEMENTING` 经 `VERIFYING` 进入 `LOCAL_ACCEPTED`。该状态明确不代表 PR、Preview 或生产发布；这些仍需 Provider Evidence 和独立人工批准。
 - 2026-08-10 Agent Capability Probe 已明确 Adapter 状态：`verified`、`candidate`、`unsupported`。当前仅 Codex 为 `verified`；其他已发现 Agent 只能生成 dry-run，不能执行。
 - 2026-08-10 已增加交付证据推进 API：`POST /api/projects/:projectId/delivery/pr-evidence` 将 `LOCAL_ACCEPTED` 推进到 `PR_OPEN`；`POST .../delivery/preview-evidence` 将 `PR_OPEN` 推进到 `PREVIEW_READY`。两者都会在隔离 workspace 写入 JSON/Markdown 证据并提交本地 Git，不能代表生产发布。
@@ -168,7 +168,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 2. ✅ ~~将 Dual Preview 部署编排实现为幂等 Step~~：已于 2026-08-09 完成（`packages/deployment-composer`，精确 CORS + 临时项目清理）；
 3. 在可访问 Vercel Deployment Domain 的网络重新跑 Deployment Composer 端到端，验证 Studio 部署区块 → Daemon → Vercel/Cloudflare 的完整链路，并确认资源清单中的外部 ID/URL 与 Provider 控制台一致；
 4. ✅ ~~为 Catalog 增加只读 Capability Probe~~：Daemon API 已提供探测结果，Studio 选择 Agent 后显示非交互、workspace-write 和 Adapter 状态；仍需在各 Agent 实际安装环境逐个验证 Adapter；
-5. 用一次必然产生 Git diff 的真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Human Acceptance Gate 的完整成功路径；
+5. ✅ ~~用一次必然产生 Git diff 的真实功能任务验证 Runtime 写入和 Quality Gate~~：已于 2026-08-11 完成；Human Acceptance 仍需由用户明确确认；
 6. ✅ ~~将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联~~：已于 2026-08-10 完成；本地批准进入 `LOCAL_ACCEPTED`，不代表生产交付；
 7. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。
 
