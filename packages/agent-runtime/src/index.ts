@@ -1,4 +1,8 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+export { discoverAgentRuntimes, probeAgentCapabilities, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource, type CapabilityProbe } from './catalog.js';
+
+const SAFE_ENV_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'TMP', 'TEMP', 'NO_COLOR'];
+const MAX_OUTPUT_LENGTH = 2_000_000;
 
 export type ApprovedTask = {
   id: string;
@@ -15,15 +19,24 @@ export type CodexRuntimeProbe = {
   reason: string;
 };
 
+export type CodexExecutionResult = {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+  output: string;
+  startedAt: string;
+  completedAt: string;
+};
+
 export type CodexExecutionPlan = {
-  mode: 'dry-run';
+  mode: 'dry-run' | 'execute';
   taskId: string;
   workspacePath: string;
   command: string[];
   forbiddenPaths: string[];
   acceptanceCriteria: string[];
-  noExternalChanges: true;
-  executionAllowed: false;
+  noExternalChanges: boolean;
+  executionAllowed: boolean;
 };
 
 export function probeCodexRuntime(): CodexRuntimeProbe {
@@ -38,8 +51,52 @@ export function probeCodexRuntime(): CodexRuntimeProbe {
   };
 }
 
-export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: string): CodexExecutionPlan {
-  const prompt = [
+export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: string, options: { execute?: boolean } = {}): CodexExecutionPlan {
+  const execute = options.execute === true;
+  const prompt = buildTaskPrompt(task);
+  return {
+    mode: execute ? 'execute' : 'dry-run',
+    taskId: task.id,
+    workspacePath,
+    command: ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', workspacePath, prompt],
+    forbiddenPaths: ['.env', '.env.*', '.git/config', '~/.codex', '~/.ssh', 'production secrets'],
+    acceptanceCriteria: task.acceptanceCriteria,
+    noExternalChanges: !execute,
+    executionAllowed: execute,
+  };
+}
+
+const AGENT_COMMAND_BUILDERS: Record<string, (prompt: string, workspacePath: string) => string[]> = {
+  codex: (prompt, cwd) => ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', cwd, prompt],
+  'claude-code': (prompt, cwd) => ['claude', '-p', prompt, '--allowedTools', 'Read,Write,Edit,Bash', '--cwd', cwd],
+  aider: (prompt, cwd) => ['aider', '--message', prompt, '--yes', '--cwd', cwd],
+  opencode: (prompt, cwd) => ['opencode', '-p', prompt, '--cwd', cwd],
+  openclaw: (prompt, cwd) => ['openclaw', 'exec', '--json', '--sandbox', 'workspace-write', '--cd', cwd, prompt],
+};
+
+export function buildAgentExecutionPlan(task: ApprovedTask, workspacePath: string, agentId: string, options: { execute?: boolean } = {}): CodexExecutionPlan {
+  const execute = options.execute === true;
+  const prompt = buildTaskPrompt(task);
+  const builder = AGENT_COMMAND_BUILDERS[agentId];
+  if (!builder) throw new Error(`Agent "${agentId}" does not have a verified non-interactive execution adapter.`);
+  return {
+    mode: execute ? 'execute' : 'dry-run',
+    taskId: task.id,
+    workspacePath,
+    command: builder(prompt, workspacePath),
+    forbiddenPaths: ['.env', '.env.*', '.git/config', '~/.ssh', 'production secrets'],
+    acceptanceCriteria: task.acceptanceCriteria,
+    noExternalChanges: !execute,
+    executionAllowed: execute,
+  };
+}
+
+export function isAgentExecutable(agentId: string): boolean {
+  return agentId in AGENT_COMMAND_BUILDERS;
+}
+
+function buildTaskPrompt(task: ApprovedTask): string {
+  return [
     `Implement the approved feature task: ${task.title}`,
     `Objective: ${task.objective}`,
     'Acceptance criteria:',
@@ -47,14 +104,50 @@ export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: strin
     'Work only in this task workspace. Do not access secrets, production systems, or paths outside the workspace.',
     'After implementation, summarize changed files and remaining risks. Do not claim acceptance without evidence.',
   ].join('\n');
-  return {
-    mode: 'dry-run',
-    taskId: task.id,
-    workspacePath,
-    command: ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--ask-for-approval', 'never', '--cd', workspacePath, prompt],
-    forbiddenPaths: ['.env', '.env.*', '.git/config', '~/.codex', '~/.ssh', 'production secrets'],
-    acceptanceCriteria: task.acceptanceCriteria,
-    noExternalChanges: true,
-    executionAllowed: false,
-  };
+}
+
+function boundedAppend(current: string, chunk: string) {
+  const next = current + chunk;
+  return next.length > MAX_OUTPUT_LENGTH ? `${next.slice(0, MAX_OUTPUT_LENGTH)}\n[output truncated]` : next;
+}
+
+function safeEnvironment() {
+  return Object.fromEntries(SAFE_ENV_KEYS.flatMap(key => process.env[key] ? [[key, process.env[key] as string]] : []));
+}
+
+export type CodexProcessRunner = (command: string, arguments_: string[], options: {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}) => Promise<CodexExecutionResult>;
+
+export const runCodexProcess: CodexProcessRunner = (command, arguments_, options) => new Promise(resolve => {
+  const startedAt = new Date().toISOString();
+  const child: ChildProcess = spawn(command, arguments_, { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGTERM');
+    setTimeout(() => {
+      if (!child.killed) child.kill('SIGKILL');
+    }, 5_000).unref();
+  }, options.timeoutMs);
+  child.stdout?.on('data', chunk => { output = boundedAppend(output, String(chunk)); });
+  child.stderr?.on('data', chunk => { output = boundedAppend(output, String(chunk)); });
+  child.once('error', error => {
+    clearTimeout(timeout);
+    resolve({ exitCode: null, signal: null, timedOut, output: boundedAppend(output, error.message), startedAt, completedAt: new Date().toISOString() });
+  });
+  child.once('close', (exitCode, signal) => {
+    clearTimeout(timeout);
+    resolve({ exitCode, signal, timedOut, output, startedAt, completedAt: new Date().toISOString() });
+  });
+});
+
+export async function executeCodexPlan(plan: CodexExecutionPlan, runner: CodexProcessRunner = runCodexProcess, timeoutMs = 180_000) {
+  if (!plan.executionAllowed || plan.mode !== 'execute' || plan.noExternalChanges) {
+    throw new Error('Agent execution requires an explicitly approved execute plan.');
+  }
+  return runner(plan.command[0], plan.command.slice(1), { cwd: plan.workspacePath, env: safeEnvironment(), timeoutMs });
 }

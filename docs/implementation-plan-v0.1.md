@@ -95,11 +95,11 @@ agent-dev/
 | Dry Run | Provider `discover/plan` | 无外部副作用，展示 Diff/权限/费用 |
 | 项目脚手架 | `templates/web-saas` | 本地可测试并具备 CI |
 | 平台连接 | 四个 Provider Adapter | 创建后重新读取真实状态验证 |
-| 联合部署 | `deployment-composer` | API/页面 URL 均可访问并联合 smoke |
-| Agent 执行 | `LocalCodexRuntime` | 隔离 worktree、范围受控、可取消 |
+| 联合部署 | `deployment-composer` | API/页面 URL 均可访问并联合 smoke；Composer 已实现（7 步幂等编排含 Vercel SSO Protection 关闭、精确 CORS、临时项目清理），10 个单元测试通过，真实云端端到端待验证（需安装 Vercel/Wrangler CLI） |
+| Agent 执行 | `LocalCodexRuntime` + Runtime Catalog API | 隔离 worktree、范围受控、可取消；内置 Agent 探测和 custom 名称/命令登记已完成，Studio 选择待完成 |
 | 质量门禁 | Quality Contract + GitHub Actions | 本地/CI 命令语义一致 |
 | 人工 Gate | `workflow` + `approvals` | 暂停、重启进程、恢复后继续 |
-| 失败恢复 | `step_runs` + retry policy | 最多两次，第三次可靠暂停 |
+| 失败恢复 | Apply retry policy + Runtime attempt history | Apply 最多两次；Runtime 失败可显式 Retry，所有 attempt 保留在 JSON/Markdown evidence |
 | 交付报告 | `evidence` | 每个验收标准映射真实证据 |
 
 ## 6. 开发阶段

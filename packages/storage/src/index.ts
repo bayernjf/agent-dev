@@ -9,7 +9,7 @@ import { drizzle } from 'drizzle-orm/sql-js';
 import initSqlJs, { type Database } from 'sql.js';
 import type { ProductBlueprint } from '@agent-dev/blueprint';
 import { createBaselinePlan, createDryRunPlan, productBlueprintSchema } from '@agent-dev/blueprint';
-import { buildCodexExecutionPlan, type CodexExecutionPlan } from '@agent-dev/agent-runtime';
+import { buildAgentExecutionPlan, executeCodexPlan, isAgentExecutable, type CodexExecutionPlan, type CodexExecutionResult, type CodexProcessRunner } from '@agent-dev/agent-runtime';
 import { createNeedsInputRun, restoreDeliveryActor, type DeliveryEvent, type DeliverySnapshot, type DeliveryState } from '@agent-dev/workflow';
 import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects } from './schema.js';
 import { migrations } from './migrations.js';
@@ -126,10 +126,23 @@ export type RuntimeRun = {
   taskId: string;
   projectId: string;
   blueprintRevision: number;
-  status: 'planned' | 'cancelled';
+  agentId: string;
+  status: 'planned' | 'running' | 'completed' | 'failed' | 'cancelled';
   plan: CodexExecutionPlan;
+  result?: CodexExecutionResult;
+  attempts: number;
+  history: RuntimeAttempt[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type RuntimeAttempt = {
+  attempt: number;
+  status: 'running' | 'completed' | 'failed';
+  plan: CodexExecutionPlan;
+  result?: CodexExecutionResult;
+  startedAt: string;
+  completedAt?: string;
 };
 
 export type GitEvidence = {
@@ -621,16 +634,17 @@ export class AgentDevStore {
     await writeFile(join(task.workspacePath, 'TASK_APPROVAL.md'), `# Feature Task Approval\n\n- Task: ${approved.title}\n- Approved by: ${approved.approvedBy}\n- Approved at: ${approved.approvedAt}\n- Blueprint revision: ${approved.blueprintRevision}\n\nThe acceptance criteria in FEATURE_TASK.md are the governing human approval boundary for this task.\n`, 'utf8');
     await execFileAsync('git', ['add', 'feature-task.json', 'FEATURE_TASK.md', 'TASK_APPROVAL.md'], { cwd: task.workspacePath });
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `task: approve ${approved.title}`], { cwd: task.workspacePath });
+    await this.advanceDelivery(projectId, [{ type: 'START_IMPLEMENTATION' }]);
     return approved;
   }
 
-  async prepareRuntimeRun(projectId: string, blueprintRevision: number): Promise<RuntimeRun> {
+  async prepareRuntimeRun(projectId: string, blueprintRevision: number, agentId = 'codex'): Promise<RuntimeRun> {
     const task = await this.getFeatureTask(projectId, blueprintRevision);
     if (!task || task.status !== 'approved') throw new Error('Approve a Feature Task before preparing a Runtime run.');
     const existing = await this.getRuntimeRun(projectId, blueprintRevision);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, status: 'planned', plan: buildCodexExecutionPlan(task, task.workspacePath), createdAt: now, updatedAt: now };
+    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId, status: 'planned', plan: isAgentExecutable(agentId) ? buildAgentExecutionPlan(task, task.workspacePath, agentId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex'), attempts: 0, history: [], createdAt: now, updatedAt: now };
     await writeFile(join(task.workspacePath, 'runtime-run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8');
     await writeFile(join(task.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(run, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
     await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: task.workspacePath });
@@ -638,11 +652,77 @@ export class AgentDevStore {
     return run;
   }
 
+  async executeRuntimeRun(projectId: string, blueprintRevision: number, runner?: CodexProcessRunner): Promise<RuntimeRun> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task || task.status !== 'approved') throw new Error('Approve a Feature Task before executing Runtime.');
+    const existing = await this.getRuntimeRun(projectId, blueprintRevision);
+    if (!existing) throw new Error('Prepare a Runtime run before executing it.');
+    if (existing.status === 'completed') return existing;
+    if (existing.status === 'running') throw new Error('A Runtime run is already executing.');
+    if (existing.status === 'cancelled') throw new Error('A cancelled Runtime run cannot be executed. Prepare a new run.');
+    if (existing.status === 'failed') throw new Error('A failed Runtime run must be retried explicitly.');
+
+    return this.executeRuntimeAttempt(task, existing, runner);
+  }
+
+  async retryRuntimeRun(projectId: string, blueprintRevision: number, runner?: CodexProcessRunner): Promise<RuntimeRun> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task || task.status !== 'approved') throw new Error('Approve a Feature Task before retrying Runtime.');
+    const existing = await this.getRuntimeRun(projectId, blueprintRevision);
+    if (!existing) throw new Error('No Runtime run is prepared.');
+    if (existing.status !== 'failed') throw new Error('Only a failed Runtime run can be retried.');
+    return this.executeRuntimeAttempt(task, existing, runner);
+  }
+
+  private async executeRuntimeAttempt(task: FeatureTask, existing: RuntimeRun, runner?: CodexProcessRunner): Promise<RuntimeRun> {
+    const attemptNumber = existing.attempts + 1;
+    const plan = buildAgentExecutionPlan(task, task.workspacePath, existing.agentId && isAgentExecutable(existing.agentId) ? existing.agentId : 'codex', { execute: true });
+    const startedAt = new Date().toISOString();
+    const attempt: RuntimeAttempt = { attempt: attemptNumber, status: 'running', plan, startedAt };
+
+    const run: RuntimeRun = {
+      ...existing,
+      status: 'running',
+      plan,
+      attempts: attemptNumber,
+      history: [...existing.history, attempt],
+      updatedAt: startedAt,
+    };
+    await this.writeRuntimeRun(run, 'runtime: start Codex execution');
+
+    let result: CodexExecutionResult;
+    try {
+      result = await executeCodexPlan(run.plan, runner);
+    } catch (error) {
+      result = {
+        exitCode: null,
+        signal: null,
+        timedOut: false,
+        output: error instanceof Error ? error.message : String(error),
+        startedAt,
+        completedAt: new Date().toISOString(),
+      };
+    }
+    const completed: RuntimeRun = {
+      ...run,
+      status: result.exitCode === 0 && !result.timedOut ? 'completed' : 'failed',
+      result,
+      updatedAt: result.completedAt,
+      history: run.history.map(item => item.attempt === attemptNumber ? { ...item, status: result.exitCode === 0 && !result.timedOut ? 'completed' : 'failed', result, completedAt: result.completedAt } : item),
+    };
+    await this.writeRuntimeRun(completed, `runtime: ${completed.status}`);
+    if (completed.status === 'completed') {
+      await this.advanceDelivery(task.projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }]);
+    }
+    return completed;
+  }
+
   async getRuntimeRun(projectId: string, blueprintRevision: number): Promise<RuntimeRun | null> {
     const task = await this.getFeatureTask(projectId, blueprintRevision);
     if (!task) return null;
     try {
-      return JSON.parse(await readFile(join(task.workspacePath, 'runtime-run.json'), 'utf8')) as RuntimeRun;
+      const parsed = JSON.parse(await readFile(join(task.workspacePath, 'runtime-run.json'), 'utf8')) as RuntimeRun;
+      return { ...parsed, agentId: parsed.agentId ?? 'codex', attempts: parsed.attempts ?? (parsed.result ? 1 : 0), history: parsed.history ?? (parsed.result ? [{ attempt: 1, status: parsed.status === 'completed' ? 'completed' : 'failed', plan: parsed.plan, result: parsed.result, startedAt: parsed.result.startedAt, completedAt: parsed.result.completedAt }] : []) };
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
       throw error;
@@ -653,6 +733,8 @@ export class AgentDevStore {
     const run = await this.getRuntimeRun(projectId, blueprintRevision);
     if (!run) throw new Error('No Runtime run is prepared.');
     if (run.status === 'cancelled') return run;
+    if (run.status === 'running') throw new Error('A running Runtime process must be cancelled through its process controller.');
+    if (run.status === 'completed' || run.status === 'failed') throw new Error('A finished Runtime run cannot be cancelled.');
     const cancelled: RuntimeRun = { ...run, status: 'cancelled', updatedAt: new Date().toISOString() };
     await writeFile(join(run.plan.workspacePath, 'runtime-run.json'), JSON.stringify(cancelled, null, 2) + '\n', 'utf8');
     await writeFile(join(run.plan.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(cancelled, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
@@ -708,6 +790,7 @@ export class AgentDevStore {
     await writeFile(join(run.workspacePath, 'ACCEPTANCE_REPORT.md'), this.buildAcceptanceReport(record), 'utf8');
     await execFileAsync('git', ['add', 'acceptance.json', 'ACCEPTANCE_REPORT.md'], { cwd: run.workspacePath });
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `acceptance: approve delivery`], { cwd: run.workspacePath });
+    await this.advanceDelivery(projectId, [{ type: 'VERIFY_COMPLETE' }]);
     return record;
   }
 
@@ -811,7 +894,19 @@ export class AgentDevStore {
   }
 
   private buildRuntimeRunReport(run: RuntimeRun, evidence: GitEvidence) {
-    return `# Runtime Run Report\n\n- Run: ${run.id}\n- Task: ${run.taskId}\n- Status: ${run.status}\n- Mode: ${run.plan.mode}\n- Execution allowed: ${run.plan.executionAllowed}\n- No external changes: ${run.plan.noExternalChanges}\n\n## Planned command\n\n\`\`\`text\n${run.plan.command.join(' ')}\n\`\`\`\n\n## Git evidence\n\n- Branch: ${evidence.branch}\n- HEAD: ${evidence.head}\n- Working tree: ${evidence.status || 'clean'}\n- Diff stat: ${evidence.diffStat || 'no changes'}\n\n## Boundary\n\nThis run records a guarded dry-run plan only. No Codex process was started and no feature code was changed.\n`;
+    const result = run.result ? `\n## Execution result\n\n- Exit code: ${run.result.exitCode ?? 'none'}\n- Signal: ${run.result.signal ?? 'none'}\n- Timed out: ${run.result.timedOut}\n- Started: ${run.result.startedAt}\n- Completed: ${run.result.completedAt}\n\n\`\`\`text\n${run.result.output}\n\`\`\`\n` : '';
+    const boundary = run.status === 'planned' || run.status === 'cancelled'
+      ? 'This run records a guarded dry-run plan only. No Codex process was started and no feature code was changed.'
+      : 'Codex execution was explicitly requested for this approved task. Quality Gate and human acceptance are still required.';
+    const history = run.history.length ? `\n## Attempt history\n\n${run.history.map(item => `### Attempt ${item.attempt}\n\n- Status: ${item.status}\n- Started: ${item.startedAt}\n- Completed: ${item.completedAt ?? 'in progress'}\n- Exit code: ${item.result?.exitCode ?? 'none'}\n- Timed out: ${item.result?.timedOut ?? false}\n`).join('\n')}` : '';
+    return `# Runtime Run Report\n\n- Run: ${run.id}\n- Task: ${run.taskId}\n- Agent: ${run.agentId}\n- Status: ${run.status}\n- Attempts: ${run.attempts}\n- Mode: ${run.plan.mode}\n- Execution allowed: ${run.plan.executionAllowed}\n- No external changes: ${run.plan.noExternalChanges}\n\n## Planned command\n\n\`\`\`text\n${run.plan.command.join(' ')}\n\`\`\`\n${history}${result}\n## Git evidence\n\n- Branch: ${evidence.branch}\n- HEAD: ${evidence.head}\n- Working tree: ${evidence.status || 'clean'}\n- Diff stat: ${evidence.diffStat || 'no changes'}\n\n## Boundary\n\n${boundary}\n`;
+  }
+
+  private async writeRuntimeRun(run: RuntimeRun, commitMessage: string) {
+    await writeFile(join(run.plan.workspacePath, 'runtime-run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8');
+    await writeFile(join(run.plan.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(run, await this.getGitEvidence(run.projectId, run.blueprintRevision)), 'utf8');
+    await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: run.plan.workspacePath });
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', commitMessage], { cwd: run.plan.workspacePath });
   }
 
   private buildAcceptanceReport(record: AcceptanceRecord) {

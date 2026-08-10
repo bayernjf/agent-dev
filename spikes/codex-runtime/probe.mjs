@@ -107,7 +107,6 @@ async function main() {
     'never',
     'exec',
     '--ephemeral',
-    '--ignore-user-config',
     '--sandbox',
     writeMode ? 'workspace-write' : 'read-only',
     '--json',
