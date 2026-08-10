@@ -41,7 +41,7 @@ Probe 输出只汇总版本、退出码、信号、事件类型、最终结构�
 - 只读模式使用 `--sandbox read-only`；
 - 写入模式使用 `--sandbox workspace-write`，工作目录是新建临时仓库；
 - 使用 `--ephemeral`，不保存可恢复 Session；
-- 使用 `--ignore-user-config`，减少个人配置对实验的影响，但认证仍由 Codex 自己管理；
+- 使用用户当前 Codex 配置和认证状态；Probe 不读取或打印认证凭据；
 - 不使用 `--dangerously-bypass-approvals-and-sandbox`；
 - 180 秒后发送 `SIGTERM`，5 秒后仍未退出才发送 `SIGKILL`；
 - 输出中对形似 OpenAI API Key 的内容进行脱敏。

@@ -6,7 +6,7 @@ Agent-Dev 是面向 AI 产品创作者的自主产品交付平台。它不替代
 
 ## 第一版定位
 
-`v0.1` 面向已经使用 GitHub 和 Codex 的独立开发者，提供一条固定的 Web SaaS Golden Path：
+`v0.1` 面向已经使用 GitHub 和 Codex 的独立开发者，先提供一条固定的 Web SaaS Golden Path。Web SaaS 是验证交付控制面的第一种产品类型，不是 Agent-Dev 的最终产品边界。多产品类型的扩展原则和阶段见 [多产品类型交付方案](docs/multi-product-delivery-plan.md)。
 
 ```text
 React/Vite 前端 -> Cloudflare Pages
@@ -32,12 +32,14 @@ Agent Runtime  -> 用户电脑中的 Codex
 - [v0.1 实施计划](docs/implementation-plan-v0.1.md)：Agent-Dev 自身技术选型、PRD 工程拆解、完成定义和开发顺序。
 - [Product Blueprint 规范](docs/blueprint-spec.md)：模块化问卷、候选项、自定义答案、继承、版本和生成物。
 - [环境变量与平台连接](docs/environment-and-connectors.md)：Env Contract、Secrets、Provider Adapter 和最小人工步骤。
+- [Agent Runtime Catalog](docs/agent-runtime-catalog.md)：内置 Agent 自动识别、自定义 Agent 最小配置和 Runtime 选择策略。
 
 ### 规划与依据
 
 - [市场与竞争分析](docs/market-analysis.md)：相邻产品、竞争压力、差异化与商业判断。
 - [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)：六个真实项目到 Blueprint、Adapter 和验收用例的映射。
 - [产品路线图](docs/roadmap.md)：从内部闭环到托管运行时、模板生态和企业能力。
+- [多产品类型交付方案](docs/multi-product-delivery-plan.md)：Web SaaS、落地页、浏览器插件、桌面端和移动端的共享层、类型层与推进门槛。
 - [AI Agent 全周期开发 SOP](ai-agent-development-sop.md)：需求到生产交付的通用治理基线。
 - [现有项目组合复盘](portfolio-development-review.md)：六个已有项目的流程资产、缺口和证据。
 
@@ -73,10 +75,12 @@ Agent Runtime  -> 用户电脑中的 Codex
 - Studio 会检查生成工作区的 `node_modules`、TypeScript quality binary 和 lock file 状态；依赖未安装时给出本地 `npm install` 指引，并禁用质量门禁执行；
 - 依赖安装是独立的显式动作（`INSTALL_DEPENDENCIES`）：只在用户确认后运行 `npm install`，并生成 `dependency-install.json` 与 `DEPENDENCY_INSTALL_REPORT.md`；
 - Local Apply 完成后可在 Studio 创建 Feature Task，提交目标、验收标准和任务边界；人工批准后生成 `TASK_APPROVAL.md` 并提交到本地 feature 分支；
-- 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；当前 Runtime 执行器仍未接入真实 Codex 写入，先保留任务证据和边界。
-- Runtime Adapter 已能生成受 sandbox、workspace 和禁止路径约束的 Codex dry-run 命令计划，并探测 CLI 是否存在；认证和真实写入验证未通过前不会执行命令。
-- Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期、Git branch/HEAD/diff evidence 和 `RUNTIME_RUN_REPORT.md`；它不会把计划状态标记为代码已完成。
-- Studio 已展示 Runtime Run 状态、取消动作和 Git evidence；当前界面不会提供绕过 Gate 的 Codex 写入按钮。
+- 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；默认仍先生成 dry-run 计划。
+- Runtime Adapter 已能生成受 sandbox、workspace 和禁止路径约束的 Codex 计划，并通过环境变量白名单启动显式批准的 `workspace-write` 执行；认证和真实写入成功路径仍未验证前，不应宣称功能已交付。
+- Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence、attempt 历史和 `RUNTIME_RUN_REPORT.md`；失败运行可通过 `RETRY_RUNTIME_RUN` 显式重试，历史不会被覆盖。
+- Studio 已展示 Runtime Run 状态、取消动作、显式 `Run Codex`/`Retry Codex` 按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
+- Daemon 已提供 `/api/runtime/catalog`，内置 Agent 来自 `agents.builtin.conf`，可登记名称 + 启动命令的 custom Agent；内置未安装项隐藏，custom 未安装项置灰并保存到 `.agent-dev/agents.conf`。
+- 凭证管理 Phase 1 已提供本地凭证文件、连接元数据、项目资源清单、`.env` 生成器和 daemon API；Secret 不返回 API、不写入数据库。Studio 凭证面板和 Supabase 真实 Adapter 尚未实现。
 - Acceptance Gate 已接入 Studio：提交验收总结和标准确认后，根据 Quality Gate/Git evidence 生成 `ACCEPTANCE_REPORT.md`；blocked 状态不能批准交付。
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
@@ -97,7 +101,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 当前阻塞：
 
-- 本机 Codex 认证无效，Runtime 成功路径尚未验证；
+- 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；真实功能任务已能启动并产生隔离 workspace 改动，首个任务在 180 秒上限内超时并被正确记录；失败重试和 attempt 历史已实现，但真正的 Codex session resume 仍未接入；
 - Vercel Preview 公网访问超时，Cloudflare/Vercel 联合 Preview 尚未通过；
 - Supabase CLI 的本地状态目录与当前文件边界冲突，Auth Redirect 尚未进行真实平台验证。
 

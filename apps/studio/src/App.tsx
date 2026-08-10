@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles,
+  Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, KeyRound, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles,
 } from 'lucide-react';
 import { getBlueprintDecisions, type BaselinePlan, type BlueprintAnswers, type DryRunPlan, type ProductBlueprint } from '@agent-dev/blueprint';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
@@ -23,11 +23,25 @@ type DependencyReadiness = { status: 'not-applied' | 'missing-dependencies' | 'r
 type QualityGateResult = { status: 'passed' | 'failed'; command: string; exitCode: number; output: string; completedAt: string };
 type DependencyInstallResult = { status: 'installed' | 'failed'; exitCode: number; output: string; completedAt: string };
 type FeatureTask = { id: string; blueprintRevision: number; title: string; objective: string; acceptanceCriteria: string[]; status: 'draft' | 'approved'; approvedBy?: string; approvedAt?: string };
-type RuntimeRun = { id: string; status: 'planned' | 'cancelled'; taskId: string; blueprintRevision: number; plan: { mode: 'dry-run'; executionAllowed: false; noExternalChanges: true; command: string[] } };
+type RuntimeAttempt = { attempt: number; status: 'running' | 'completed' | 'failed'; startedAt: string; completedAt?: string; result?: { exitCode: number | null; signal: string | null; timedOut: boolean; output: string } };
+type RuntimeRun = { id: string; status: 'planned' | 'running' | 'completed' | 'failed' | 'cancelled'; taskId: string; blueprintRevision: number; agentId: string; attempts: number; history: RuntimeAttempt[]; plan: { mode: 'dry-run' | 'execute'; executionAllowed: boolean; noExternalChanges: boolean; command: string[] }; result?: { exitCode: number | null; signal: string | null; timedOut: boolean; output: string } };
 type GitEvidence = { branch: string; head: string; status: string; diffStat: string };
 type AcceptanceRecord = { status: 'blocked' | 'ready' | 'approved'; summary: string; criteriaConfirmed: boolean; qualityStatus: 'passed' | 'failed' | 'missing'; approvedBy?: string; approvedAt?: string };
 type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
 type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
+type AgentDescriptor = { id: string; name: string; source: 'built-in' | 'custom'; launchCommand: string; detected: boolean; version: string | null; detail: string; capabilities: string[] };
+type CredentialMeta = { version: 1; updatedAt: string; keys: string[] };
+type ProjectResources = { version: number; projectName: string; projectId: string; blueprintRevision: number; updatedAt: string; providers: Record<string, Record<string, unknown>> } | null;
+type CredentialVerifyResult = { providerId: string; status: 'valid' | 'invalid' | 'not_set'; detail: string };
+type PreviewStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped'; detail?: string };
+type PreviewDeploymentResult = { status: 'completed' | 'failed' | 'cancelled'; steps: PreviewStep[]; apiBaseUrl?: string; pagesUrl?: string; corsOrigin?: string; evidence?: Record<string, string>; cleanupRequired?: { vercel?: string; cloudflare?: string } };
+
+const PROVIDER_FIELDS = [
+  { key: 'GITHUB_TOKEN', label: 'GitHub Token', tutorial: 'https://github.com/settings/tokens', hint: 'Generate a classic token with repo and workflow scopes.', providerId: 'github' },
+  { key: 'VERCEL_TOKEN', label: 'Vercel Token', tutorial: 'https://vercel.com/account/tokens', hint: 'Create a token with Full Account scope.', providerId: 'vercel' },
+  { key: 'CLOUDFLARE_API_TOKEN', label: 'Cloudflare API Token', tutorial: 'https://dash.cloudflare.com/profile/api-tokens', hint: 'Use the Edit Cloudflare Workers template.', providerId: 'cloudflare' },
+  { key: 'SUPABASE_ACCESS_TOKEN', label: 'Supabase Access Token', tutorial: 'https://supabase.com/dashboard/account/tokens', hint: 'Generate a new access token.', providerId: 'supabase' },
+] as const;
 
 const defaultAnswers: BlueprintAnswers = {
   mode: 'beginner',
@@ -102,6 +116,27 @@ export function App() {
   const [featureCriteria, setFeatureCriteria] = useState('');
   const [acceptanceSummary, setAcceptanceSummary] = useState('');
   const [criteriaConfirmed, setCriteriaConfirmed] = useState(false);
+  const [agents, setAgents] = useState<AgentDescriptor[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [savingAgent, setSavingAgent] = useState(false);
+  const [customAgentName, setCustomAgentName] = useState('');
+  const [customAgentCommand, setCustomAgentCommand] = useState('');
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [credentialMeta, setCredentialMeta] = useState<CredentialMeta | null>(null);
+  const [credentialInputs, setCredentialInputs] = useState<Record<string, string>>({});
+  const [savingCredentials, setSavingCredentials] = useState(false);
+  const [projectResources, setProjectResources] = useState<ProjectResources>(null);
+  const [regeneratingEnv, setRegeneratingEnv] = useState(false);
+  const [verifyResults, setVerifyResults] = useState<CredentialVerifyResult[]>([]);
+  const [verifying, setVerifying] = useState(false);
+  const [guideMode, setGuideMode] = useState(false);
+  const [guideStep, setGuideStep] = useState(0);
+  const [newCustomKey, setNewCustomKey] = useState('');
+  const [newCustomValue, setNewCustomValue] = useState('');
+  const [supabaseInputs, setSupabaseInputs] = useState<{ SUPABASE_URL: string; SUPABASE_ANON_KEY: string; SUPABASE_SERVICE_ROLE_KEY: string }>({ SUPABASE_URL: '', SUPABASE_ANON_KEY: '', SUPABASE_SERVICE_ROLE_KEY: '' });
+  const [previewBranch, setPreviewBranch] = useState('preview');
+  const [previewResult, setPreviewResult] = useState<PreviewDeploymentResult | null>(null);
+  const [deployingPreview, setDeployingPreview] = useState(false);
 
   const decisions = useMemo(() => selected ? getBlueprintDecisions(selected.blueprint) : [], [selected]);
   const selectedArtifact = useMemo(
@@ -142,6 +177,7 @@ export function App() {
       void loadAcceptance(projectId);
       void loadFinalDeliveryReport(projectId);
       void loadProviderPlan(projectId);
+      void loadProjectResources(projectId);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load this Blueprint.');
@@ -275,6 +311,181 @@ export function App() {
       setProviderReport('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load the provider simulation plan.');
+    }
+  };
+
+  const loadAgents = async () => {
+    setLoadingAgents(true);
+    try {
+      const response = await fetch('/api/runtime/catalog');
+      if (!response.ok) throw new Error('Unable to load the Agent Catalog.');
+      const payload = await response.json() as { agents: AgentDescriptor[] };
+      setAgents(payload.agents);
+      setSelectedAgentId(current => {
+        if (current && payload.agents.some(agent => agent.id === current)) return current;
+        const firstDetected = payload.agents.find(agent => agent.detected);
+        return firstDetected?.id ?? payload.agents[0]?.id ?? null;
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load the Agent Catalog.');
+    } finally {
+      setLoadingAgents(false);
+    }
+  };
+
+  const addCustomAgent = async () => {
+    if (customAgentName.trim().length < 1 || customAgentCommand.trim().length < 1) {
+      setError('Custom Agent requires both a name and a launch command.');
+      return;
+    }
+    setSavingAgent(true);
+    try {
+      const response = await fetch('/api/runtime/catalog', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: customAgentName.trim(), launchCommand: customAgentCommand.trim() }),
+      });
+      const payload = await response.json() as { agent?: AgentDescriptor; error?: string };
+      if (!response.ok || !payload.agent) throw new Error(payload.error ?? 'Unable to register the custom Agent.');
+      await loadAgents();
+      setSelectedAgentId(payload.agent.id);
+      setCustomAgentName('');
+      setCustomAgentCommand('');
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to register the custom Agent.');
+    } finally {
+      setSavingAgent(false);
+    }
+  };
+
+  const loadCredentials = async () => {
+    try {
+      const response = await fetch('/api/credentials');
+      if (!response.ok) throw new Error('Unable to load credential status.');
+      const payload = await response.json() as { meta: CredentialMeta };
+      setCredentialMeta(payload.meta);
+      if (payload.meta.keys.length === 0 && !guideMode) setGuideMode(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load credential status.');
+    }
+  };
+
+  const verifyAllCredentials = async () => {
+    setVerifying(true);
+    try {
+      const response = await fetch('/api/credentials/verify', { method: 'POST' });
+      if (!response.ok) throw new Error('Unable to verify credentials.');
+      const payload = await response.json() as { results: CredentialVerifyResult[] };
+      setVerifyResults(payload.results);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to verify credentials.');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const addCustomKey = async () => {
+    const key = newCustomKey.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    const value = newCustomValue.trim();
+    if (!key || !value) { setError('Both key name and value are required for custom API keys.'); return; }
+    if (credentialMeta?.keys.includes(key)) { setError(`Key "${key}" already exists.`); return; }
+    setSavingCredentials(true);
+    try {
+      const response = await fetch('/api/credentials', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ [key]: value }),
+      });
+      const payload = await response.json() as { saved?: boolean; meta?: CredentialMeta; error?: string };
+      if (!response.ok || !payload.saved) throw new Error(payload.error ?? 'Unable to save custom key.');
+      setCredentialMeta(payload.meta ?? null);
+      setNewCustomKey('');
+      setNewCustomValue('');
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to save custom key.');
+    } finally {
+      setSavingCredentials(false);
+    }
+  };
+
+  const saveSupabaseManual = async () => {
+    const entries = Object.entries(supabaseInputs).filter(([, v]) => (v as string).trim().length > 0);
+    if (entries.length === 0) { setError('Fill in at least the Supabase URL before saving.'); return; }
+    setSavingCredentials(true);
+    try {
+      const response = await fetch('/api/credentials', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(entries.map(([key, value]) => [key, value.trim()]))),
+      });
+      const payload = await response.json() as { saved?: boolean; meta?: CredentialMeta; error?: string };
+      if (!response.ok || !payload.saved) throw new Error(payload.error ?? 'Unable to save Supabase credentials.');
+      setCredentialMeta(payload.meta ?? null);
+      setSupabaseInputs({ SUPABASE_URL: '', SUPABASE_ANON_KEY: '', SUPABASE_SERVICE_ROLE_KEY: '' });
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to save Supabase credentials.');
+    } finally {
+      setSavingCredentials(false);
+    }
+  };
+
+  const saveCredentialValues = async () => {
+    const entries = Object.entries(credentialInputs).filter(([, value]) => value.trim().length > 0);
+    if (entries.length === 0) { setError('Fill in at least one token before saving.'); return; }
+    setSavingCredentials(true);
+    try {
+      const response = await fetch('/api/credentials', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(entries.map(([key, value]) => [key, value.trim()]))),
+      });
+      const payload = await response.json() as { saved?: boolean; meta?: CredentialMeta; error?: string };
+      if (!response.ok || !payload.saved) throw new Error(payload.error ?? 'Unable to save credentials.');
+      setCredentialMeta(payload.meta ?? null);
+      setCredentialInputs({});
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to save credentials.');
+    } finally {
+      setSavingCredentials(false);
+    }
+  };
+
+  const deleteCredential = async (key: string) => {
+    if (!window.confirm(`Delete ${key} from the local credential file?`)) return;
+    try {
+      const response = await fetch(`/api/credentials/${key}`, { method: 'DELETE' });
+      const payload = await response.json() as { saved?: boolean; meta?: CredentialMeta; error?: string };
+      if (!response.ok || !payload.saved) throw new Error(payload.error ?? 'Unable to delete credential.');
+      setCredentialMeta(payload.meta ?? null);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to delete credential.');
+    }
+  };
+
+  const loadProjectResources = async (projectId: string) => {
+    try {
+      const response = await fetch(`/api/projects/${projectId}/resources`);
+      if (!response.ok) throw new Error('Unable to load project resources.');
+      const payload = await response.json() as { resources: ProjectResources };
+      setProjectResources(payload.resources);
+    } catch {
+      setProjectResources(null);
+    }
+  };
+
+  const regenerateEnv = async () => {
+    if (!selected) return;
+    setRegeneratingEnv(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/env/regenerate`, { method: 'POST' });
+      if (!response.ok) throw new Error('Unable to regenerate .env.');
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to regenerate .env.');
+    } finally {
+      setRegeneratingEnv(false);
     }
   };
 
@@ -440,6 +651,50 @@ export function App() {
     }
   };
 
+  const deployPreview = async () => {
+    if (!selected || !applyRun || applyRun.status !== 'completed' || deployingPreview) return;
+    if (!/^[a-z0-9-]+$/.test(previewBranch)) {
+      setError('Preview branch must contain only lowercase letters, digits, and hyphens.');
+      return;
+    }
+    setDeployingPreview(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/preview/deploy`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'DEPLOY_PREVIEW', previewBranch }),
+      });
+      const payload = await response.json() as { result?: PreviewDeploymentResult; error?: string };
+      if (!payload.result) throw new Error(payload.error ?? 'Unable to deploy preview.');
+      setPreviewResult(payload.result);
+      if (payload.result.status !== 'completed') setError(`Preview deployment ${payload.result.status}. Check step details.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to deploy preview.');
+    } finally {
+      setDeployingPreview(false);
+    }
+  };
+
+  const cleanupPreview = async () => {
+    if (!selected || !previewResult?.cleanupRequired) return;
+    if (!window.confirm('Delete the preview projects from Vercel and Cloudflare?')) return;
+    setDeployingPreview(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/preview/cleanup`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'CLEANUP_PREVIEW', vercelProject: previewResult.cleanupRequired.vercel, cloudflareProject: previewResult.cleanupRequired.cloudflare }),
+      });
+      const payload = await response.json() as { cleanup?: { vercel: boolean; cloudflare: boolean; errors: { provider: string; project: string; detail: string }[] }; error?: string };
+      if (!payload.cleanup) throw new Error(payload.error ?? 'Unable to cleanup preview.');
+      setPreviewResult(null);
+      if (payload.cleanup.errors.length > 0) setError(`Cleanup partial: ${payload.cleanup.errors.map(e => e.provider).join(', ')} failed.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to cleanup preview.');
+    } finally {
+      setDeployingPreview(false);
+    }
+  };
+
   const createFeatureTask = async () => {
     if (!selected || !applyRun || applyRun.status !== 'completed' || savingFeatureTask) return;
     const acceptanceCriteria = featureCriteria.split('\n').map(value => value.trim()).filter(Boolean);
@@ -491,7 +746,7 @@ export function App() {
     setPreparingRuntime(true);
     try {
       const response = await fetch(`/api/projects/${selected.id}/runtime/run`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'PREPARE_RUNTIME_RUN' }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'PREPARE_RUNTIME_RUN', agentId: selectedAgentId }),
       });
       const payload = await response.json() as { run?: RuntimeRun; error?: string };
       if (!response.ok || !payload.run) throw new Error(payload.error ?? 'Unable to prepare the Runtime run.');
@@ -519,6 +774,46 @@ export function App() {
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to cancel the Runtime run.');
+    } finally {
+      setPreparingRuntime(false);
+    }
+  };
+
+  const executeRuntime = async () => {
+    if (!selected || !runtimeRun || runtimeRun.status !== 'planned' || preparingRuntime) return;
+    if (!window.confirm('Start Codex in the approved workspace? It may modify only that workspace and will not deploy or access production resources.')) return;
+    setPreparingRuntime(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/runtime/execute`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'EXECUTE_RUNTIME_RUN' }),
+      });
+      const payload = await response.json() as { run?: RuntimeRun; error?: string };
+      if (!payload.run) throw new Error(payload.error ?? 'Unable to execute the Runtime run.');
+      setRuntimeRun(payload.run);
+      await loadGitEvidence(selected.id);
+      setError(response.ok ? '' : `Codex execution failed with exit code ${payload.run.result?.exitCode ?? 'none'}.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to execute the Runtime run.');
+    } finally {
+      setPreparingRuntime(false);
+    }
+  };
+
+  const retryRuntime = async () => {
+    if (!selected || !runtimeRun || runtimeRun.status !== 'failed' || preparingRuntime) return;
+    if (!window.confirm('Retry Codex in the same approved workspace? The previous failed attempt will be preserved.')) return;
+    setPreparingRuntime(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/runtime/retry`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RETRY_RUNTIME_RUN' }),
+      });
+      const payload = await response.json() as { run?: RuntimeRun; error?: string };
+      if (!payload.run) throw new Error(payload.error ?? 'Unable to retry the Runtime run.');
+      setRuntimeRun(payload.run);
+      await loadGitEvidence(selected.id);
+      setError(response.ok ? '' : `Codex retry failed with exit code ${payload.run.result?.exitCode ?? 'none'}.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to retry the Runtime run.');
     } finally {
       setPreparingRuntime(false);
     }
@@ -604,6 +899,8 @@ export function App() {
 
   useEffect(() => {
     void loadProjects();
+    void loadAgents();
+    void loadCredentials();
     const source = new EventSource('/events');
     const onEvent = (event: Event) => {
       const payload = JSON.parse((event as MessageEvent<string>).data) as { type: string; projectId: string; projectName: string; occurredAt: string };
@@ -616,6 +913,9 @@ export function App() {
     };
     source.addEventListener('project.created', onEvent);
     source.addEventListener('blueprint.revised', onEvent);
+    source.addEventListener('baseline.approved', onEvent);
+    source.addEventListener('apply.completed', onEvent);
+    source.addEventListener('apply.failed', onEvent);
     return () => source.close();
   }, [selected?.id]);
 
@@ -673,6 +973,8 @@ export function App() {
           <a className="nav-item active" href="#projects"><FolderKanban size={18} aria-hidden="true" />Projects</a>
           <a className="nav-item" href="#decisions"><ShieldCheck size={18} aria-hidden="true" />Decisions</a>
           <a className="nav-item" href="#connections"><PlugZap size={18} aria-hidden="true" />Connections</a>
+          <a className="nav-item" href="#credentials"><KeyRound size={18} aria-hidden="true" />Credentials</a>
+          <a className="nav-item" href="#agents"><CircleDot size={18} aria-hidden="true" />Agents</a>
           <a className="nav-item" href="#activity"><Activity size={18} aria-hidden="true" />Activity</a>
           <a className="nav-item" href="#standards"><Settings2 size={18} aria-hidden="true" />Standards</a>
         </nav>
@@ -725,8 +1027,9 @@ export function App() {
               {baselineApproval && !applyRun && <div className="approval-action"><p>Run the local simulator to create the delivery package in the ignored `.agent-dev` workspace.</p><button className="primary-button" type="button" onClick={() => void applyBaseline()} disabled={applyingBaseline}>{applyingBaseline ? 'Applying locally...' : 'Run local Apply'}<ArrowRight size={16} aria-hidden="true" /></button></div>}
               {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>Attempt {applyRun.attempts} of 3 · {applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? 'Retrying...' : 'Retry local Apply'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}
               {applyRun?.status === 'completed' && dependencyReadiness && <div className={`quality-gate ${dependencyReadiness.status}`}><div><p className="eyebrow">Local quality gate</p><h3>{qualityGateResult ? `Last run: ${qualityGateResult.status}` : dependencyReadiness.status === 'ready' ? 'Ready to run' : 'Dependencies required'}</h3><p>{dependencyReadiness.nextAction}</p></div>{dependencyReadiness.status === 'missing-dependencies' && <button className="secondary-button" type="button" onClick={() => void installDependencies()} disabled={installingDependencies}>{installingDependencies ? 'Installing...' : 'Install dependencies'}<ArrowRight size={15} aria-hidden="true" /></button>}{dependencyReadiness.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void runQualityGate()} disabled={applyingBaseline}>{applyingBaseline ? 'Running...' : 'Run quality gate'}<CheckCircle2 size={15} aria-hidden="true" /></button>}</div>}
+              {applyRun?.status === 'completed' && qualityGateResult?.status === 'passed' && <div className="preview-deployment"><div className="runtime-heading"><div><p className="eyebrow">Dual Preview</p><h3>{previewResult ? `Preview ${previewResult.status}` : 'Deploy Preview Environment'}</h3><p>{previewResult?.status === 'completed' ? `API: ${previewResult.apiBaseUrl} · Pages: ${previewResult.pagesUrl}` : previewResult?.status === 'failed' ? 'Deployment failed. Review steps and cleanup if needed.' : 'Deploy Vercel API + Cloudflare Pages as a joint preview with exact CORS.'}</p></div></div>{!previewResult ? <div className="preview-deploy-form"><label htmlFor="preview-branch">Preview branch</label><input id="preview-branch" value={previewBranch} onChange={event => setPreviewBranch(event.target.value)} placeholder="e.g. pr-42 or feature-x" pattern="[a-z0-9-]+" maxLength={100} /><button className="primary-button" type="button" onClick={() => void deployPreview()} disabled={deployingPreview}>{deployingPreview ? 'Deploying preview...' : 'Deploy Preview'}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="preview-steps"><ol>{previewResult.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{previewResult.status === 'completed' && <div className="preview-urls"><span>API: <a href={previewResult.apiBaseUrl} target="_blank" rel="noreferrer">{previewResult.apiBaseUrl}</a></span><span>Pages: <a href={previewResult.pagesUrl} target="_blank" rel="noreferrer">{previewResult.pagesUrl}</a></span><span>CORS: <code>{previewResult.corsOrigin}</code></span></div>}{previewResult.cleanupRequired && <button className="secondary-button" type="button" onClick={() => void cleanupPreview()} disabled={deployingPreview}>{deployingPreview ? 'Cleaning up...' : 'Cleanup Preview Projects'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}</div>}
               {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">Feature delivery</p><h3>{featureTask ? featureTask.title : 'Define the next feature'}</h3><p>{featureTask ? `Task is ${featureTask.status}. Acceptance criteria are the Agent boundary.` : 'Create a focused task package before asking an Agent to change code.'}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{featureTask.status}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">Task title</label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder="e.g. Add receipt list" maxLength={120} /><label htmlFor="feature-objective">Objective</label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder="What user outcome should this feature deliver?" maxLength={2000} /><label htmlFor="feature-criteria">Acceptance criteria <small>one per line</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder="The list renders saved receipts.\nEmpty state is visible." maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Creating task...' : 'Create feature task'}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.status === 'draft' ? <button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Approving...' : 'Approve task for Agent'}<ShieldCheck size={15} aria-hidden="true" /></button> : <small>Approved by {featureTask.approvedBy} · {featureTask.approvedAt && formatDate(featureTask.approvedAt)}</small>}</div>}</div>}
-              {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">Agent runtime</p><h3>{runtimeRun ? `Dry-run ${runtimeRun.status}` : 'Runtime not prepared'}</h3><p>{runtimeRun ? 'No Codex process has started. Review the local evidence before any future execution.' : 'Prepare a guarded Runtime plan from the approved task.'}</p></div>{runtimeRun?.status === 'planned' ? <button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Cancelling...' : 'Cancel dry-run'}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Preparing...' : 'Prepare Runtime'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{gitEvidence && <div className="git-evidence"><span>Branch <strong>{gitEvidence.branch}</strong></span><span>HEAD <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>Working tree <strong>{gitEvidence.status || 'clean'}</strong></span><span>Diff <strong>{gitEvidence.diffStat || 'no changes'}</strong></span></div>}</div>}
+              {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">Agent runtime{selectedAgentId && agents.find(a => a.id === selectedAgentId) ? ` · ${agents.find(a => a.id === selectedAgentId)!.name}` : ''}</p><h3>{runtimeRun ? `${runtimeRun.plan.mode === 'execute' ? 'Codex' : 'Dry-run'} ${runtimeRun.status}` : 'Runtime not prepared'}</h3><p>{runtimeRun?.status === 'completed' ? 'Codex finished. Review the diff and run the Quality Gate before acceptance.' : runtimeRun?.status === 'failed' ? `Codex failed on attempt ${runtimeRun.attempts}. Review the report or retry.` : runtimeRun?.status === 'running' ? 'Codex is working in the approved workspace.' : runtimeRun ? 'No Codex process has started. Review the local plan before explicitly starting execution.' : 'Prepare a guarded Runtime plan from the approved task.'}</p></div>{runtimeRun?.status === 'planned' ? <div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Cancelling...' : 'Cancel dry-run'}<RefreshCw size={15} aria-hidden="true" /></button><button className="primary-button" type="button" onClick={() => void executeRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Running Codex...' : 'Run Codex'}<ArrowRight size={15} aria-hidden="true" /></button></div> : runtimeRun?.status === 'failed' ? <button className="primary-button" type="button" onClick={() => void retryRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Retrying Codex...' : 'Retry Codex'}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Preparing...' : 'Prepare Runtime'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{gitEvidence && <div className="git-evidence"><span>Branch <strong>{gitEvidence.branch}</strong></span><span>HEAD <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>Working tree <strong>{gitEvidence.status || 'clean'}</strong></span><span>Diff <strong>{gitEvidence.diffStat || 'no changes'}</strong></span></div>}{runtimeRun?.result?.output && <pre className="provider-report">{runtimeRun.result.output}</pre>}{runtimeRun?.history.length ? <div className="runtime-history"><small>{runtimeRun.history.length} attempt{runtimeRun.history.length === 1 ? '' : 's'} recorded</small></div> : null}</div>}
               {featureTask?.status === 'approved' && runtimeRun && <div className={`acceptance-panel ${acceptance?.status ?? 'pending'}`}><div className="runtime-heading"><div><p className="eyebrow">Human acceptance</p><h3>{acceptance ? `Acceptance ${acceptance.status}` : 'Submit delivery evidence'}</h3><p>{acceptance?.status === 'blocked' ? `Blocked: Quality Gate is ${acceptance.qualityStatus}.` : 'Confirm the acceptance criteria and record what was verified.'}</p></div>{acceptance?.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void approveDelivery()} disabled={submittingAcceptance}>{submittingAcceptance ? 'Approving...' : 'Approve delivery'}<ShieldCheck size={15} aria-hidden="true" /></button>}</div>{acceptance?.status !== 'approved' && <div className="acceptance-form"><label htmlFor="acceptance-summary">Acceptance summary</label><textarea id="acceptance-summary" value={acceptanceSummary} onChange={event => setAcceptanceSummary(event.target.value)} placeholder="Describe what was verified and what remains." maxLength={2000} /><label className="check-row"><input type="checkbox" checked={criteriaConfirmed} onChange={event => setCriteriaConfirmed(event.target.checked)} /> I reviewed every acceptance criterion</label><button className="primary-button" type="button" onClick={() => void submitAcceptance()} disabled={submittingAcceptance}>{submittingAcceptance ? 'Submitting...' : 'Submit acceptance evidence'}<ArrowRight size={15} aria-hidden="true" /></button></div>}</div>}
               {finalDeliveryReport && <div className="final-report"><div className="artifact-heading"><div><p className="eyebrow">Evidence bundle</p><h3>Final Delivery Report</h3></div><button className="icon-button" type="button" onClick={() => selected && void loadFinalDeliveryReport(selected.id)} aria-label="Refresh final delivery report" title="Refresh final delivery report"><RefreshCw size={17} /></button></div><pre className="provider-report">{finalDeliveryReport}</pre></div>}
               <p className="baseline-note">No remote resource has been created. The simulator writes only local generated artifacts and an execution manifest.</p>
@@ -791,6 +1094,171 @@ export function App() {
               {accountDiscovery && <div className="discovery-list">{accountDiscovery.accounts.map(account => <article className="connector" key={account.id}>
                 <div><h3>{account.title}</h3><p>{account.identity ?? 'No identity returned'}</p><small>{account.detail}</small><em>{account.nextAction}</em></div><span className={`connector-status ${account.status}`}>{account.status === 'authenticated' ? 'Authenticated' : account.status === 'manual' ? 'Manual' : account.status === 'missing' ? 'Install required' : 'Sign in required'}</span>
               </article>)}</div>}
+            </section>
+            <section className="credential-panel" id="credentials">
+              <div className="panel-title"><div><p className="eyebrow">Local only</p><h2>Credentials</h2></div><KeyRound size={19} aria-hidden="true" /></div>
+              <p className="form-note">Tokens are stored only in <code>~/.agent-dev/credentials.txt</code> on your machine. They are never uploaded to any server.</p>
+
+              {guideMode && credentialMeta?.keys.length === 0 && (
+                <div className="credential-guide">
+                  <div className="guide-progress">
+                    <span>Step {guideStep + 1} of {PROVIDER_FIELDS.length}</span>
+                    <button className="guide-skip-button" type="button" onClick={() => setGuideMode(false)}>Skip guide</button>
+                  </div>
+                  {PROVIDER_FIELDS.map((field, index) => (
+                    <div className={`guide-step ${index === guideStep ? 'active' : index < guideStep ? 'done' : ''}`} key={field.key}>
+                      <div className="guide-step-header">
+                        <strong>{field.label}</strong>
+                        {index < guideStep && credentialInputs[field.key] ? <span className="verify-status valid">Filled</span> : null}
+                      </div>
+                      {index === guideStep && <>
+                        <small>{field.hint}</small>
+                        <a href={field.tutorial} target="_blank" rel="noopener noreferrer">How to get this token</a>
+                        <input type="password" className="credential-input" value={credentialInputs[field.key] ?? ''} onChange={event => setCredentialInputs(current => ({ ...current, [field.key]: event.target.value }))} placeholder={`Paste ${field.label}`} />
+                        <div className="guide-step-actions">
+                          {guideStep > 0 && <button className="secondary-button" type="button" onClick={() => setGuideStep(guideStep - 1)}>Back</button>}
+                          {guideStep < PROVIDER_FIELDS.length - 1
+                            ? <button className="primary-button" type="button" onClick={() => setGuideStep(guideStep + 1)}>Next</button>
+                            : <button className="primary-button" type="button" onClick={() => { setGuideMode(false); void saveCredentialValues(); }}>Save all</button>}
+                        </div>
+                      </>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!guideMode && <>
+                <div className="credential-list">
+                  {PROVIDER_FIELDS.map(field => {
+                    const connected = credentialMeta?.keys.includes(field.key) ?? false;
+                    const verifyResult = verifyResults.find(r => r.providerId === field.providerId);
+                    return (
+                      <article className="credential-item" key={field.key}>
+                        <div className="credential-header">
+                          <strong>{field.label}</strong>
+                          <span className={`credential-status ${connected ? 'connected' : 'missing'}`}>{connected ? 'Connected' : 'Not set'}</span>
+                          {verifyResult && <span className={`verify-status ${verifyResult.status}`}>{verifyResult.status === 'valid' ? 'Valid' : verifyResult.status === 'invalid' ? 'Invalid' : 'N/A'}</span>}
+                        </div>
+                        <small className="credential-hint">{field.hint}</small>
+                        <a className="credential-tutorial" href={field.tutorial} target="_blank" rel="noopener noreferrer">How to get this token</a>
+                        {connected ? (
+                          <button className="quiet-button credential-delete" type="button" onClick={() => void deleteCredential(field.key)}>Delete</button>
+                        ) : (
+                          <input
+                            type="password"
+                            className="credential-input"
+                            value={credentialInputs[field.key] ?? ''}
+                            onChange={event => setCredentialInputs(current => ({ ...current, [field.key]: event.target.value }))}
+                            placeholder={`Paste ${field.label}`}
+                          />
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+                <div className="credential-actions-row">
+                  <button className="primary-button" type="button" onClick={() => void saveCredentialValues()} disabled={savingCredentials}>
+                    {savingCredentials ? 'Saving...' : 'Save to local'}
+                    <KeyRound size={15} aria-hidden="true" />
+                  </button>
+                  <button className="secondary-button" type="button" onClick={() => void verifyAllCredentials()} disabled={verifying}>
+                    {verifying ? 'Verifying...' : 'Verify credentials'}
+                    <ShieldCheck size={15} aria-hidden="true" />
+                  </button>
+                </div>
+                {verifyResults.length > 0 && (
+                  <div className="verify-results">
+                    {verifyResults.map(result => (
+                      <div className={`verify-item ${result.status}`} key={result.providerId}>
+                        <strong>{result.providerId}</strong>
+                        <span>{result.status}</span>
+                        <small>{result.detail}</small>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Supabase Manual Setup */}
+                <div className="supabase-manual">
+                  <div className="section-heading"><div><p className="eyebrow">Manual setup</p><h3>Supabase Configuration</h3></div></div>
+                  <p className="form-note">Supabase requires manual project creation. Follow these steps, then paste your credentials below.</p>
+                  <ol className="supabase-steps">
+                    <li>Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer">Supabase Dashboard</a> and create a new project</li>
+                    <li>Wait for the project to finish provisioning</li>
+                    <li>Go to Settings &gt; API in your project dashboard</li>
+                    <li>Copy the Project URL and the anon/public key</li>
+                  </ol>
+                  <div className="supabase-inputs">
+                    <label htmlFor="supabase-url">Project URL</label>
+                    <input id="supabase-url" className="credential-input" value={supabaseInputs.SUPABASE_URL} onChange={event => setSupabaseInputs(current => ({ ...current, SUPABASE_URL: event.target.value }))} placeholder="https://xxxxx.supabase.co" />
+                    <label htmlFor="supabase-anon">Anon/Public Key</label>
+                    <input id="supabase-anon" className="credential-input" value={supabaseInputs.SUPABASE_ANON_KEY} onChange={event => setSupabaseInputs(current => ({ ...current, SUPABASE_ANON_KEY: event.target.value }))} placeholder="eyJhbGciOi..." />
+                    <label htmlFor="supabase-service">Service Role Key (optional)</label>
+                    <input id="supabase-service" className="credential-input" value={supabaseInputs.SUPABASE_SERVICE_ROLE_KEY} onChange={event => setSupabaseInputs(current => ({ ...current, SUPABASE_SERVICE_ROLE_KEY: event.target.value }))} placeholder="eyJhbGciOi..." />
+                    <button className="secondary-button" type="button" onClick={() => void saveSupabaseManual()} disabled={savingCredentials}>{savingCredentials ? 'Saving...' : 'Save Supabase config'}<KeyRound size={14} aria-hidden="true" /></button>
+                  </div>
+                </div>
+
+                {/* Custom API Keys */}
+                <div className="custom-key-section">
+                  <div className="section-heading"><div><p className="eyebrow">Third-party</p><h3>Custom API Keys</h3></div></div>
+                  {credentialMeta?.keys.filter(key => !PROVIDER_FIELDS.some(f => f.key === key)).map(key => (
+                    <article className="credential-item" key={key}>
+                      <div className="credential-header">
+                        <strong>{key}</strong>
+                        <span className="credential-status connected">Configured</span>
+                      </div>
+                      <button className="quiet-button credential-delete" type="button" onClick={() => void deleteCredential(key)}>Delete</button>
+                    </article>
+                  ))}
+                  <div className="custom-key-form">
+                    <label htmlFor="custom-key-name">Key name (e.g. OPENAI_API_KEY)</label>
+                    <input id="custom-key-name" value={newCustomKey} onChange={event => setNewCustomKey(event.target.value)} placeholder="OPENAI_API_KEY" maxLength={60} />
+                    <label htmlFor="custom-key-value">Value</label>
+                    <input id="custom-key-value" type="password" value={newCustomValue} onChange={event => setNewCustomValue(event.target.value)} placeholder="sk-..." maxLength={200} />
+                    <button className="secondary-button" type="button" onClick={() => void addCustomKey()} disabled={savingCredentials}>{savingCredentials ? 'Saving...' : 'Add custom key'}<ArrowRight size={14} aria-hidden="true" /></button>
+                  </div>
+                </div>
+              </>}
+
+              {credentialMeta?.updatedAt && <small className="credential-updated">Last updated: {formatDate(credentialMeta.updatedAt)}</small>}
+              {selected && projectResources && (
+                <div className="credential-resources">
+                  <p className="eyebrow">Project resources</p>
+                  <div className="resource-list">
+                    {Object.entries(projectResources.providers).map(([providerId, state]) => (
+                      <article className="resource-item" key={providerId}>
+                        <strong>{providerId}</strong>
+                        <code>{'url' in state ? String(state.url) : 'projectId' in state ? String(state.projectId) : 'projectRef' in state ? String(state.projectRef) : 'created'}</code>
+                      </article>
+                    ))}
+                  </div>
+                  <button className="secondary-button" type="button" onClick={() => void regenerateEnv()} disabled={regeneratingEnv}>
+                    {regeneratingEnv ? 'Regenerating...' : 'Regenerate .env'}
+                    <RefreshCw size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              )}
+            </section>
+            <section className="agent-catalog-panel" id="agents">
+              <div className="panel-title"><div><p className="eyebrow">Local runtime</p><h2>Agent Catalog</h2></div><button className="icon-button" type="button" onClick={() => void loadAgents()} disabled={loadingAgents} aria-label="Refresh agents" title="Refresh agents"><RefreshCw size={17} /></button></div>
+              <p className="form-note">Detected Agents can be selected for Runtime execution. Custom Agents are persisted in .agent-dev/agents.yaml.</p>
+              {loadingAgents && agents.length === 0 ? <p className="empty-state">Detecting local Agents...</p> : agents.length === 0 ? <p className="empty-state">No Agents found.</p> : <div className="agent-list">{agents.map(agent => (
+                <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => setSelectedAgentId(agent.id)} disabled={!agent.detected}>
+                  <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}<code className="agent-command">{agent.launchCommand}</code></div>
+                  <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? 'Detected' : 'Not found'}</span>
+                </button>
+              ))}</div>}
+              <details className="agent-form-toggle">
+                <summary>Add a custom Agent</summary>
+                <div className="agent-form">
+                  <label htmlFor="custom-agent-name">Agent name</label>
+                  <input id="custom-agent-name" value={customAgentName} onChange={event => setCustomAgentName(event.target.value)} placeholder="e.g. My Custom Agent" maxLength={80} />
+                  <label htmlFor="custom-agent-command">Launch command</label>
+                  <input id="custom-agent-command" value={customAgentCommand} onChange={event => setCustomAgentCommand(event.target.value)} placeholder="e.g. my-agent" maxLength={200} />
+                  <button className="primary-button" type="button" onClick={() => void addCustomAgent()} disabled={savingAgent}>{savingAgent ? 'Registering...' : 'Register Agent'}<ArrowRight size={15} aria-hidden="true" /></button>
+                </div>
+              </details>
             </section>
             <section className="activity-panel" id="activity"><div className="panel-title"><h2>Activity</h2><Activity size={18} aria-hidden="true" /></div><ol>{activity.map(item => <li key={item.id}><span>{item.text}</span><time>{item.time}</time></li>)}</ol></section>
           </aside>

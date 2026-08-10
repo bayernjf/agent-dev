@@ -42,6 +42,7 @@
 
 - 导入现有仓库；
 - Local Claude Runtime；
+- Agent Runtime Catalog、内置 Agent Discovery 和自定义 Agent 最小配置（阶段 A API 已提前落地，Studio 选择器与持久化仍属于 v0.2）；
 - GA4、Clarity接入与隐私 Gate；
 - Infisical Adapter；
 - 更完善的失败分类和修复建议；
@@ -83,14 +84,9 @@
 
 ## v1.x：多产品 Blueprint
 
-扩展顺序由真实重复需求决定，候选为：
+多产品扩展不是一次性增加模板市场，而是按真实交付证据逐步增加 Product Type。先完成 Web SaaS 闭环，再依次验证落地页、浏览器插件、桌面端和移动端。每种类型都必须独立定义构建、质量、Preview/分发、权限、商店人工步骤和交付证据；不同产品只共享治理层，不强行共享源码结构。
 
-1. 浏览器扩展：参考 `word-picker`、`tab-manager`；
-2. 桌面应用：参考 `soft-desk`；
-3. 多端产品：参考 `word-base`；
-4. 内容站、内部工具和 API 服务。
-
-每个 Blueprint 都必须独立定义构建、质量、Preview/分发、权限、商店人工步骤和交付证据。不同产品只共享治理层，不强行共享源码结构。
+详细的共享层、类型层、候选技术栈和退出条件见 [多产品类型交付方案](multi-product-delivery-plan.md)。
 
 ## 长期平台
 

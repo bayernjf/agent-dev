@@ -6,9 +6,13 @@ import { blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryR
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { buildCodexExecutionPlan, probeCodexRuntime } from '@agent-dev/agent-runtime';
+import { buildAgentExecutionPlan, discoverAgentRuntimes, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
+import { RealProviderRegistry, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
+import { DeploymentComposer, cleanupPreviewProjects } from '@agent-dev/deployment-composer';
+import type { PreviewDeploymentResult } from '@agent-dev/deployment-composer';
 import { DaemonEventBus } from './events.js';
-import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint } from './providers.js';
+import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
+import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -67,16 +71,33 @@ const acceptanceApprovalSchema = z.object({
   approvedBy: z.string().trim().min(1).max(120).default('local-user'),
 });
 
+const customAgentSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  launchCommand: z.string().trim().min(1).max(200),
+});
+
+const credentialsSchema = z.record(z.string().regex(/^[A-Z][A-Z0-9_]*$/), z.string().min(1).max(10_000));
+
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
 };
 
-export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}) {
+export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}, dataDirectory?: string) {
   const app = new Hono();
+  const customAgents: CustomAgentInput[] = dataDirectory ? loadCustomAgents(dataDirectory) : [];
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
   const fakeProviders = new FakeProviderRegistry();
+  const realProviders = new RealProviderRegistry({
+    resolveContext: async (projectId: string) => {
+      const project = store.getProject(projectId);
+      if (!project) return null;
+      const run = store.getLatestApplyRun(projectId, project.blueprint.metadata.revision);
+      if (!run || run.status !== 'completed') return null;
+      return { workspacePath: run.workspacePath, projectName: project.name, projectId, blueprintRevision: project.blueprint.metadata.revision };
+    },
+  });
 
   app.get('/api/health', context =>
     context.json({ service: 'agent-dev-daemon', status: 'ok', version: '0.1.0-alpha.0' }),
@@ -89,6 +110,30 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.get('/api/connectors/discovery', async context =>
     context.json(await (dependencies.runAccountDiscovery ?? runAccountDiscovery)()),
   );
+
+  app.get('/api/credentials', context => context.json({ meta: getCredentialMeta() }));
+
+  app.post('/api/credentials', async context => {
+    const parsed = credentialsSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Credentials must be an object of uppercase key/value pairs.' }, 400);
+    saveCredentials({ ...loadCredentials(), ...parsed.data });
+    return context.json({ saved: true, meta: getCredentialMeta() });
+  });
+
+  app.delete('/api/credentials/:key', context => {
+    const key = context.req.param('key');
+    const credentials = loadCredentials();
+    if (!(key in credentials)) return context.json({ error: 'Credential not found.' }, 404);
+    delete credentials[key];
+    saveCredentials(credentials);
+    return context.json({ saved: true, meta: getCredentialMeta() });
+  });
+
+  app.post('/api/credentials/verify', async context => {
+    const creds = loadCredentials();
+    const results = await verifyCredentials(creds);
+    return context.json({ results });
+  });
 
   app.get('/api/projects', context => context.json({ projects: store.listProjects() }));
 
@@ -224,24 +269,79 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.get('/api/runtime/probe', context => context.json({ probe: probeCodexRuntime() }));
 
+  app.get('/api/runtime/probe/:agentId', context => {
+    const agentId = context.req.param('agentId');
+    const catalog = discoverAgentRuntimes(customAgents);
+    const agent = catalog.find(a => a.id === agentId);
+    if (!agent) return context.json({ error: 'Agent not found in catalog.' }, 404);
+    return context.json({ probe: probeAgentCapabilities(agent.id, agent.launchCommand), executable: isAgentExecutable(agent.id) });
+  });
+
+  app.get('/api/runtime/catalog', context => context.json({ agents: discoverAgentRuntimes(customAgents) }));
+
+  app.post('/api/runtime/catalog', async context => {
+    const parsed = customAgentSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Custom Agent requires a name and launchCommand.' }, 400);
+    if (customAgents.some(agent => agent.name.toLowerCase() === parsed.data.name.toLowerCase())) return context.json({ error: 'An Agent with this name already exists.' }, 409);
+    customAgents.push(parsed.data);
+    if (dataDirectory) saveCustomAgents(dataDirectory, customAgents);
+    return context.json({ agent: discoverAgentRuntimes(customAgents).at(-1) }, 201);
+  });
+
   app.get('/api/projects/:projectId/runtime/plan', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     const task = await store.getFeatureTask(project.id, project.blueprint.metadata.revision);
     if (!task || task.status !== 'approved') return context.json({ error: 'Approve a Feature Task before preparing a Runtime plan.' }, 409);
-    return context.json({ probe: probeCodexRuntime(), plan: buildCodexExecutionPlan(task, task.workspacePath), run: await store.getRuntimeRun(project.id, project.blueprint.metadata.revision) });
+    const run = await store.getRuntimeRun(project.id, project.blueprint.metadata.revision);
+    const agentId = run?.agentId ?? 'codex';
+    const plan = isAgentExecutable(agentId) ? buildAgentExecutionPlan(task, task.workspacePath, agentId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
+    return context.json({ probe: probeCodexRuntime(), plan, run });
   });
 
   app.post('/api/projects/:projectId/runtime/run', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
-    const body = await context.req.json().catch(() => null) as { confirmation?: string } | null;
+    const body = await context.req.json().catch(() => null) as { confirmation?: string; agentId?: string } | null;
     if (body?.confirmation !== 'PREPARE_RUNTIME_RUN') return context.json({ error: 'Runtime preparation requires confirmation PREPARE_RUNTIME_RUN.' }, 400);
+    if (body.agentId) {
+      const catalog = discoverAgentRuntimes(customAgents);
+      const agent = catalog.find(a => a.id === body.agentId);
+      if (!agent) return context.json({ error: 'The selected Agent was not found in the catalog.' }, 404);
+      if (!agent.detected) return context.json({ error: `Agent "${agent.name}" is not detected on PATH.` }, 409);
+      if (!isAgentExecutable(agent.id)) return context.json({ error: `Agent "${agent.name}" is detected, but does not have a verified non-interactive execution adapter.` }, 409);
+    }
     try {
-      const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision);
+      const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision, body.agentId ?? 'codex');
       return context.json({ run, probe: probeCodexRuntime() }, 201);
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to prepare the Runtime run.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/runtime/execute', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const body = await context.req.json().catch(() => null) as { confirmation?: string } | null;
+    if (body?.confirmation !== 'EXECUTE_RUNTIME_RUN') return context.json({ error: 'Runtime execution requires confirmation EXECUTE_RUNTIME_RUN.' }, 400);
+    try {
+      const run = await store.executeRuntimeRun(project.id, project.blueprint.metadata.revision);
+      return context.json({ run }, run.status === 'completed' ? 200 : 422);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to execute the Runtime run.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/runtime/retry', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const body = await context.req.json().catch(() => null) as { confirmation?: string } | null;
+    if (body?.confirmation !== 'RETRY_RUNTIME_RUN') return context.json({ error: 'Runtime retry requires confirmation RETRY_RUNTIME_RUN.' }, 400);
+    try {
+      const run = await store.retryRuntimeRun(project.id, project.blueprint.metadata.revision);
+      return context.json({ run }, run.status === 'completed' ? 200 : 422);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to retry the Runtime run.' }, 409);
     }
   });
 
@@ -370,6 +470,136 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const providerReport = buildProviderSimulationReport(project.name, plans, verification);
     const localApply = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
     return context.json({ projectId: project.id, verification, verified: verification.every(item => item.verified), deliveryReport: providerReport, unifiedDeliveryReport: buildUnifiedDeliveryReport(project.name, localApply, providerReport) });
+  });
+
+  app.get('/api/projects/:projectId/providers/plan', async context => {
+    const projectId = context.req.param('projectId');
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const plans = await realProviders.plan(projectId, providerSpecsFromBlueprint(project.blueprint));
+      return context.json({ projectId, real: true, plans });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to plan real providers.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/providers/apply', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ confirmation: z.literal('APPLY_REAL_PROVIDERS') }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Real Provider Apply requires confirmation APPLY_REAL_PROVIDERS.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const approval = store.getBaselineApproval(projectId, project.blueprint.metadata.revision);
+    if (!approval) return context.json({ error: 'Approve the baseline before applying real providers.' }, 409);
+    try {
+      const plans = await realProviders.plan(projectId, providerSpecsFromBlueprint(project.blueprint));
+      const results = await realProviders.apply(projectId, plans, { id: `${approval.projectId}:${approval.blueprintRevision}`, status: approval.status, approvedAt: approval.approvedAt });
+      events.emit({ type: 'providers.applied', projectId, projectName: project.name, occurredAt: new Date().toISOString() });
+      return context.json({ projectId, real: true, results });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to apply real providers.' }, 409);
+    }
+  });
+
+  app.get('/api/projects/:projectId/providers/verify', async context => {
+    const projectId = context.req.param('projectId');
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const verification = await realProviders.verify(projectId, providerSpecsFromBlueprint(project.blueprint));
+      const plans = await realProviders.plan(projectId, providerSpecsFromBlueprint(project.blueprint));
+      const report = buildRealProviderReport(project.name, plans, verification);
+      return context.json({ projectId, real: true, verification, verified: verification.filter(v => v.providerId !== 'supabase').every(item => item.verified), report });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to verify real providers.' }, 409);
+    }
+  });
+
+  app.get('/api/projects/:projectId/resources', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    return context.json({ resources: run ? loadProjectResources(run.workspacePath) : null });
+  });
+
+  app.post('/api/projects/:projectId/env/regenerate', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    if (!run) return context.json({ error: 'No workspace found.' }, 404);
+    generateEnvFile(run.workspacePath, loadCredentials(), loadProjectResources(run.workspacePath), project.name);
+    return context.json({ generated: true, workspacePath: run.workspacePath });
+  });
+
+  // --- Preview Deployment Composer ---
+
+  const previewSchema = z.object({
+    confirmation: z.literal('DEPLOY_PREVIEW'),
+    previewBranch: z.string().trim().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Branch name must be lowercase alphanumeric with hyphens.'),
+  });
+
+  app.post('/api/projects/:projectId/preview/deploy', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = previewSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Preview deployment requires confirmation DEPLOY_PREVIEW and a valid previewBranch.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    if (!run || run.status !== 'completed') return context.json({ error: 'Complete the baseline Apply before deploying a preview.' }, 409);
+
+    try {
+      const composer = new DeploymentComposer({
+        workspacePath: run.workspacePath,
+        projectName: project.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+        previewBranch: parsed.data.previewBranch,
+      });
+      const result = await composer.execute();
+      events.emit({
+        type: result.status === 'completed' ? 'preview.deployed' : 'preview.failed',
+        projectId,
+        projectName: project.name,
+        occurredAt: new Date().toISOString(),
+      });
+      return context.json({ result }, result.status === 'completed' ? 200 : 422);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to execute preview deployment.' }, 409);
+    }
+  });
+
+  app.get('/api/projects/:projectId/preview/plan', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    if (!run || run.status !== 'completed') return context.json({ error: 'Complete the baseline Apply before planning a preview.' }, 409);
+    const composer = new DeploymentComposer({
+      workspacePath: run.workspacePath,
+      projectName: project.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      previewBranch: 'preview',
+    });
+    return context.json({ steps: composer.plan(), idempotencyKey: composer.idempotencyKey });
+  });
+
+  app.post('/api/projects/:projectId/preview/cleanup', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ confirmation: z.literal('CLEANUP_PREVIEW'), vercelProject: z.string().optional(), cloudflareProject: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Preview cleanup requires confirmation CLEANUP_PREVIEW.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    if (!run) return context.json({ error: 'No workspace found.' }, 404);
+
+    try {
+      const { defaultRunner } = await import('@agent-dev/provider-cli');
+      const result = await cleanupPreviewProjects(defaultRunner, {
+        vercelProject: parsed.data.vercelProject,
+        cloudflareProject: parsed.data.cloudflareProject,
+        workspacePath: run.workspacePath,
+      });
+      return context.json({ cleanup: result });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to cleanup preview projects.' }, 409);
+    }
   });
 
   app.post('/api/projects', async context => {
