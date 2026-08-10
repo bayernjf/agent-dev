@@ -1,8 +1,27 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-06
-> 当前阶段：Local Delivery Control Plane 已实现；真实 Provider Apply 与联合 Preview 仍处于技术验证阶段
+> 更新时间：2026-08-09
+> 当前阶段：Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；Dual Preview 部署编排已实现为 Deployment Composer（精确 CORS + 临时项目清理）；凭证管理 Phase 2 已实现（Studio 凭证面板 + 引导模式 + 凭证验证）
 > 工作目录：仓库根目录
+
+## 最近进度
+
+- **Dual Preview 部署编排已实现为正式产品代码**：新增 `packages/deployment-composer` 包，`DeploymentComposer` 按 7 步幂等编排 Vercel API Preview → 关闭 Vercel SSO/Password Protection → API 健康验证 → VITE_API_BASE_URL 注入 → 前端构建 → Cloudflare Pages Preview → 联合 Smoke → Evidence 写入。精确 CORS origin（`https://<branch>.<project>-web-<branch>.pages.dev`，替换 Spike 中的 `*`），临时项目清理 API 支持 PR 关闭后删除 Vercel/Cloudflare 项目。Daemon 新增 `POST /api/projects/:projectId/preview/deploy`、`GET .../preview/plan`、`POST .../preview/cleanup` 三个路由；Studio 在 Quality Gate 通过后显示 Dual Preview 部署区块。10 个单元测试全部通过。
+- **Deployment Composer 端到端阻塞已修复**：补上了 Spike 验证过但正式代码遗漏的 Vercel SSO Protection 关闭步骤——在 `deployVercelPreview` 成功后通过 Vercel REST API `PATCH /v9/projects/{name}` 将 `ssoProtection` 和 `passwordProtection` 设为 `null`，否则 `*.vercel.app` URL 被 Deployment Protection 挡住导致健康检查超时。`VERCEL_TOKEN` 获取路径改为 `providerCredentialEnv() ?? process.env.VERCEL_TOKEN` 双路获取。新增根级 `vitest.config.ts` 用 `resolve.alias` 解析 workspace 内部包依赖，修复了 vitest 无法解析 `file:` 协议 workspace link 的问题（此前 3 个测试文件因模块解析失败无法加载）。
+- **凭证管理 Phase 2 已实现**：`verifyCredentials()` 通过 CLI（gh/vercel/wrangler/supabase）验证各 Provider Token 有效性；Studio 凭证面板新增首次引导模式（无凭证时自动进入分步引导）、Supabase 手动配置区块（遵循用户决策：Supabase 不做自动化，仅引导用户手动创建项目后填入 URL/Key）、自定义第三方 API Key 管理和凭证验证 UI。
+- Dual Preview Spike 已通过真实云端验证：Vercel API 部署（`/api/health` 公网可访问）、Cloudflare Pages 部署、跨域通信和 API URL 注入均取得真实 Evidence。解决了 Vercel SSO Protection 阻塞公网访问、`vercel.json` 配置、API Handler 兼容性、部署目录和 Cloudflare 构建注入等问题。详见 [Dual Preview Spike](docs/spikes/dual-preview.md)。
+- Supabase Auth Spike 已确认采用 Manual 降级路径（路径 C）：由用户手动完成 Supabase 项目创建和凭证管理，Agent-Dev 负责展示最小人工步骤和凭证注入，RealProviderRegistry 已实现自动降级为 ManualProviderAdapter。详见 [Supabase Auth Spike](docs/spikes/supabase-auth.md)。
+- 真实 Provider Adapter 端到端验证通过：GitHub 仓库创建、Vercel 部署、Cloudflare Pages 部署、Supabase 自动降级。验证项目 `e2e-test-real`，GitHub 仓库 `bayernjf/e2e-test-real`，Vercel URL `e2e-test-real-bayernjfs-projects.vercel.app`。
+- `fix: resolve Vercel CLI non-TTY hanging and stderr output in adapter`：修复 Vercel CLI 在非交互环境挂起（添加 `--no-wait` + `CI=true`）和 stdout 为空（discover 改为 `stdout || stderr`）的问题。
+- `feat: add real CLI-based Provider Adapters with auto-degradation`：新增基于 CLI 的 GitHub/Vercel/Cloudflare Provider Adapter，通过 RealProviderRegistry 统一编排，支持 CLI 可用性自动检测和 Manual 降级。
+- 凭证与环境变量管理方案设计完成，详见 [凭证管理方案](docs/credential-management.md)。
+- `823affa feat: add runtime retry history`：Runtime 失败运行现在保留 attempt 历史，提供显式 Retry API/UI，报告不会覆盖之前的失败证据。
+- `35f7eaf feat: add local agent runtime catalog`：Daemon 已能探测内置 Agent，并接受名称 + 启动命令的 custom Agent 配置。
+- 当前 Agent Catalog 已迁移为 Key-Value 配置：内置目录为 `packages/agent-runtime/agents.builtin.conf`，Custom 配置为 `.agent-dev/agents.conf`；内置未安装项隐藏，Custom 未安装项置灰。
+- Agent 检测采用打开 Studio 时一次检测 + 用户点击刷新按钮主动检测，不做实时监控、文件监听或后台轮询。
+- 凭证管理 Phase 1 已实现本地凭证/元数据文件、项目资源清单、`.env` 生成器和 daemon API；Studio 凭证面板、真实 Supabase Adapter 仍待完成。
+- 最近验证：Deployment Composer 10 tests 全部通过；全项目 34/36 tests 通过（2 个 agent-runtime 失败为 pre-existing Windows 环境问题：codex CLI 探测失败 + `HOME` 变量缺失）。本机平台预检：`gh`/`vercel`/`wrangler`/`supabase` CLI 均未安装，`codex` 已安装但当前边界不可用。
+- 当前工作分支：`feature/20260802`，领先 origin 9 个 commit（未推送）。
 
 ## 1. 项目摘要
 
@@ -12,7 +31,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 
 > 让人专注于产品为何存在，让 Agent 负责产品如何可靠地存在。
 
-首版完成结果不是生成代码，而是交付一个归用户所有、可以访问、可以继续开发和维护的 Web 产品基线，并通过相同流程交付至少一个真实功能。
+首版完成结果不是生成代码，而是交付一个归用户所有、可以访问、可以继续开发和维护的 Web 产品基线，并通过相同流程交付至少一个真实功能。Web SaaS 是当前验证类型；落地页、浏览器插件、桌面端和移动端属于后续独立 Product Type，不应被当前固定模板误认为已实现。详见 [多产品类型交付方案](docs/multi-product-delivery-plan.md)。
 
 ## 2. 当前真实状态
 
@@ -27,11 +46,14 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 实施计划和路线图 | 已完成 |
 | 现有项目流程复盘/SOP | 已完成 |
 | 六项目能力矩阵 | 已完成 |
-| 技术 Spike | Workflow Resume、macOS Secret Boundary 已通过；Codex 部分通过；Dual Preview 真实执行阻塞；Supabase Auth 前置阻塞 |
+| 技术 Spike | Workflow Resume、macOS Secret Boundary、Dual Preview 已通过；Codex 部分通过；Supabase Auth 已确认 Manual 降级路径 |
 | Git 仓库 | 已初始化；Phase 0 提交已完成 |
-| package.json / 代码骨架 | npm workspaces、Studio、Daemon、Blueprint、Policy、Provider Core、Storage、Workflow 已实现 |
-| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、带合法 npm 包名和 TypeScript/Vite 质量配置的固定 Web SaaS 模板、隔离工作区 Git baseline 与本地 feature branch、显式依赖安装与准备状态、Feature Task 与人工 Approval、Codex Runtime dry-run 计划及 Run 生命周期、Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、可恢复/可重试的 Local Apply Simulator、XState 状态推进、Fake Provider Adapter 计划/Apply/Verify 及 Studio 展示；真实 Codex 写入执行尚未接入 |
-| 测试、构建和部署 | 本地单元测试与 Studio build 已通过；真实云端部署未运行 |
+| package.json / 代码骨架 | npm workspaces、Studio、Daemon、Blueprint、Policy、Provider Core、Provider CLI、Storage、Workflow 已实现 |
+| 真实 Provider Adapter | GitHub/Vercel/Cloudflare 真实 CLI 接入已验证；Supabase Manual 降级已验证；RealProviderRegistry 统一编排，支持 CLI 可用性自动检测和 Manual 降级；Promise.allSettled 部分失败处理 |
+| 凭证管理方案 | Phase 1 + Phase 2 已实现（详见 [凭证管理方案](docs/credential-management.md)）。凭证/元数据写入 Agent-Dev `.agent-dev` 目录，项目资源清单写入 workspace `.agent-dev`，自动生成 `.env`；Studio 凭证面板（引导模式 + 验证 + Supabase 手动配置 + 自定义 Key）已完成 |
+| Dual Preview 部署编排 | `packages/deployment-composer` 已实现：7 步幂等编排（含 Vercel SSO Protection 关闭）、精确 CORS origin、临时项目清理、Daemon Preview API 和 Studio 部署区块；尚未用真实云端跑通端到端（本机未安装 Vercel/Wrangler CLI） |
+| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、固定 Web SaaS 模板、隔离工作区 Git baseline、Feature Task 与人工 Approval、Codex Runtime dry-run/Execute/Retry、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、Local Apply Simulator、XState 状态推进、Fake Provider Adapter、真实 Provider Adapter（GitHub/Vercel/Cloudflare）及 Studio 展示、凭证管理 UI（含验证和引导）、Dual Preview 部署编排；Agent Catalog 已支持 Key-Value 内置目录、Studio 选择、Custom Agent 弹窗和 `.agent-dev/agents.conf` 持久化；内置未安装项隐藏、custom 未安装项置灰；多 Agent 真实执行 Adapter、Supabase 真实自动接入尚未实现 |
+| 测试、构建和部署 | 本地单元测试与 Studio build 已通过；真实云端部署已通过 GitHub 仓库创建 + Vercel 部署 + Cloudflare Pages 部署验证 |
 
 不要把文档中的设计描述为已实现能力。
 
@@ -106,9 +128,11 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 5. [v0.1 实施计划](docs/implementation-plan-v0.1.md)
 6. [Blueprint 规范](docs/blueprint-spec.md)
 7. [环境与连接方案](docs/environment-and-connectors.md)
-8. [对话决策记录](docs/decision-log.md)
-9. [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)
-10. [通用开发 SOP](ai-agent-development-sop.md)
+8. [凭证与环境变量管理方案](docs/credential-management.md)
+9. [对话决策记录](docs/decision-log.md)
+10. [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)
+11. [通用开发 SOP](ai-agent-development-sop.md)
+12. [Agent Runtime Catalog](docs/agent-runtime-catalog.md)
 
 市场判断和长期范围见 [市场分析](docs/market-analysis.md) 与 [路线图](docs/roadmap.md)。现有项目事实依据见 [项目组合复盘](portfolio-development-review.md)。
 
@@ -124,31 +148,32 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 
 Codex Runtime 已确认本机 `codex-cli 0.142.3` 提供非交互执行、JSONL 事件、最终输出 Schema、sandbox、超时终止和 resume 命令入口。2026-08-06 的只读请求在模型调用前因当前受限环境禁止 Codex 写入 `~/.codex/state_5.sqlite` 而停止，未能验证认证；不要通过 Agent-Dev 绕过该状态目录边界。详见 [Codex Runtime Spike](docs/spikes/codex-runtime.md)。
 
-Workflow Resume 与 macOS Secret Boundary 已通过真实本地 Probe。Dual Preview 和 Supabase Auth 尚未取得云端 Evidence；当前 Vercel/GitHub CLI 已认证，Wrangler/Supabase CLI 已局部安装，其中 Supabase CLI 会尝试写入 `~/.supabase`，不符合当前文件边界。完整状态见 [Phase 0 技术 Spike](docs/spikes/README.md)。
+Workflow Resume 与 macOS Secret Boundary 已通过真实本地 Probe。Dual Preview 已通过真实云端验证：Vercel API 部署、Cloudflare Pages 部署、跨域通信和 API URL 注入均取得真实 Evidence。Supabase Auth 已确认采用 Manual 降级路径（路径 C），由用户手动完成项目创建和凭证管理，RealProviderRegistry 已实现自动降级为 ManualProviderAdapter。完整状态见 [Phase 0 技术 Spike](docs/spikes/README.md)。
 
-Dual Preview 已真实验证到 Vercel 部署就绪，但公网 Preview 持续超时，所有临时项目已清理；Supabase 尚未进行平台写操作。两项降级都会改变 v0.1 验收范围，必须由用户在 [Phase 0 状态](docs/spikes/README.md) 给出的候选路径中确认后，才能进入正式工程骨架。
+Dual Preview 的部署编排已实现为 `packages/deployment-composer`（精确 CORS origin、临时项目清理和 Vercel SSO Protection 关闭已包含），下一动作是在安装了 Vercel/Wrangler CLI 的机器上用真实云端跑通 Composer 端到端，并补充 PR 关闭时自动触发清理的编排。Supabase 遵循用户决策保持 Manual 降级（不做自动化，仅引导用户手动操作）；Supabase Auth Redirect URL 更新仍为手动步骤。
 
 OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`。不得基于未核实记忆固定 Codex CLI 参数；需要重新访问官方资料或把首版降级为生成任务包后由用户手动启动 Codex。
 
 ## 8. 下一步执行顺序
 
-1. 在用户恢复 Codex 状态目录权限和认证后，完成只读 Probe、受限写入 Probe、取消/恢复 Probe；
-2. 用一次真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Acceptance Gate 的成功路径；
-3. 将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联，但不把本地批准误标记为生产交付；
-4. 完成 Dual Preview 与 Supabase Auth 的真实平台验证，或由用户确认明确降级路径；
-5. 在真实授权边界下接入 GitHub、Vercel、Cloudflare、Supabase Provider Adapter；
-6. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。
+1. ✅ ~~实现凭证管理 Phase 2~~：已于 2026-08-08 完成（Studio 凭证面板 + 引导模式 + 凭证验证 + Supabase 手动配置）；
+2. ✅ ~~将 Dual Preview 部署编排实现为幂等 Step~~：已于 2026-08-09 完成（`packages/deployment-composer`，精确 CORS + 临时项目清理）；
+3. 用真实云端跑通 Deployment Composer 端到端，验证 Studio 部署区块 → Daemon → Vercel/Cloudflare 的完整链路；
+4. 为 Catalog 增加只读 Capability Probe，并为 Claude Code、Aider、OpenCode、CodeBuddy、Pi、Hermes、OpenClaw 逐个验证 Adapter；
+5. 用一次真实功能任务验证 Runtime 写入、Git diff、Quality Gate 和 Acceptance Gate 的成功路径；
+6. 将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联，但不把本地批准误标记为生产交付；
+7. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。
 
-## 9. 尚待用户决策
+## 9. 用户决策
 
-| 决策 | 当前推荐 |
-| --- | --- |
-| 生产页面域名 | `app.example.com`，允许项目改为 apex |
-| Supabase 环境 | dev 与 production 使用独立项目 |
-| 模板最小业务能力 | 登录、基础用户资料、API health、示例受保护页面 |
-| Analytics 默认 | 默认关闭，隐私确认后再接入 |
-| GitHub Ruleset | 支持则自动计划；权限/套餐不足时生成 Manual Action |
-| Blueprint 开源 | v0.1 稳定后再发布 v1alpha1 |
+| 决策 | 状态 | 值 |
+| --- | --- | --- |
+| 生产页面域名 | 已确认 | `app.example.com`，允许项目改为 apex |
+| Supabase 环境 | 已确认 | dev 与 production 使用独立项目 |
+| 模板最小业务能力 | 已确认 | 登录、基础用户资料、API health、示例受保护页面 |
+| Analytics 默认 | 待确认 | 默认关闭，隐私确认后再接入 |
+| GitHub Ruleset | 待确认 | 支持则自动计划；权限/套餐不足时生成 Manual Action |
+| Blueprint 开源 | 待确认 | v0.1 稳定后再发布 v1alpha1 |
 
 ## 10. 交接完成定义
 
