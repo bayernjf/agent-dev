@@ -77,6 +77,24 @@ describe('DeploymentComposer', () => {
   });
 
   describe('execute()', () => {
+    it('fails before creating a Vercel project when the REST API token is missing', async () => {
+      vi.stubEnv('VERCEL_TOKEN', '');
+      const calls: string[] = [];
+      const runner: CommandRunner = async (command, args) => {
+        calls.push(`${command} ${args.join(' ')}`);
+        return { stdout: '', stderr: '', exitCode: 0, success: true };
+      };
+
+      const composer = new DeploymentComposer({ workspacePath: tempDir, projectName: 'test-project', previewBranch: 'feature-x' }, runner);
+      const result = await composer.execute();
+
+      expect(result.status).toBe('failed');
+      expect(result.steps[0].detail).toContain('configure it before creating a Vercel preview');
+      expect(result.cleanupRequired).toBeUndefined();
+      expect(calls).toEqual([]);
+      vi.unstubAllEnvs();
+    });
+
     it('records the Cloudflare Pages URL emitted by Wrangler', async () => {
       const mockFetch = vi.fn().mockImplementation((url: string) => Promise.resolve(new Response(
         url.includes('.pages.dev') ? '<script>https://test-api-preview.vercel.app</script>' : JSON.stringify({ ok: true }),

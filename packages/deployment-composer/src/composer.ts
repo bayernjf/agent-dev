@@ -30,6 +30,8 @@ export class DeploymentComposer {
   private pagesUrlSource: 'cli-output' | 'derived-fallback' | undefined;
   private vercelProjectName: string | undefined;
   private cloudflareProjectName: string | undefined;
+  private vercelProjectMayExist = false;
+  private cloudflareProjectMayExist = false;
 
   constructor(options: PreviewComposerOptions, runner?: CommandRunner) {
     this.workspacePath = options.workspacePath;
@@ -83,10 +85,10 @@ export class DeploymentComposer {
       corsOrigin: this.corsOrigin,
     };
 
-    if (status === 'failed') {
+    if (status === 'failed' && (this.vercelProjectMayExist || this.cloudflareProjectMayExist)) {
       result.cleanupRequired = {
-        vercel: this.vercelProjectName,
-        cloudflare: this.cloudflareProjectName,
+        vercel: this.vercelProjectMayExist ? this.vercelProjectName : undefined,
+        cloudflare: this.cloudflareProjectMayExist ? this.cloudflareProjectName : undefined,
       };
     }
 
@@ -120,7 +122,12 @@ export class DeploymentComposer {
   }
 
   private async deployVercelPreview(step: PreviewStep): Promise<void> {
-    const env = { ...providerCredentialEnv(), CI: 'true', VERCEL_TELEMETRY_DISABLED: '1' };
+    const credentialEnv: Record<string, string> = providerCredentialEnv();
+    const env = { ...credentialEnv, CI: 'true', VERCEL_TELEMETRY_DISABLED: '1' };
+    if (!credentialEnv.VERCEL_TOKEN && !process.env.VERCEL_TOKEN) {
+      throw new Error('VERCEL_TOKEN is not set; configure it before creating a Vercel preview.');
+    }
+    this.vercelProjectMayExist = true;
 
     // Create project if it does not exist (idempotent: vercel project add is safe to re-run)
     const projectResult = await this.runner('vercel', ['project', 'add', this.vercelProjectName!, '--no-color'], {
@@ -228,6 +235,7 @@ export class DeploymentComposer {
 
   private async deployCloudflarePreview(step: PreviewStep): Promise<void> {
     const env = providerCredentialEnv();
+    this.cloudflareProjectMayExist = true;
 
     // Create Cloudflare Pages project (idempotent)
     const createResult = await this.runner('npx', ['wrangler', 'pages', 'project', 'create', this.cloudflareProjectName!, '--production-branch', 'main'], {
