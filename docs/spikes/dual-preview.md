@@ -123,7 +123,8 @@ Dual Preview 联合部署编排契约已通过真实云端验证：Vercel API �
 - Vercel SSO/Password Protection 关闭步骤已纳入正式代码：`deployVercelPreview` 成功后通过 Vercel REST API `PATCH /v9/projects/{name}` 将 `ssoProtection` 和 `passwordProtection` 设为 `null`，确保 `*.vercel.app` URL 公网可访问；
 - 精确 CORS origin（`https://<branch>.<project>-web-<branch>.pages.dev`）已替换 Spike 中的 `*`；
 - `cleanupPreviewProjects()` 支持删除 Vercel/Cloudflare 临时项目，失败时返回未清理项目名供 Manual Action；
-- Daemon 提供 `POST /api/projects/:projectId/preview/deploy`、`GET .../preview/plan`、`POST .../preview/cleanup` 三个路由；
+- Daemon 提供 `POST /api/projects/:projectId/preview/deploy`、`GET .../preview/plan`、`POST .../preview/cleanup` 三个路由；部署传入 `pullRequestNumber` 时使用规范分支 `pr-<number>`；
+- `POST /api/github/webhooks` 会验证 `GITHUB_WEBHOOK_SECRET` 的 HMAC SHA-256 签名，并仅处理 `pull_request.closed`。它按仓库名匹配唯一本地项目，以 `pr-<number>` 推导临时项目名后调用清理；无效签名或无关事件不会执行删除；
 - Studio 在 Quality Gate 通过后展示 Dual Preview 部署区块；
 - 10 个单元测试全部通过（含 SSO Protection 关闭路径的 mock fetch + `VERCEL_TOKEN` 环境变量注入）。
 
