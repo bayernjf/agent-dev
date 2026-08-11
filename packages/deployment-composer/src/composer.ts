@@ -2,6 +2,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CommandRunner, CliResult } from '@agent-dev/provider-cli';
 import { defaultRunner, providerCredentialEnv } from '@agent-dev/provider-cli';
+import { previewProjectNames } from './names.js';
 import type { PreviewStep, PreviewStepId, PreviewComposerOptions, PreviewDeploymentResult, PreviewEvidence } from './steps.js';
 
 const STEP_DEFINITIONS: { id: PreviewStepId; title: string }[] = [
@@ -39,8 +40,9 @@ export class DeploymentComposer {
     this.frontendDistDirectory = options.frontendDistDirectory ?? join(this.frontendDirectory, 'dist');
     this.runner = runner ?? defaultRunner;
     this.steps = STEP_DEFINITIONS.map(def => ({ ...def, status: 'pending' as const }));
-    this.vercelProjectName = `${this.projectName}-api-${this.previewBranch}`;
-    this.cloudflareProjectName = `${this.projectName}-web-${this.previewBranch}`;
+    const names = previewProjectNames(this.projectName, this.previewBranch);
+    this.vercelProjectName = names.vercelProject;
+    this.cloudflareProjectName = names.cloudflareProject;
   }
 
   get idempotencyKey(): string {
