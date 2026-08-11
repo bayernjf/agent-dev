@@ -129,3 +129,5 @@ Dual Preview 联合部署编排契约已通过真实云端验证：Vercel API �
 - 10 个单元测试全部通过（含 SSO Protection 关闭路径的 mock fetch + `VERCEL_TOKEN` 环境变量注入）。
 
 2026-08-09 已安装并授权 Wrangler，并进行了三次真实 Vercel 诊断/双 Preview 尝试：Vercel 控制面部署为 `READY`，保护字段已置空，但当前网络访问新建 `*.vercel.app` Deployment Domain 超时或 `ECONNREFUSED`；Vercel 临时项目均已清理，Cloudflare 项目未创建。下一步需在可访问 Vercel Deployment Domain 的网络重新运行；Composer 与 Spike 的健康检查已将传播重试窗口扩大到约 2 分钟。
+
+2026-08-11 重新运行正式 Composer：网络与 CLI 认证均可用，修复后的模板已通过隔离 workspace 的 `npm run quality`，Vercel API 项目创建成功并开始部署；随后因未配置 `VERCEL_TOKEN` 无法调用 REST API 关闭 Deployment Protection，临时 Vercel 项目已删除，Cloudflare 项目未创建。下一步是配置 `VERCEL_TOKEN` 后重跑。
