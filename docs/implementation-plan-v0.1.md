@@ -1,7 +1,7 @@
 # Agent-Dev v0.1 实施计划
 
-> 状态：Ready for Technical Spikes  
-> 日期：2026-08-02  
+> 状态：阶段 A–F 骨架已实现，Phase 0 Spike 全部通过或已批准降级；剩余真实端到端交付验证  
+> 日期：2026-08-13（工程结构与模块映射已对齐真实代码）  
 > 上游文档：[v0.1 PRD](prd-v0.1.md)、[技术架构](technical-architecture-v0.1.md)
 
 ## 1. 实施目标
@@ -64,43 +64,41 @@ agent-dev/
 │   ├── daemon/                  # Hono 本地 API 与任务执行
 │   └── cli/                     # 启动、doctor、环境检测
 ├── packages/
-│   ├── blueprint/               # Schema、解析、覆盖、Diff、生成
+│   ├── blueprint/               # Schema、解析、覆盖、Diff、生成（含模板与 CI 生成物）
 │   ├── workflow/                # Delivery State Machine
-│   ├── policy/                  # 自动/询问/禁止的确定性判断
-│   ├── agent-runtime/           # Runtime 接口与 Local Codex
-│   ├── provider-core/           # Provider 共享契约
-│   ├── provider-github/
-│   ├── provider-supabase/
-│   ├── provider-vercel/
-│   ├── provider-cloudflare/
-│   ├── deployment-composer/     # 双平台部署顺序与 URL 传递
-│   ├── env-contract/            # 变量契约、同步与验证
-│   └── evidence/                # 外部证据与交付报告
-├── schemas/
-│   ├── blueprint/
-│   └── modules/
-└── templates/
-    └── web-saas/
+│   ├── policy/                  # 自动/询问/禁止的确定性判断、Connector Preflight、账号发现
+│   ├── agent-runtime/           # Runtime 接口、Agent Catalog 与 Local Codex
+│   ├── provider-core/           # Provider 共享契约与 Fake Adapter
+│   ├── provider-cli/            # GitHub/Vercel/Cloudflare CLI Adapter、Manual 降级、凭据与 Env 契约生成
+│   ├── deployment-composer/     # 双平台部署顺序、URL 传递与 PR 关闭清理
+│   └── storage/                 # SQLite/Drizzle 事实存储与 Evidence 持久化
+└── .github/workflows/           # Agent-Dev 自身质量门禁
 ```
 
 首版所有 package 同进程运行，包边界用于契约和测试，不拆微服务。
+
+与早期草案的差异（已按真实代码修正）：
+
+- 四个 Provider 不再各自成包，统一收敛为 `provider-cli`（`github.ts` / `vercel.ts` / `cloudflare.ts` / `manual.ts` + `registry.ts`），共享 `discover/plan/apply/verify/detectDrift` 契约并支持自动降级。
+- 独立的 `env-contract` 与 `evidence` 包未落地：Env 契约在 `provider-cli/env-generator.ts`，Evidence 由 `storage` 持久化，产出分散在 `agent-runtime`（attempt 历史）与 `deployment-composer`（部署步骤证据）。
+- 顶层 `schemas/` 与 `templates/web-saas/` 未落地：Blueprint Schema 与产品模板（含 `.github/workflows/quality.yml`）均由 `blueprint/generate.ts` 内联生成。
 
 ## 5. PRD 到工程模块映射
 
 | PRD 功能 | 工程实现 | 主要验收 |
 | --- | --- | --- |
 | Blueprint 问卷 | `blueprint` + Studio RJSF | 生成并验证 `agent-dev.yaml` |
-| 规范生成 | `blueprint/generators` | Markdown、Env Contract 带 revision/hash |
+| 规范生成 | `blueprint/generate.ts` | Markdown、Env Contract 带 revision/hash |
 | 环境检查 | CLI `doctor` | 检测 Git、Node、npm、GitHub、Codex |
 | Dry Run | Provider `discover/plan` | 无外部副作用，展示 Diff/权限/费用 |
-| 项目脚手架 | `templates/web-saas` | 本地可测试并具备 CI |
-| 平台连接 | 四个 Provider Adapter | 创建后重新读取真实状态验证 |
-| 联合部署 | `deployment-composer` | API/页面 URL 均可访问并联合 smoke；Composer 已实现（7 步幂等编排含 Vercel SSO Protection 关闭、精确 CORS、临时项目清理），10 个单元测试通过，真实云端端到端待验证（需安装 Vercel/Wrangler CLI） |
-| Agent 执行 | `LocalCodexRuntime` + Runtime Catalog API | 隔离 worktree、范围受控、可取消；内置 Agent 探测和 custom 名称/命令登记已完成，Studio 选择待完成 |
-| 质量门禁 | Quality Contract + GitHub Actions | 本地/CI 命令语义一致 |
+| 项目脚手架 | `blueprint/generate.ts`（Web SaaS 模板） | 本地可测试并具备 CI |
+| 平台连接 | `provider-cli`（GitHub/Vercel/Cloudflare + Supabase Manual 降级） | 创建后重新读取真实状态验证 |
+| 联合部署 | `deployment-composer` | API/页面 URL 均可访问并联合 smoke；Composer 已实现（7 步幂等编排含 Vercel SSO Protection 关闭、精确 CORS、临时项目清理），14 个单元测试通过，2026-08-14 已在真实云端跑通全部 7 步并取得 Evidence（PR 关闭清理仍待真实验证） |
+| Agent 执行 | `LocalCodexRuntime` + Runtime Catalog API | 隔离 worktree、范围受控、可取消；内置 Agent 探测、custom 名称/命令登记、Studio 选择和只读 Capability Probe 已完成 |
+| 质量门禁 | Quality Contract + GitHub Actions | 本地/CI 命令语义一致；Agent-Dev 自身门禁见 `.github/workflows/quality.yml` |
 | 人工 Gate | `workflow` + `approvals` | 暂停、重启进程、恢复后继续 |
 | 失败恢复 | Apply retry policy + Runtime attempt history | Apply 最多两次；Runtime 失败可显式 Retry，所有 attempt 保留在 JSON/Markdown evidence |
-| 交付报告 | `evidence` | 每个验收标准映射真实证据 |
+| 交付报告 | `storage` + `agent-runtime` / `deployment-composer` 证据产出 | 每个验收标准映射真实证据 |
 
 ## 6. 开发阶段
 

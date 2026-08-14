@@ -21,6 +21,7 @@ export type PreviewDeploymentResult = {
   steps: PreviewStep[];
   apiBaseUrl?: string;
   pagesUrl?: string;
+  pagesUrlSource?: 'cli-output' | 'derived-fallback';
   corsOrigin?: string;
   evidence?: Record<string, string>;
   cleanupRequired?: { vercel?: string; cloudflare?: string };
@@ -40,6 +41,7 @@ export type PreviewEvidence = {
   previewBranch: string;
   apiBaseUrl: string;
   pagesUrl: string;
+  pagesUrlSource: 'cli-output' | 'derived-fallback';
   corsOrigin: string;
   apiHealth: string;
   exactCors: string;

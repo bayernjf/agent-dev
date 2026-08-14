@@ -45,7 +45,7 @@ describe('ProductBlueprint', () => {
 
     expect(first).toEqual(second);
     expect(first.noExternalChanges).toBe(true);
-    expect(first.artifacts).toEqual(expect.arrayContaining([
+      expect(first.artifacts).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: 'config/env.contract.yaml', content: expect.stringContaining('VITE_GA4_MEASUREMENT_ID') }),
       expect.objectContaining({ path: 'generated/DELIVERY_HANDOFF.md' }),
       expect.objectContaining({ path: 'apps/web/src/main.tsx' }),
@@ -53,6 +53,9 @@ describe('ProductBlueprint', () => {
       expect.objectContaining({ path: 'package.json', content: expect.stringContaining('"name": "receipt-desk"') }),
       expect.objectContaining({ path: 'vite.config.ts', content: expect.stringContaining('@vitejs/plugin-react') }),
       expect.objectContaining({ path: 'apps/api/src/index.ts', content: expect.stringContaining('/api/health') }),
+      expect.objectContaining({ path: 'apps/api/src/index.ts', content: expect.stringContaining("import { handle } from 'hono/vercel';") }),
+      expect.objectContaining({ path: 'apps/api/vercel.json', content: expect.stringContaining('"@vercel/node"') }),
+      expect.objectContaining({ path: 'apps/api/vercel.json', content: expect.not.stringContaining('nodejs22.x') }),
       expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('npm install') }),
     ]));
   });

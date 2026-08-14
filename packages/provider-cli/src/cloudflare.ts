@@ -3,6 +3,15 @@ import type { CommandRunner } from './cli.js';
 import { defaultRunner } from './cli.js';
 import { providerCredentialEnv } from './credentials.js';
 
+type CloudflarePagesProject = {
+  id?: string;
+  name?: string;
+  subdomain?: string;
+  production_branch?: string;
+  created_on?: string;
+  account_id?: string;
+};
+
 export class CloudflareAdapter implements ProviderAdapter {
   readonly providerId = 'cloudflare';
   private readonly distPath: string;
@@ -16,18 +25,42 @@ export class CloudflareAdapter implements ProviderAdapter {
     this.distPath = `${workspacePath}/apps/web/dist`;
   }
 
+  private async inspectProject(): Promise<CloudflarePagesProject | null> {
+    const result = await this.runner('npx', ['wrangler', 'pages', 'project', 'list', '--json'], {
+      cwd: this.workspacePath,
+      timeout: 60_000,
+      env: providerCredentialEnv(),
+    });
+    if (!result.success) return null;
+    try {
+      const parsed = JSON.parse(result.stdout) as CloudflarePagesProject[] | { projects?: CloudflarePagesProject[] };
+      const projects = Array.isArray(parsed) ? parsed : parsed.projects ?? [];
+      return projects.find(project => project.name === this.projectName) ?? null;
+    } catch { return null; }
+  }
+
   async discover(): Promise<ProviderState> {
     const result = await this.runner('npx', ['wrangler', 'pages', 'project', 'list'], { cwd: this.workspacePath, timeout: 60_000, env: providerCredentialEnv() });
     if (!result.success) return { providerId: this.providerId, resources: [] };
     const exists = result.stdout.split('\n').some(line => line.trim().includes(this.projectName));
     if (!exists) return { providerId: this.providerId, resources: [] };
+    const project = await this.inspectProject();
+    const pagesUrl = project?.subdomain ? `https://${project.subdomain}` : undefined;
     return {
       providerId: this.providerId,
       resources: [{
         id: 'cloudflare-pages',
         kind: 'pages-project',
         owner: this.owner,
-        createdAt: new Date().toISOString(),
+        createdAt: project?.created_on ?? new Date().toISOString(),
+        externalId: project?.id,
+        url: pagesUrl,
+        metadata: {
+          projectName: project?.name ?? this.projectName,
+          ...(project?.account_id ? { accountId: project.account_id } : {}),
+          ...(project?.production_branch ? { productionBranch: project.production_branch } : {}),
+          ...(pagesUrl ? { urlSource: 'cli-output' } : {}),
+        },
       }],
     };
   }

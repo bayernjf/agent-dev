@@ -1,15 +1,17 @@
 import { Hono } from 'hono';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryRunPlan, getBlueprintDecisions } from '@agent-dev/blueprint';
+import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { buildAgentExecutionPlan, discoverAgentRuntimes, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
-import { RealProviderRegistry, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
-import { DeploymentComposer, cleanupPreviewProjects } from '@agent-dev/deployment-composer';
-import type { PreviewDeploymentResult } from '@agent-dev/deployment-composer';
+import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
+import { RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
+import { DeploymentComposer, cleanupPreviewProjects, previewProjectNames } from '@agent-dev/deployment-composer';
+import type { CleanupResult, PreviewDeploymentResult } from '@agent-dev/deployment-composer';
 import { DaemonEventBus } from './events.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
 import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
@@ -71,6 +73,19 @@ const acceptanceApprovalSchema = z.object({
   approvedBy: z.string().trim().min(1).max(120).default('local-user'),
 });
 
+const prEvidenceSchema = z.object({
+  confirmation: z.literal('RECORD_PR_EVIDENCE'),
+  url: z.string().url(),
+  checks: z.array(z.string().trim().min(1).max(300)).min(1).max(20),
+});
+
+const previewEvidenceSchema = z.object({
+  confirmation: z.literal('RECORD_PREVIEW_EVIDENCE'),
+  apiUrl: z.string().url(),
+  webUrl: z.string().url(),
+  smokeTest: z.string().trim().min(10).max(2000),
+});
+
 const customAgentSchema = z.object({
   name: z.string().trim().min(1).max(80),
   launchCommand: z.string().trim().min(1).max(200),
@@ -81,7 +96,27 @@ const credentialsSchema = z.record(z.string().regex(/^[A-Z][A-Z0-9_]*$/), z.stri
 export type DaemonDependencies = {
   runPreflight?: () => Promise<ConnectorPreflightReport>;
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
+  resolveGitHubWebhookSecret?: () => string | undefined;
+  cleanupPreview?: (options: { vercelProject?: string; cloudflareProject?: string; workspacePath: string }) => Promise<CleanupResult>;
 };
+
+const githubPullRequestWebhookSchema = z.object({
+  action: z.literal('closed'),
+  repository: z.object({ name: z.string().trim().min(1) }),
+  pull_request: z.object({ number: z.number().int().positive() }),
+});
+
+function projectSlug(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+}
+
+function hasValidGitHubSignature(body: string, signature: string | undefined, secret: string) {
+  if (!signature?.startsWith('sha256=')) return false;
+  const expected = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+  const received = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  return received.length === expectedBuffer.length && timingSafeEqual(received, expectedBuffer);
+}
 
 export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}, dataDirectory?: string) {
   const app = new Hono();
@@ -97,6 +132,35 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       if (!run || run.status !== 'completed') return null;
       return { workspacePath: run.workspacePath, projectName: project.name, projectId, blueprintRevision: project.blueprint.metadata.revision };
     },
+  });
+  const executePreviewCleanup = dependencies.cleanupPreview ?? (options => cleanupPreviewProjects(defaultRunner, options));
+
+  app.post('/api/github/webhooks', async context => {
+    if (context.req.header('x-github-event') !== 'pull_request') return context.json({ ignored: true }, 202);
+    const secret = dependencies.resolveGitHubWebhookSecret?.() ?? loadCredentials().GITHUB_WEBHOOK_SECRET;
+    if (!secret) return context.json({ error: 'GitHub webhook secret is not configured.' }, 503);
+    const body = await context.req.text();
+    if (!hasValidGitHubSignature(body, context.req.header('x-hub-signature-256'), secret)) return context.json({ error: 'Invalid GitHub webhook signature.' }, 401);
+    const payload = githubPullRequestWebhookSchema.safeParse((() => {
+      try {
+        return JSON.parse(body);
+      } catch {
+        return null;
+      }
+    })());
+    if (!payload.success) return context.json({ ignored: true }, 202);
+
+    const projects = store.listProjects().filter(project => projectSlug(project.name) === projectSlug(payload.data.repository.name));
+    if (projects.length !== 1) return context.json({ error: projects.length ? 'GitHub repository matches multiple local projects.' : 'No local project matches the GitHub repository.' }, projects.length ? 409 : 404);
+    const project = store.getProject(projects[0].id);
+    if (!project) return context.json({ error: 'Local project is unavailable.' }, 404);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    if (!run || run.status !== 'completed') return context.json({ error: 'No completed local workspace is available for preview cleanup.' }, 409);
+
+    const names = previewProjectNames(projectSlug(project.name), `pr-${payload.data.pull_request.number}`);
+    const cleanup = await executePreviewCleanup({ ...names, workspacePath: run.workspacePath });
+    events.emit({ type: cleanup.errors.length ? 'preview.cleanup_failed' : 'preview.cleaned', projectId: project.id, projectName: project.name, occurredAt: new Date().toISOString() });
+    return context.json({ cleanup, projectId: project.id, previewBranch: `pr-${payload.data.pull_request.number}` }, cleanup.errors.length ? 422 : 200);
   });
 
   app.get('/api/health', context =>
@@ -117,6 +181,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const parsed = credentialsSchema.safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Credentials must be an object of uppercase key/value pairs.' }, 400);
     saveCredentials({ ...loadCredentials(), ...parsed.data });
+    realProviders.invalidateCredentials();
     return context.json({ saved: true, meta: getCredentialMeta() });
   });
 
@@ -126,6 +191,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!(key in credentials)) return context.json({ error: 'Credential not found.' }, 404);
     delete credentials[key];
     saveCredentials(credentials);
+    realProviders.invalidateCredentials();
     return context.json({ saved: true, meta: getCredentialMeta() });
   });
 
@@ -274,7 +340,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const catalog = discoverAgentRuntimes(customAgents);
     const agent = catalog.find(a => a.id === agentId);
     if (!agent) return context.json({ error: 'Agent not found in catalog.' }, 404);
-    return context.json({ probe: probeAgentCapabilities(agent.id, agent.launchCommand), executable: isAgentExecutable(agent.id) });
+    return context.json({ probe: probeAgentCapabilities(agent.id, agent.launchCommand), adapterStatus: getAgentAdapterStatus(agent.id) });
   });
 
   app.get('/api/runtime/catalog', context => context.json({ agents: discoverAgentRuntimes(customAgents) }));
@@ -412,6 +478,44 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
+  app.post('/api/projects/:projectId/delivery/pr-evidence', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const parsed = prEvidenceSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'PR evidence requires RECORD_PR_EVIDENCE, a URL, and at least one check.' }, 400);
+    try {
+      const evidence = await store.recordPrEvidence(project.id, project.blueprint.metadata.revision, { url: parsed.data.url, checks: parsed.data.checks });
+      return context.json({ evidence, project: store.getProject(project.id) });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to record PR evidence.' }, 409);
+    }
+  });
+
+  app.get('/api/projects/:projectId/delivery/pr-evidence', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    return context.json({ evidence: await store.getPrEvidence(project.id, project.blueprint.metadata.revision) });
+  });
+
+  app.post('/api/projects/:projectId/delivery/preview-evidence', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const parsed = previewEvidenceSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Preview evidence requires RECORD_PREVIEW_EVIDENCE, API and Web URLs, and a smoke-test note.' }, 400);
+    try {
+      const evidence = await store.recordPreviewEvidence(project.id, project.blueprint.metadata.revision, { apiUrl: parsed.data.apiUrl, webUrl: parsed.data.webUrl, smokeTest: parsed.data.smokeTest });
+      return context.json({ evidence, project: store.getProject(project.id) });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to record Preview evidence.' }, 409);
+    }
+  });
+
+  app.get('/api/projects/:projectId/delivery/preview-evidence', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    return context.json({ evidence: await store.getPreviewEvidence(project.id, project.blueprint.metadata.revision) });
+  });
+
   app.post('/api/projects/:projectId/feature-task', async context => {
     const projectId = context.req.param('projectId');
     const parsed = featureTaskSchema.safeParse(await context.req.json().catch(() => null));
@@ -536,8 +640,9 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   const previewSchema = z.object({
     confirmation: z.literal('DEPLOY_PREVIEW'),
-    previewBranch: z.string().trim().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Branch name must be lowercase alphanumeric with hyphens.'),
-  });
+    previewBranch: z.string().trim().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Branch name must be lowercase alphanumeric with hyphens.').optional(),
+    pullRequestNumber: z.number().int().positive().optional(),
+  }).refine(data => Boolean(data.previewBranch || data.pullRequestNumber), 'A previewBranch or pullRequestNumber is required.');
 
   app.post('/api/projects/:projectId/preview/deploy', async context => {
     const projectId = context.req.param('projectId');
@@ -547,12 +652,15 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
     if (!run || run.status !== 'completed') return context.json({ error: 'Complete the baseline Apply before deploying a preview.' }, 409);
+    const workspace = await verifyWorkspaceArtifacts(run.workspacePath, project.blueprint);
+    if (!workspace.usable) return context.json({ error: workspace.reason, workspace }, 409);
+    const previewBranch = parsed.data.pullRequestNumber ? `pr-${parsed.data.pullRequestNumber}` : parsed.data.previewBranch!;
 
     try {
       const composer = new DeploymentComposer({
         workspacePath: run.workspacePath,
-        projectName: project.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
-        previewBranch: parsed.data.previewBranch,
+        projectName: projectSlug(project.name),
+        previewBranch,
       });
       const result = await composer.execute();
       events.emit({
@@ -567,17 +675,22 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
-  app.get('/api/projects/:projectId/preview/plan', context => {
+  app.get('/api/projects/:projectId/preview/plan', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
     if (!run || run.status !== 'completed') return context.json({ error: 'Complete the baseline Apply before planning a preview.' }, 409);
+    const workspace = await verifyWorkspaceArtifacts(run.workspacePath, project.blueprint);
     const composer = new DeploymentComposer({
       workspacePath: run.workspacePath,
       projectName: project.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
       previewBranch: 'preview',
     });
-    return context.json({ steps: composer.plan(), idempotencyKey: composer.idempotencyKey });
+    return context.json({
+      steps: composer.plan(),
+      idempotencyKey: composer.idempotencyKey,
+      workspace,
+    }, workspace.usable ? 200 : 409);
   });
 
   app.post('/api/projects/:projectId/preview/cleanup', async context => {
@@ -590,8 +703,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!run) return context.json({ error: 'No workspace found.' }, 404);
 
     try {
-      const { defaultRunner } = await import('@agent-dev/provider-cli');
-      const result = await cleanupPreviewProjects(defaultRunner, {
+      const result = await executePreviewCleanup({
         vercelProject: parsed.data.vercelProject,
         cloudflareProject: parsed.data.cloudflareProject,
         workspacePath: run.workspacePath,
