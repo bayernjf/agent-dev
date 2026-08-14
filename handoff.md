@@ -1,15 +1,32 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-11
+> 更新时间：2026-08-14
 > 当前阶段：Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；Dual Preview 部署编排已实现为 Deployment Composer（精确 CORS + 签名验证的 PR 关闭清理）；凭证管理 Phase 2 已实现（Studio 凭证面板 + 引导模式 + 凭证验证）
 > 工作目录：仓库根目录
 
 ## 最近进度
 
-- **Dual Preview 部署编排已实现为正式产品代码**：新增 `packages/deployment-composer` 包，`DeploymentComposer` 按 7 步幂等编排 Vercel API Preview → 关闭 Vercel SSO/Password Protection → API 健康验证 → VITE_API_BASE_URL 注入 → 前端构建 → Cloudflare Pages Preview → 联合 Smoke → Evidence 写入。精确 CORS origin（`https://<branch>.<project>-web-<branch>.pages.dev`，替换 Spike 中的 `*`），临时项目清理 API 支持 PR 关闭后删除 Vercel/Cloudflare 项目。Daemon 新增 `POST /api/projects/:projectId/preview/deploy`、`GET .../preview/plan`、`POST .../preview/cleanup` 三个路由；Studio 在 Quality Gate 通过后显示 Dual Preview 部署区块。10 个单元测试全部通过。
+- **Dual Preview 真实云端端到端已跑通（7/7 步），过程中修掉 5 个真实缺陷**。最终 Evidence：`.agent-dev/previews/workspace-verify-fresh-preview.json`，`pagesUrlSource: cli-output`，`apiHealth` / `exactCors` / `pageContainsApiUrl` / `jointSmoke` 全部 passed。已在编排之外独立复验：分支别名与每次部署的哈希域名两个 Pages URL 都返回 200 且 HTML 中带正确的 API 域名，API 对别名 Origin 回精确 `access-control-allow-origin`。修掉的缺陷：
+  1. **生成的 API 模板在 Vercel 上永久挂起**。`export default handle(app)` 返回 Web fetch 风格的 `Response`，但 Vercel 按传统 `(req, res) => void` 签名处理默认导出并丢弃返回值，请求永远拿不到响应（Vercel 运行时日志：`WARN: default export returned a Response`）。根路径能瞬间 404 而 `/api/health` 挂满 40 秒，正好排除了网络因素。改为按 HTTP 方法导出 fetch-style handler（`export const GET/POST/OPTIONS = handle(app)`）；本地 dev 的 `serve()` 守卫从宽泛的 `NODE_ENV !== 'production'` 改为精确的 `!process.env.VERCEL`，避免删掉 `serve()` 破坏 `npm run dev`。
+  2. **生成的 API 模板没有 CORS 中间件**。Composer 一直注入 `ALLOWED_ORIGIN`，但模板从不读它，响应完全没有 `access-control-allow-origin`，而健康检查要求它精确等于 CORS origin。补上 `hono/cors`，`origin: process.env.ALLOWED_ORIGIN ?? '*'`。
+  3. **生成的前端从不消费 `VITE_API_BASE_URL`**。Composer 注入了变量、写了 `.env.preview`，但模板里没有任何引用，构建产物里自然找不到该 URL，联合 Smoke 的"页面包含 API 地址"必然失败（该检查只读页面 HTML，即使 bundle 里有引用也不够）。`index.html` 增加 `<meta name="api-base-url" content="%VITE_API_BASE_URL%">` 走 Vite 的 HTML 变量替换，`main.tsx` 改为真的去 `fetch(${apiBaseUrl}/api/health)` 并渲染状态——这让 Golden Path 的"前端跨域调用 API"变成真实行为而非文档描述。
+  4. **`WRANGLER_LOG: 'none'` 同时破坏了幂等性和 URL 解析**。Cloudflare 建项目那步的幂等判断依赖 stderr 里的 `already exists` 文本，而该环境变量把这句话压掉了（手工复现：带该变量时 wrangler 退出码 1 且无任何输出，不带时 stderr 明确给出 `A project with this name already exists ... [code: 8000002]`），导致第一次能建、之后每次重跑必挂；部署那步同样被压掉了 Wrangler 回传的真实 Pages URL，使 `pagesUrlSource` 永远退化成 `derived-fallback`。两处都移除该变量，并加了断言 create 调用 env 不含 `WRANGLER_LOG` 的回归测试——原有那条"已存在项目"测试直接 mock 出 `already exists` stderr，因此永远发现不了这个问题。
+  5. **联合 Smoke 的 CORS 校验对象错了**。API 的 CORS 锁在**分支别名** `preview.<project>.pages.dev`，但 Smoke 拿 Wrangler 回传的**每次部署哈希域名**去校验，必然 mismatch。改为统一用别名校验：别名才是 Reviewer 打开的稳定链接，哈希域名每次部署都变。此前该检查只是因为 URL 解析失败退化成别名才"碰巧"通过——缺陷 4 修好、真实哈希域名第一次被解析出来后，这个矛盾才暴露。
+  - **环境前提（非代码问题，但会阻塞复现）**：本机直连访问不了任何 `*.vercel.app`（TLS 连接被重置），必须走本机代理；Node 的 `fetch` 默认不读代理环境变量，Node 22.23 需要 `NODE_USE_ENV_PROXY=1` 才生效。另外 shell 默认 Node 20 会让 `wrangler` 直接拒绝运行（要求 ≥22）。代理链路本身有抖动，健康检查偶发 `fetch failed`，手工 curl 显示第一次 000、第二三次 200，重跑即过（未误记为代码缺陷）。
+  - **免长期凭据路径已在真实环境确认**：真实 Vercel 项目在 `vercel api -X PATCH --input <file>` 后 `ssoProtection` 与 `passwordProtection` 均为 `null`，不再只是单元测试断言。
+  - **现存真实资源**：Vercel 项目 `workspace-verify-fresh-api-preview`、Cloudflare Pages 项目 `workspace-verify-fresh-web-preview` 仍在账号里，未清理（清理入口 `POST .../preview/cleanup`，`confirmation: CLEANUP_PREVIEW`）。
+- **Preview 部署前新增 workspace 产物校验，并修复状态库路径二义性**：
+  - 新增 `verifyWorkspaceArtifacts()`（`packages/blueprint/src/workspace.ts`），在创建任何外部资源之前校验 Apply workspace。存在性检查覆盖全部生成产物；内容比对只覆盖部署配置产物（`vercel.json`、`wrangler.toml`、产品 CI），因为应用源码本就会被 Agent 的功能任务修改，全量比对会把正常改动误判为漂移。Daemon 的 `GET .../preview/plan` 与 `POST .../preview/deploy` 均已接入，不可用时返回 409。这挡住了一类真实故障：workspace 被冻结在生成它的那版 generator 上，后续 generator 修复不会回填，旧 workspace 会带着无效配置直接进入部署（且 `apply/retry` 只接受 `failed`，已完成的 Apply 没有受支持的重生成路径）。
+  - 用真实数据验证有效：对 `Receipt Test` revision-2 workspace 返回 409、`staleConfig: ['apps/api/vercel.json']`、`missing: ['apps/web/src/main.tsx']`。追查后发现该 workspace 已被两次失败的 Codex 运行破坏（workspace git log 有两组 `runtime: start Codex execution` / `runtime: failed`，`git status` 显示 `D apps/web/src/main.tsx` 而 `index.html` 仍引用它）——这正是 `codex-runtime.md` 列为未验证的"失败 workspace 恢复"场景的真实实例，缺失的是产品源码而非配置，重生成配置无法修复。
+  - 因此另建 project `Workspace Verify Fresh` 走一次本地 Apply（纯本地模拟器，`noExternalChanges: true`），得到当前模板的干净 workspace，`preview/plan` 返回 200、`usable: true`。上述真实云端端到端就是在这个 workspace 上跑通的。
+  - 修复 Daemon 状态库路径二义性：`databasePath` 原先基于 `process.cwd()`，而 `npm run -w @agent-dev/daemon dev` 会把 cwd 设为包目录，导致 `apps/daemon/.agent-dev/` 与仓库根 `.agent-dev/` 两个数据库并存、项目状态被静默拆分（我自己就因此查错了库）。新增 `resolveWorkspaceRoot()` 向上寻找声明了 `workspaces` 的 `package.json` 作为锚点，并在启动日志打印实际使用的数据库路径。遗留数据已迁移到仓库根 `.agent-dev/`（88M，含两个 Apply workspace），`apply_runs.workspace_path` 里的两条绝对路径同步重写并验证目录存在；迁移前的空库保留为 `.agent-dev/agent-dev.sqlite.empty-pre-migration`，迁移前备份在 `/tmp/agent-dev.sqlite.premigration`。
+  - 收尾时 `npm run build` 暴露一个由本次改动引入的真实回归：`workspace.ts` 用 `node:fs/promises` 读产物，而它被 blueprint 的 barrel 再导出，Studio 在浏览器里 import barrel，于是 `node:fs` 被拖进 Vite 打包并直接构建失败（`"readFile" is not exported by "__vite-browser-external"`）。typecheck 和 test 全绿也发现不了——只有 build 会。改为通过 `@agent-dev/blueprint/workspace` 子路径导出，barrel 不再引用它；Daemon 与其测试改走子路径，根 `vitest.config.ts` 的 alias 改为数组并把子路径规则排在前面（alias 是前缀匹配，裸包名规则会把子路径重写成不存在的目录）。这也正是上一条新增的 `quality.yml` 会拦住的那类问题。
+- **`VERCEL_TOKEN` 硬依赖已移除，Composer 端到端阻塞解除**：`vercel api` 子命令能复用 CLI 现有登录态发认证请求（已用只读 `vercel api /v9/projects` 取得真实数据验证）。`disableVercelDeploymentProtection()` 现在分两条路径：设置了 `VERCEL_TOKEN` 走原 REST API `fetch`，未设置则走 `vercel api -X PATCH /v9/projects/{name} --input <body.json>`。请求体必须经 `--input` 文件传入，因为 `--field` 会把 `null` 强制成 `""`（已用 `--generate=curl` 干跑确认）。`deployVercelPreview` 的前置检查从"必须有 token"改为 `ensureVercelAuth()`：有 token 或 `vercel whoami` 成功即可。这也消除了原先的实现不一致——同文件其他步骤（`project add`、`deploy`、`project rm`）本就走 CLI 会话，只有这一步降级到裸 `fetch` 而需要长期凭据。两条路径均有单元测试，Composer 现有 13 个用例全部通过。注意 `vercel api` 标注为 beta；若将来要在 GitHub Actions 等无交互登录环境运行 Composer，仍需 token（v0.1 为 local-first，Daemon 跑在本机）。真实云端端到端已重跑通过（见本节首条）。
+- **Agent-Dev 自身质量门禁已建立**：新增 `.github/workflows/quality.yml`（`npm ci` → `typecheck` → `test` → `build`，带 `concurrency` 取消旧运行）。此前项目为其生成的产品生成 CI，自己却没有任何 CI。同时修复了一个真实缺陷：`npm ci` 在 Node 20 下必然失败（`wrangler@4.120.0 → @cloudflare/kv-asset-handler@0.5.0` 要求 node ≥22，`.npmrc` 的 `engine-strict=true` 使其成为硬错误），而 `package.json` 仍声明 `>=20.20.0`。已新增 `.node-version`（`22`）作为本地 fnm 与 CI `actions/setup-node` 的唯一来源，并把 `engines.node` 提升为 `>=22.0.0`。
+- **Dual Preview 部署编排已实现为正式产品代码**：新增 `packages/deployment-composer` 包，`DeploymentComposer` 按 7 步幂等编排 Vercel API Preview → 关闭 Vercel SSO/Password Protection → API 健康验证 → VITE_API_BASE_URL 注入 → 前端构建 → Cloudflare Pages Preview → 联合 Smoke → Evidence 写入。精确 CORS origin（`https://<branch>.<project>-web-<branch>.pages.dev`，替换 Spike 中的 `*`），临时项目清理 API 支持 PR 关闭后删除 Vercel/Cloudflare 项目。Daemon 新增 `POST /api/projects/:projectId/preview/deploy`、`GET .../preview/plan`、`POST .../preview/cleanup` 三个路由；Studio 在 Quality Gate 通过后显示 Dual Preview 部署区块。
 - **PR 关闭自动清理已实现**：Daemon 的 `POST /api/github/webhooks` 仅接受 HMAC SHA-256 验证通过的 GitHub `pull_request.closed` 事件。部署请求传入 `pullRequestNumber` 时，Preview 分支固定为 `pr-<number>`；Webhook 使用该编号推导 Vercel/Cloudflare 临时项目名并执行清理。无效签名、非 PR 事件和未匹配本地项目不会触发删除。本地 API 测试覆盖成功清理、签名拒绝和事件忽略；真实云端清理仍需与 Composer 一起复验。
 - **Deployment Composer 端到端阻塞已修复**：补上了 Spike 验证过但正式代码遗漏的 Vercel SSO Protection 关闭步骤——在 `deployVercelPreview` 成功后通过 Vercel REST API `PATCH /v9/projects/{name}` 将 `ssoProtection` 和 `passwordProtection` 设为 `null`，否则 `*.vercel.app` URL 被 Deployment Protection 挡住导致健康检查超时。`VERCEL_TOKEN` 获取路径改为 `providerCredentialEnv() ?? process.env.VERCEL_TOKEN` 双路获取。新增根级 `vitest.config.ts` 用 `resolve.alias` 解析 workspace 内部包依赖，修复了 vitest 无法解析 `file:` 协议 workspace link 的问题（此前 3 个测试文件因模块解析失败无法加载）。
-- **Deployment Composer 端到端配置修复**：补上了 Spike 验证过但正式代码遗漏的 Vercel SSO Protection 关闭步骤，并修复生成模板的 Vercel runtime 配置；生成 API 现在使用 `@vercel/node` builder 和 Hono `hono/vercel` adapter。当前仍需显式 `VERCEL_TOKEN` 才能执行关闭 Deployment Protection 的 REST API 步骤。
+- **Deployment Composer 端到端配置修复**：补上了 Spike 验证过但正式代码遗漏的 Vercel SSO Protection 关闭步骤，并修复生成模板的 Vercel runtime 配置；生成 API 现在使用 `@vercel/node` builder 和 Hono `hono/vercel` adapter。
 - **Provider 与验证可靠性修复**：根级 `npm test` 现在直接执行一次 `vitest run`，与根级测试配置一致；所有 GitHub CLI 的发现和创建调用都注入 Agent-Dev 保存的 `GITHUB_TOKEN`；凭证保存或删除后会废弃 Provider CLI 可用性缓存。资源清单改为写入资源级事实（外部 ID、URL、非敏感元数据）而非原始通用状态。Cloudflare Preview 证据会优先记录 Wrangler CLI 回传的实际 Pages URL，并标识 `cli-output` 或 `derived-fallback` 来源。
 - **凭证管理 Phase 2 已实现**：`verifyCredentials()` 通过 CLI（gh/vercel/wrangler/supabase）验证各 Provider Token 有效性；Studio 凭证面板新增首次引导模式（无凭证时自动进入分步引导）、Supabase 手动配置区块（遵循用户决策：Supabase 不做自动化，仅引导用户手动创建项目后填入 URL/Key）、自定义第三方 API Key 管理和凭证验证 UI。
 - Dual Preview Spike 已通过真实云端验证：Vercel API 部署（`/api/health` 公网可访问）、Cloudflare Pages 部署、跨域通信和 API URL 注入均取得真实 Evidence。解决了 Vercel SSO Protection 阻塞公网访问、`vercel.json` 配置、API Handler 兼容性、部署目录和 Cloudflare 构建注入等问题。详见 [Dual Preview Spike](docs/spikes/dual-preview.md)。
@@ -24,7 +41,7 @@
 - Agent 检测采用打开 Studio 时一次检测 + 用户点击刷新按钮主动检测，不做实时监控、文件监听或后台轮询。
 - 当前本机 CLI 状态：`gh`、`vercel`、`codex`、项目本地 `wrangler@4.120.0` 已安装；`supabase` 未安装。Wrangler OAuth 已授权。
 - 2026-08-09 真实双 Preview 尝试：Cloudflare OAuth 已授权；Vercel 临时项目可创建且部署状态为 `READY`，项目级 `ssoProtection/passwordProtection` 均已置空，但 `*.vercel.app` 公网域名在当前网络连续返回超时/ECONNREFUSED；每次 Vercel 临时项目均已自动清理，Cloudflare 项目未创建。需要在可访问 Vercel Deployment Domain 的网络重新验证。
-- 2026-08-11 真实 Composer 重跑：网络和 Vercel/Cloudflare CLI 认证均可用；修复后的新 workspace 已通过 `npm run quality`，Vercel API 项目成功创建并开始部署；Composer 随后因未配置 `VERCEL_TOKEN` 无法关闭 Deployment Protection，临时 Vercel 项目已删除，Cloudflare 项目未创建。下一次只需配置 `VERCEL_TOKEN` 后重跑。
+- 2026-08-11 真实 Composer 重跑：网络和 Vercel/Cloudflare CLI 认证均可用；修复后的新 workspace 已通过 `npm run quality`，Vercel API 项目成功创建并开始部署；Composer 随后因未配置 `VERCEL_TOKEN` 无法关闭 Deployment Protection，临时 Vercel 项目已删除，Cloudflare 项目未创建。该 token 依赖已于 2026-08-13 移除（改用 `vercel api` 复用 CLI 登录态），可直接重跑。
 - 2026-08-11 真实 Feature Task 验证：在新的隔离 workspace 中执行了一个要求修改 `apps/web/src/main.tsx` 的小功能，Codex 退出码为 0，Runtime 状态为 `completed`，Git evidence 记录 `1 insertion, 1 deletion`，Quality Gate `npm run quality` 通过，交付状态停在 `VERIFYING`。未代替用户执行 Human Acceptance，也未产生任何远程 Provider 写入。
 - 2026-08-10 Acceptance Gate 与 Delivery State 已对齐：本地人工验收批准会使状态机从 `IMPLEMENTING` 经 `VERIFYING` 进入 `LOCAL_ACCEPTED`。该状态明确不代表 PR、Preview 或生产发布；这些仍需 Provider Evidence 和独立人工批准。
 - 2026-08-10 Agent Capability Probe 已明确 Adapter 状态：`verified`、`candidate`、`unsupported`。当前仅 Codex 为 `verified`；其他已发现 Agent 只能生成 dry-run，不能执行。
@@ -149,27 +166,27 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 
 ## 7. 阻塞性技术 Spike
 
-下一位执行 Agent 在接入真实外部写操作前，应先完成或明确降级以下验证：
+五个阻塞性 Spike 已全部通过或明确降级（详见 [Phase 0 技术 Spike](docs/spikes/README.md)）：
 
-1. **Codex Runtime**：官方非交互入口、结构化输出、取消和恢复；
-2. **Dual Preview**：Vercel API Preview URL 注入 Cloudflare Pages Build；
-3. **Supabase Auth**：动态 CORS、Redirect URL 和 PR 关闭后的清理；
-4. **Secret Boundary**：Provider CLI/OAuth、系统 Keychain、GitHub Secrets 的最小复制路径；
-5. **Workflow Resume**：SQLite 持久化后从暂停 Gate 或失败 Step 恢复。
+1. **Codex Runtime**：✅ 已通过（非交互入口、结构化输出、真实功能任务写入）；
+2. **Dual Preview**：✅ 已通过（Vercel API Preview URL 注入 Cloudflare Pages Build）；
+3. **Supabase Auth**：✅ 已明确降级为 Manual 路径 C（动态 CORS、Redirect URL 与 PR 关闭清理）；
+4. **Secret Boundary**：✅ 已通过（Provider CLI/OAuth、系统 Keychain、GitHub Secrets 最小复制路径，macOS）；
+5. **Workflow Resume**：✅ 已通过（SQLite 持久化后从暂停 Gate 或失败 Step 恢复）。
 
-Codex Runtime 已确认本机 `codex-cli 0.142.3` 提供非交互执行、JSONL 事件、最终输出 Schema、sandbox、超时终止和 resume 命令入口。2026-08-06 的只读请求在模型调用前因当前受限环境禁止 Codex 写入 `~/.codex/state_5.sqlite` 而停止，未能验证认证；不要通过 Agent-Dev 绕过该状态目录边界。详见 [Codex Runtime Spike](docs/spikes/codex-runtime.md)。
+Codex Runtime 已确认本机 `codex-cli 0.142.3` 提供非交互执行、JSONL 事件、最终输出 Schema、sandbox、超时终止和 resume 命令入口。2026-08-07 的只读探测已通过（exit 0，完整 `thread.started` → `turn.completed` 事件链），2026-08-11 已用一次真实功能任务验证写入与 Quality Gate。注意：早期 2026-08-06 的尝试曾因受限环境禁止 Codex 写入 `~/.codex/state_5.sqlite` 而在模型调用前停止，该记录已被后续验证取代；仍不要通过 Agent-Dev 绕过该状态目录边界。剩余未验证项为失败 workspace 恢复、真实 Codex 会话 resume 和可控取消。详见 [Codex Runtime Spike](docs/spikes/codex-runtime.md)。
 
 Workflow Resume 与 macOS Secret Boundary 已通过真实本地 Probe。Dual Preview 已通过真实云端验证：Vercel API 部署、Cloudflare Pages 部署、跨域通信和 API URL 注入均取得真实 Evidence。Supabase Auth 已确认采用 Manual 降级路径（路径 C），由用户手动完成项目创建和凭证管理，RealProviderRegistry 已实现自动降级为 ManualProviderAdapter。完整状态见 [Phase 0 技术 Spike](docs/spikes/README.md)。
 
 Dual Preview 的部署编排已实现为 `packages/deployment-composer`（精确 CORS origin、临时项目清理、Vercel SSO Protection 关闭和签名验证的 PR 关闭清理已包含）。下一动作是在可访问 Vercel Deployment Domain 的网络用真实云端跑通 Composer 与清理链路。Supabase 遵循用户决策保持 Manual 降级（不做自动化，仅引导用户手动操作）；Supabase Auth Redirect URL 更新仍为手动步骤。
 
-OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`。不得基于未核实记忆固定 Codex CLI 参数；需要重新访问官方资料或把首版降级为生成任务包后由用户手动启动 Codex。
+OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`，此后仍未能访问。当前使用的 CLI 参数集来自本机 `codex-cli 0.142.3` 的实测（见 Codex Runtime Spike），不得基于未核实记忆扩展或修改；升级 CLI 版本后需重新实测。
 
 ## 8. 下一步执行顺序
 
 1. ✅ ~~实现凭证管理 Phase 2~~：已于 2026-08-08 完成（Studio 凭证面板 + 引导模式 + 凭证验证 + Supabase 手动配置）；
 2. ✅ ~~将 Dual Preview 部署编排实现为幂等 Step~~：已于 2026-08-09 完成（`packages/deployment-composer`，精确 CORS + 临时项目清理）；
-3. 在可访问 Vercel Deployment Domain 的网络重新跑 Deployment Composer 端到端，验证 Studio 部署区块 → Daemon → Vercel/Cloudflare 的完整链路，并确认资源清单中的外部 ID/URL 与 Provider 控制台一致；
+3. 重跑 Deployment Composer 端到端（`VERCEL_TOKEN` 依赖已移除，无阻塞），验证 Studio 部署区块 → Daemon → Vercel/Cloudflare 的完整链路，并确认资源清单中的外部 ID/URL 与 Provider 控制台一致；
 4. ✅ ~~为 Catalog 增加只读 Capability Probe~~：Daemon API 已提供探测结果，Studio 选择 Agent 后显示非交互、workspace-write 和 Adapter 状态；仍需在各 Agent 实际安装环境逐个验证 Adapter；
 5. ✅ ~~用一次必然产生 Git diff 的真实功能任务验证 Runtime 写入和 Quality Gate~~：已于 2026-08-11 完成；Human Acceptance 仍需由用户明确确认；
 6. ✅ ~~将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联~~：已于 2026-08-10 完成；本地批准进入 `LOCAL_ACCEPTED`，不代表生产交付；

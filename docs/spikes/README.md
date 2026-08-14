@@ -8,7 +8,7 @@
 | [Codex Runtime](codex-runtime.md) | 真实功能任务已通过 | 当前用户配置下真实功能任务在隔离 workspace 中退出码为 0，产生 `apps/web/src/main.tsx` 的 Git diff，Quality Gate 通过，状态停在 `VERIFYING`；未执行人工验收 | 失败工作区恢复、Codex resume/cancel 和可控的真实功能重跑 |
 | [Workflow Resume](workflow-resume.md) | 已通过 | XState 5.32.5 快照跨四个独立进程恢复，SQLite 历史连续 | Phase A 改用 Drizzle/正式驱动并补 lease、幂等和 crash 测试 |
 | [Secret Boundary](secret-boundary.md) | 已通过（macOS） | 临时 Keychain、引用存储、Provider 单次注入、Agent allowlist、日志脱敏均实测 | 提取共享库，补 Windows/Linux Adapter |
-| [Dual Preview](dual-preview.md) | 历史 Spike 通过 / 当前 Composer 受 Vercel Token 配置阻塞 | 历史 Evidence 覆盖 Vercel API、Cloudflare Pages、跨域通信和 API URL 注入；部署编排已实现为 `packages/deployment-composer`（含 Vercel SSO Protection 关闭、精确 CORS、临时项目清理和签名验证的 PR 关闭 Webhook）。2026-08-11 修复了生成模板的 Vercel runtime 配置，真实部署已创建 Vercel API 项目；因缺少 `VERCEL_TOKEN` 无法关闭 Deployment Protection，临时项目已清理，Cloudflare 项目未创建 | 配置 `VERCEL_TOKEN` 后重新跑 Composer 和 PR 关闭清理 |
+| [Dual Preview](dual-preview.md) | 正式 Composer 真实端到端已通过 | 2026-08-14 正式 `packages/deployment-composer` 在真实云端跑通 7/7 步：`pagesUrlSource: cli-output`，`apiHealth` / `exactCors` / `pageContainsApiUrl` / `jointSmoke` 全部 passed，并在编排之外独立复验（两个 Pages URL 均 200 且 HTML 含正确 API 域名，API 对别名 Origin 回精确 CORS 头）。免 token 路径也在真实项目确认 `ssoProtection`/`passwordProtection` 为 `null`。这一轮修掉 5 个"单元测试全绿但真实链路必然失败"的缺陷：Vercel 默认导出丢弃 `Response`、API 模板缺 CORS 中间件、前端从不消费 `VITE_API_BASE_URL`、`WRANGLER_LOG: 'none'` 同时破坏幂等判断与 Pages URL 解析、联合 Smoke 拿哈希域名而非分支别名校验 CORS | 在真实云端验证 PR 关闭清理；清理本轮遗留的 `workspace-verify-fresh-*` 两个真实项目 |
 | [Supabase Auth](supabase-auth.md) | 已确认降级 | CLI 写入项目边界外状态，已确认采用 Manual 降级路径（路径 C）；RealProviderRegistry 已实现自动降级 | 后续实现 Management API 自动基础设施 + 人工敏感配置审批的分阶段方案 |
 
 ## 当前本机前置状态

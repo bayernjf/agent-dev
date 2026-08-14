@@ -106,7 +106,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 当前阻塞：
 
 - 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；首个真实功能任务曾在 180 秒上限内超时并被正确记录，随后在 2026-08-11 完成了产生源码 diff 且通过 Quality Gate 的真实功能任务；失败重试和 attempt 历史已实现，但真正的 Codex session resume 仍未接入；
-- Deployment Composer 已包含 Vercel Deployment Protection 关闭、精确 CORS、Cloudflare Pages URL 证据和清理逻辑；签名验证的 GitHub `pull_request.closed` Webhook 会按 `pr-<number>` 清理对应的临时 Vercel/Cloudflare 项目。本机 Vercel CLI 和 Wrangler 均已授权，真实网络已能访问 Vercel Deployment Domain；当前 Composer 仍需要显式 `VERCEL_TOKEN` 才能通过 Vercel REST API 关闭临时项目的 Deployment Protection。
+- Deployment Composer 已包含 Vercel Deployment Protection 关闭、精确 CORS、Cloudflare Pages URL 证据和清理逻辑；签名验证的 GitHub `pull_request.closed` Webhook 会按 `pr-<number>` 清理对应的临时 Vercel/Cloudflare 项目。本机 Vercel CLI 和 Wrangler 均已授权，真实网络已能访问 Vercel Deployment Domain。关闭 Deployment Protection 不再需要单独的 `VERCEL_TOKEN`：无 token 时走 `vercel api -X PATCH /v9/projects/{name}` 复用 CLI 现有登录态，设置了 `VERCEL_TOKEN` 则仍走 REST API（两条路径均有单元测试）。2026-08-14 正式 Composer 已在真实云端跑通全部 7 步并取得 Evidence，PR 关闭清理链路仍只有本地测试覆盖。
 - Supabase CLI 的本地状态目录与当前文件边界冲突，Auth Redirect 尚未进行真实平台验证。
 
 事实、降级候选和下一项 Gate 见 [Phase 0 技术 Spike 状态](docs/spikes/README.md)。文档中的 `v0.1` 是计划目标，不代表对应连接器和交付能力已经实现。
