@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, KeyRound, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles,
+  Activity, ArrowRight, CheckCircle2, CircleDot, FolderKanban, KeyRound, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles,
 } from 'lucide-react';
 import { getBlueprintDecisions, type BaselinePlan, type BlueprintAnswers, type DryRunPlan, type ProductBlueprint } from '@agent-dev/blueprint';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
@@ -1053,7 +1053,7 @@ export function App() {
   return (
     <main className="shell">
       <aside className="sidebar">
-        <div className="brand"><Boxes size={20} aria-hidden="true" /><span>Agent-Dev</span></div>
+        <div className="brand"><img className="brand-mark" src="/favicon.svg" alt="" width={22} height={22} /><span>Agent-Dev</span></div>
         <nav aria-label="Studio navigation">
           <a className="nav-item active" href="#projects"><FolderKanban size={18} aria-hidden="true" />Projects</a>
           <a className="nav-item" href="#decisions"><ShieldCheck size={18} aria-hidden="true" />Decisions</a>
