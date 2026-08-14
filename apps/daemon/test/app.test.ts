@@ -198,7 +198,12 @@ describe('daemon API', () => {
     await expect(runtimePlan.json()).resolves.toMatchObject({ plan: { mode: 'dry-run', executionAllowed: false, noExternalChanges: true }, probe: { executionVerified: false } });
     const catalog = await app.request('http://localhost/api/runtime/catalog');
     expect(catalog.status).toBe(200);
-    await expect(catalog.json()).resolves.toMatchObject({ agents: expect.arrayContaining([expect.objectContaining({ id: 'codex', source: 'built-in' })]) });
+    // The catalog only reports built-ins actually present on PATH, so asserting a specific Agent
+    // would only pass on a machine that happens to have it installed. The contract is the shape.
+    const catalogPayload = await catalog.json() as { agents: { source: string; detected: boolean; launchCommand: string }[] };
+    expect(Array.isArray(catalogPayload.agents)).toBe(true);
+    expect(catalogPayload.agents.every(agent => agent.detected && agent.launchCommand.length > 0)).toBe(true);
+    expect(catalogPayload.agents.every(agent => agent.source === 'built-in')).toBe(true);
     const customAgent = await app.request('http://localhost/api/runtime/catalog', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Node Fixture', launchCommand: 'node' }),
     });
