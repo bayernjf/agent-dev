@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryRunPlan, getBlueprintDecisions } from '@agent-dev/blueprint';
+import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
@@ -651,6 +652,8 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
     if (!run || run.status !== 'completed') return context.json({ error: 'Complete the baseline Apply before deploying a preview.' }, 409);
+    const workspace = await verifyWorkspaceArtifacts(run.workspacePath, project.blueprint);
+    if (!workspace.usable) return context.json({ error: workspace.reason, workspace }, 409);
     const previewBranch = parsed.data.pullRequestNumber ? `pr-${parsed.data.pullRequestNumber}` : parsed.data.previewBranch!;
 
     try {
@@ -672,17 +675,22 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
-  app.get('/api/projects/:projectId/preview/plan', context => {
+  app.get('/api/projects/:projectId/preview/plan', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
     if (!run || run.status !== 'completed') return context.json({ error: 'Complete the baseline Apply before planning a preview.' }, 409);
+    const workspace = await verifyWorkspaceArtifacts(run.workspacePath, project.blueprint);
     const composer = new DeploymentComposer({
       workspacePath: run.workspacePath,
       projectName: project.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
       previewBranch: 'preview',
     });
-    return context.json({ steps: composer.plan(), idempotencyKey: composer.idempotencyKey });
+    return context.json({
+      steps: composer.plan(),
+      idempotencyKey: composer.idempotencyKey,
+      workspace,
+    }, workspace.usable ? 200 : 409);
   });
 
   app.post('/api/projects/:projectId/preview/cleanup', async context => {
