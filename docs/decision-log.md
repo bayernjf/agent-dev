@@ -1,6 +1,6 @@
 # Agent-Dev 对话决策记录
 
-> 日期：2026-08-02  
+> 日期：2026-08-02（验证与决策状态更新至 2026-08-14）  
 > 用途：记录本轮产品讨论中已经确认的方向、假设和待决事项。它不是 PRD 或架构的替代品。
 
 ## 1. 已确认方向
@@ -60,24 +60,38 @@
 
 > 在不接管用户产品所有权的前提下，把一次真实 Web 产品交付从大量人工协调压缩成少数产品决策和最终验收。
 
-## 3. 尚待验证
+## 3. 验证状态
 
-- Codex 官方非交互运行方式、结构化输出、取消和恢复能力；
-- Cloudflare Pages Preview 与 Vercel API Preview 的稳定 URL 编排；
-- 动态 CORS 与 Supabase Auth Redirect URL 的精确同步和清理；
-- GitHub Rulesets 是否由 App 自动配置，还是首版生成 Manual Action；
-- Supabase dev/production 是否使用独立项目；
-- Provider OAuth、官方 CLI 和受限 Token 的首版组合；
-- 本地 Runner 的安装、升级和崩溃恢复；
-- v0.1 是否包含 GA4/Clarity 的代码接入，当前只确认其不阻塞核心交付。
+已验证（证据见 [Phase 0 技术 Spike](spikes/README.md)）：
 
-## 4. 尚待产品决策
+- Codex 非交互运行方式与结构化输出：已在本机 `codex-cli 0.142.3` 实测通过，并完成一次真实功能任务写入；
+- Cloudflare Pages Preview 与 Vercel API Preview 的 URL 编排：已通过真实云端验证，实现为 `packages/deployment-composer`；
+- 动态 CORS 与 PR 关闭后的资源清理：已实现精确 CORS origin 与签名验证的清理 Webhook（CORS 已在真实云端验证，清理链路尚未真实验证）；
+- Provider OAuth、官方 CLI 和受限 Token 的首版组合：已确认为官方 CLI Adapter + Manual 降级 + 系统 Keychain 引用；
+- 本地 Runner 从暂停 Gate 或失败 Step 恢复：Workflow Resume 已通过真实本地 Probe；
+- Deployment Composer 真实云端端到端：2026-08-14 正式代码跑通 7/7 步，Evidence 四项检查全部 passed，并在编排之外独立复验。过程修掉 5 个"单元测试全绿但真实链路必然失败"的缺陷（详见 [Dual Preview](spikes/dual-preview.md)），印证了"没有真实 Evidence 不算完成"这条原则的必要性。
 
-| 决策 | 推荐默认 | 影响 |
+仍待验证：
+
+- Codex 取消能力、真实会话 resume 与失败 workspace 恢复；
+- PR 关闭后的临时项目清理在真实云端的链路（部署链路已验证，清理链路仍只有本地测试覆盖）；
+- Supabase Auth Redirect URL 同步仍为手动步骤，未自动化；
+- 本地 Runner 的安装与升级路径（崩溃恢复已由 Workflow Resume 覆盖）。
+
+## 4. 产品决策状态
+
+已确认（详见 [交接报告](../handoff.md) 第 9 节）：
+
+| 决策 | 结论 | 影响 |
 | --- | --- | --- |
 | 生产前端域名 | `app.example.com`，保留 apex 选择 | DNS、Cookie、品牌入口 |
 | dev 与 production Supabase | 独立项目 | 成本更高，但隔离和回滚更清晰 |
 | v0.1 初始产品能力 | 登录、基础用户资料、健康检查 | 模板大小和验收范围 |
+
+待确认：
+
+| 决策 | 推荐默认 | 影响 |
+| --- | --- | --- |
 | Analytics 默认 | 默认关闭，明确同意后接入 | 隐私与新手步骤 |
 | Ruleset 自动化 | 能力不足时生成验证过的 Manual Action | GitHub 套餐、权限和安全 |
 | Blueprint 开源时机 | v0.1 验证后发布 | 接口稳定性与社区策略 |
@@ -96,8 +110,10 @@
 
 ## 6. 下一步决策顺序
 
-1. 完成五个技术 Spike；
-2. 固定 `agent-dev.yaml` v1alpha1 Schema；
-3. 定义首版 Web SaaS 模板包含的最小业务能力；
-4. 确定 Provider 授权和 Supabase 环境隔离方案；
-5. 再创建工程骨架和第一个端到端 Delivery Run。
+1. ✅ 完成五个技术 Spike（全部通过或已批准降级）；
+2. ✅ 固定 `agent-dev.yaml` v1alpha1 Schema；
+3. ✅ 定义首版 Web SaaS 模板包含的最小业务能力；
+4. ✅ 确定 Provider 授权和 Supabase 环境隔离方案；
+5. ✅ 创建工程骨架（`apps/` 三个应用 + `packages/` 八个包）；
+6. 跑通第一个真实端到端 Delivery Run；
+7. 确认 Analytics 默认、Ruleset 自动化与 Blueprint 开源时机三项待决事项。

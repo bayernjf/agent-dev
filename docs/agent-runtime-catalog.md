@@ -1,6 +1,6 @@
 # Agent Runtime Catalog
 
-> 状态：Key-Value Catalog、Studio 选择和 Custom 持久化已实现；多 Agent 执行 Adapter 仍按能力逐个验证
+> 状态：Key-Value Catalog、Studio 选择、Custom 持久化和只读 Capability Probe 展示已实现；多 Agent 执行 Adapter 仍按能力逐个验证
 > 日期：2026-08-07
 
 ## 1. 目标
@@ -38,7 +38,7 @@ Daemon 读取目录后执行最小本地检查：
 4. 运行只读 Capability Probe；
 5. 记录能力、认证状态和失败原因。
 
-发现结果必须区分：`missing`、`available`、`unauthorized`、`unsupported` 和 `error`。
+发现结果必须区分：`missing`、`available`、`unauthorized`、`unsupported` 和 `error`。命令存在但 `--version` 失败时仍显示为已发现，并将版本标为未知，不能误判为未安装。
 
 ### 自定义 Agent
 
@@ -149,7 +149,7 @@ runtime:
 - 名称 + 启动命令表单；
 - 本地可执行文件选择；
 - 自动版本检测和只读 Probe；
-- 自动生成 `.agent-dev/agents.yaml`；
+- 自动生成 `.agent-dev/agents.conf`；
 - 专业模式补充命令模板和能力声明。
 
 ### 阶段 C：多 Runtime 交付
@@ -161,4 +161,4 @@ runtime:
 
 ## 8. 当前实现边界
 
-当前代码已提供本地 Agent Catalog API 和 Studio 面板：内置 Agent 来自 Key-Value 文件，本机未安装的内置 Agent 不显示；用户可以通过弹窗添加 custom Agent，未安装的 custom Agent 置灰并持久化到 `.agent-dev/agents.conf`。当前仅 Codex Adapter 已验证真实执行，其他 Agent 仅允许检测和生成候选计划，不能自动执行。
+当前代码已提供本地 Agent Catalog API 和 Studio 面板：内置 Agent 来自 Key-Value 文件，本机未安装的内置 Agent 不显示；用户可以通过弹窗添加 custom Agent，未安装的 custom Agent 置灰并持久化到 `.agent-dev/agents.conf`。Capability Probe 现在返回明确的 Adapter 状态：`verified`（可执行）、`candidate`（可生成 dry-run，但未实测执行）或 `unsupported`（无 Adapter）。当前仅 Codex Adapter 已完成隔离 workspace 的真实执行验证；其他 Agent 不能自动执行。`isAgentExecutable()` 只会为 `verified` Adapter 返回 `true`。

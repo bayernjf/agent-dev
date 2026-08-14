@@ -236,7 +236,7 @@ const CREDENTIALS_PATH = process.env.AGENT_DEV_CREDENTIALS_PATH
 
 ### 4.2 写入时机
 
-Provider Apply 成功后，立即将返回的 `state` 写入此文件：
+Provider Apply 成功后，立即将资源级事实写入此文件：资源 ID、URL 和非敏感元数据会被保留；无法由 CLI 确认的字段不得伪装为已验证事实。
 
 ```typescript
 // Provider apply 返回值
@@ -1032,7 +1032,7 @@ const DEFAULT_SUPABASE_REASON = 'Supabase manages irreversible data resources (d
 
 ## 11. 实施计划
 
-### 11.1 Phase 1：基础凭证管理（当前）
+### 11.1 Phase 1：基础凭证管理（已完成）
 
 **目标**：实现凭证文件读写 + Provider 注入
 
@@ -1047,7 +1047,7 @@ const DEFAULT_SUPABASE_REASON = 'Supabase manages irreversible data resources (d
 | `packages/provider-cli/src/github.ts` | 修改 | 注入 GITHUB_TOKEN |
 | `packages/provider-cli/src/vercel.ts` | 修改 | 注入 VERCEL_TOKEN |
 | `packages/provider-cli/src/cloudflare.ts` | 修改 | 已支持，无需改动 |
-| `packages/provider-cli/src/supabase.ts` | 新增 | 真实 Supabase adapter |
+| `packages/provider-cli/src/manual.ts` | 使用 | Supabase Manual Adapter（按产品决策不自动创建数据资源） |
 | `apps/daemon/src/app.ts` | 修改 | 新增凭证和资源路由 |
 | `apps/daemon/src/providers.ts` | 修改 | 修正降级理由 |
 
@@ -1056,7 +1056,7 @@ const DEFAULT_SUPABASE_REASON = 'Supabase manages irreversible data resources (d
 - Provider Apply 时从凭证文件读取 token → 注入环境变量 → CLI 调用成功
 - Apply 成功后资源信息写入 `project-resources.json`
 - `.env` 自动生成，应用代码可直接使用
-- Supabase 能真实创建项目（有 token 时）或降级为 Manual（无 token 时）
+- Supabase 始终降级为 Manual：用户在控制台创建项目后填入 URL/Key，Agent-Dev 负责校验、资源记录和环境变量生成
 
 ### 11.2 Phase 2：UI 凭证面板（已于 2026-08-08 完成）
 

@@ -17,6 +17,20 @@ describe('delivery workflow', () => {
     actor.stop();
   });
 
+  it('records local acceptance before any PR, preview, or release transition', () => {
+    const actor = createNeedsInputRun({ projectId: 'project-1', runId: 'run-1' });
+    actor.send({ type: 'PLAN_COMPLETE' });
+    actor.send({ type: 'APPROVE_PROVISIONING' });
+    actor.send({ type: 'BASELINE_CREATED' });
+    actor.send({ type: 'START_IMPLEMENTATION' });
+    actor.send({ type: 'IMPLEMENTATION_COMPLETE' });
+    actor.send({ type: 'VERIFY_COMPLETE' });
+    expect(actor.getSnapshot().value).toBe('LOCAL_ACCEPTED');
+    actor.send({ type: 'PR_CREATED' });
+    expect(actor.getSnapshot().value).toBe('PR_OPEN');
+    actor.stop();
+  });
+
   it('restores a persisted gate and continues from the saved state', () => {
     const original = createNeedsInputRun({ projectId: 'project-1', runId: 'run-1' });
     original.send({ type: 'PLAN_COMPLETE' });

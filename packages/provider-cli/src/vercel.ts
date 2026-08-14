@@ -3,6 +3,14 @@ import type { CommandRunner } from './cli.js';
 import { defaultRunner } from './cli.js';
 import { providerCredentialEnv } from './credentials.js';
 
+type VercelProject = {
+  id?: string;
+  name?: string;
+  accountId?: string;
+  link?: { projectId?: string; orgId?: string };
+  targets?: { production?: { url?: string } };
+};
+
 export class VercelAdapter implements ProviderAdapter {
   readonly providerId = 'vercel';
 
@@ -13,12 +21,26 @@ export class VercelAdapter implements ProviderAdapter {
     private runner: CommandRunner = defaultRunner,
   ) {}
 
+  private async inspectProject(): Promise<VercelProject | null> {
+    const result = await this.runner('vercel', ['project', 'inspect', this.projectName, '--json'], {
+      cwd: this.workspacePath,
+      timeout: 30_000,
+      env: { ...providerCredentialEnv(), CI: 'true' },
+    });
+    if (!result.success) return null;
+    try { return JSON.parse(result.stdout) as VercelProject; } catch { return null; }
+  }
+
   async discover(): Promise<ProviderState> {
     const result = await this.runner('vercel', ['project', 'ls'], { cwd: this.workspacePath, timeout: 30_000, env: { ...providerCredentialEnv(), CI: 'true' } });
     if (!result.success) return { providerId: this.providerId, resources: [] };
     const output = result.stdout || result.stderr;
     const exists = output.split('\n').some(line => line.trim().startsWith(this.projectName));
     if (!exists) return { providerId: this.providerId, resources: [] };
+    const project = await this.inspectProject();
+    const projectId = project?.id ?? project?.link?.projectId;
+    const orgId = project?.accountId ?? project?.link?.orgId;
+    const productionUrl = project?.targets?.production?.url;
     return {
       providerId: this.providerId,
       resources: [{
@@ -26,6 +48,13 @@ export class VercelAdapter implements ProviderAdapter {
         kind: 'functions-project',
         owner: this.owner,
         createdAt: new Date().toISOString(),
+        externalId: projectId,
+        url: productionUrl,
+        metadata: {
+          projectName: project?.name ?? this.projectName,
+          ...(orgId ? { orgId } : {}),
+          ...(productionUrl ? { urlSource: 'cli-output' } : {}),
+        },
       }],
     };
   }

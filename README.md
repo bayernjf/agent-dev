@@ -76,13 +76,17 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 依赖安装是独立的显式动作（`INSTALL_DEPENDENCIES`）：只在用户确认后运行 `npm install`，并生成 `dependency-install.json` 与 `DEPENDENCY_INSTALL_REPORT.md`；
 - Local Apply 完成后可在 Studio 创建 Feature Task，提交目标、验收标准和任务边界；人工批准后生成 `TASK_APPROVAL.md` 并提交到本地 feature 分支；
 - 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；默认仍先生成 dry-run 计划。
-- Runtime Adapter 已能生成受 sandbox、workspace 和禁止路径约束的 Codex 计划，并通过环境变量白名单启动显式批准的 `workspace-write` 执行；认证和真实写入成功路径仍未验证前，不应宣称功能已交付。
+- Runtime Adapter 能生成受 sandbox、workspace 和禁止路径约束的 Codex 计划，并通过环境变量白名单启动显式批准的 `workspace-write` 执行；2026-08-11 已在隔离生成工作区完成一次产生实际源码 diff 的真实 Codex feature task、质量门和 Git evidence 验证。Human Acceptance 仍由用户明确批准。
 - Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence、attempt 历史和 `RUNTIME_RUN_REPORT.md`；失败运行可通过 `RETRY_RUNTIME_RUN` 显式重试，历史不会被覆盖。
 - Studio 已展示 Runtime Run 状态、取消动作、显式 `Run Codex`/`Retry Codex` 按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
 - Daemon 已提供 `/api/runtime/catalog`，内置 Agent 来自 `agents.builtin.conf`，可登记名称 + 启动命令的 custom Agent；内置未安装项隐藏，custom 未安装项置灰并保存到 `.agent-dev/agents.conf`。
-- 凭证管理 Phase 1 已提供本地凭证文件、连接元数据、项目资源清单、`.env` 生成器和 daemon API；Secret 不返回 API、不写入数据库。Studio 凭证面板和 Supabase 真实 Adapter 尚未实现。
+- Studio Agent Catalog 支持主动刷新和只读 Capability Probe，展示非交互、workspace-write 及 `verified`、`candidate`、`unsupported` Adapter 状态；未知能力不会被自动宣称为可执行。
+- 凭证管理 Phase 1 + Phase 2 已提供本地凭证文件、连接元数据、项目资源清单、`.env` 生成器、daemon API 和 Studio 引导/验证面板；Secret 不返回 API、不写入数据库。Supabase 自动 Adapter 按决策保持 Manual。
 - Acceptance Gate 已接入 Studio：提交验收总结和标准确认后，根据 Quality Gate/Git evidence 生成 `ACCEPTANCE_REPORT.md`；blocked 状态不能批准交付。
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。
+- 本地验收批准后，可通过显式 PR/Preview Evidence API 逐步推进到 `PR_OPEN` 和 `PREVIEW_READY`；接口会校验前置状态并把证据写入隔离 workspace，不能跳过生产审批。
+- Studio 会根据当前状态显示对应的 PR 或 Dual Preview 证据表单，避免用户手工调用接口或跳过交付阶段。
+- 已记录的 PR/Preview 证据可通过只读 API 和 Studio 历史区恢复查看。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
 - 模板基线带有根 TypeScript/Vite 配置，可执行 `npm run quality` 和 `npm run build` 作为生成工程的质量入口；
 - Apply 步骤按状态持久化，支持失败后显式重试（最多 3 次）并对已完成 Run 保持幂等；
@@ -90,7 +94,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 身份发现只读取本机 CLI 已有登录状态；资源基线计划只显示阻塞项和待批准的创建意图。审批当前只是一条本地审计记录；Apply Simulator 只写入本仓库忽略的本地工作区，绝不写入 GitHub、Supabase、Vercel 或 Cloudflare。
 
-尚未实现：将生成物写入目标产品仓库、Provider 资源创建、Secret 连接、模板代码生成、Codex 执行、PR/Preview 编排与交付报告。它们仍受下方 Phase 0 技术验证结论约束。
+已实现本地生成物物化、Provider 计划与真实 CLI Adapter、凭证连接、模板代码生成、受控 Codex 执行、Dual Preview 编排和交付报告；真实云端 Preview、生产发布、PR/Actions 全链路仍需在具备对应 CLI 和账号授权的环境中取得 Evidence。
 
 已经取得本地 Evidence：
 
@@ -101,8 +105,8 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 当前阻塞：
 
-- 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；真实功能任务已能启动并产生隔离 workspace 改动，首个任务在 180 秒上限内超时并被正确记录；失败重试和 attempt 历史已实现，但真正的 Codex session resume 仍未接入；
-- Vercel Preview 公网访问超时，Cloudflare/Vercel 联合 Preview 尚未通过；
+- 本机 Codex 只读与临时 fixture 的 workspace-write Runtime Probe 已通过；首个真实功能任务曾在 180 秒上限内超时并被正确记录，随后在 2026-08-11 完成了产生源码 diff 且通过 Quality Gate 的真实功能任务；失败重试和 attempt 历史已实现，但真正的 Codex session resume 仍未接入；
+- Deployment Composer 已包含 Vercel Deployment Protection 关闭、精确 CORS、Cloudflare Pages URL 证据和清理逻辑；签名验证的 GitHub `pull_request.closed` Webhook 会按 `pr-<number>` 清理对应的临时 Vercel/Cloudflare 项目。本机 Vercel CLI 和 Wrangler 均已授权，真实网络已能访问 Vercel Deployment Domain。关闭 Deployment Protection 不再需要单独的 `VERCEL_TOKEN`：无 token 时走 `vercel api -X PATCH /v9/projects/{name}` 复用 CLI 现有登录态，设置了 `VERCEL_TOKEN` 则仍走 REST API（两条路径均有单元测试）。2026-08-14 正式 Composer 已在真实云端跑通全部 7 步并取得 Evidence，PR 关闭清理链路仍只有本地测试覆盖。
 - Supabase CLI 的本地状态目录与当前文件边界冲突，Auth Redirect 尚未进行真实平台验证。
 
 事实、降级候选和下一项 Gate 见 [Phase 0 技术 Spike 状态](docs/spikes/README.md)。文档中的 `v0.1` 是计划目标，不代表对应连接器和交付能力已经实现。

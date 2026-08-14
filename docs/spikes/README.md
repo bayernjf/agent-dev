@@ -5,23 +5,23 @@
 
 | Spike | 当前状态 | 已取得证据 | 下一动作 |
 | --- | --- | --- | --- |
-| [Codex Runtime](codex-runtime.md) | Probe 通过/真实任务超时 | 当前用户配置下只读和临时 fixture workspace-write、JSONL、最终 Schema 与确定性写入验证已通过；真实功能任务已启动但在 180 秒上限内超时 | 失败工作区恢复、Codex resume/cancel 和可控的真实功能重跑 |
+| [Codex Runtime](codex-runtime.md) | 真实功能任务已通过 | 当前用户配置下真实功能任务在隔离 workspace 中退出码为 0，产生 `apps/web/src/main.tsx` 的 Git diff，Quality Gate 通过，状态停在 `VERIFYING`；未执行人工验收 | 失败工作区恢复、Codex resume/cancel 和可控的真实功能重跑 |
 | [Workflow Resume](workflow-resume.md) | 已通过 | XState 5.32.5 快照跨四个独立进程恢复，SQLite 历史连续 | Phase A 改用 Drizzle/正式驱动并补 lease、幂等和 crash 测试 |
 | [Secret Boundary](secret-boundary.md) | 已通过（macOS） | 临时 Keychain、引用存储、Provider 单次注入、Agent allowlist、日志脱敏均实测 | 提取共享库，补 Windows/Linux Adapter |
-| [Dual Preview](dual-preview.md) | 已通过 | Vercel API 部署、Cloudflare Pages 部署、跨域通信、API URL 注入均已取得真实云端 Evidence；部署编排已实现为 `packages/deployment-composer`（含 Vercel SSO Protection 关闭、精确 CORS、临时项目清理）；10 个单元测试通过 | 在安装了 Vercel/Wrangler CLI 的机器上用真实云端跑通 Composer 端到端，补充 PR 关闭时自动触发清理的编排 |
+| [Dual Preview](dual-preview.md) | 正式 Composer 真实端到端已通过 | 2026-08-14 正式 `packages/deployment-composer` 在真实云端跑通 7/7 步：`pagesUrlSource: cli-output`，`apiHealth` / `exactCors` / `pageContainsApiUrl` / `jointSmoke` 全部 passed，并在编排之外独立复验（两个 Pages URL 均 200 且 HTML 含正确 API 域名，API 对别名 Origin 回精确 CORS 头）。免 token 路径也在真实项目确认 `ssoProtection`/`passwordProtection` 为 `null`。这一轮修掉 5 个"单元测试全绿但真实链路必然失败"的缺陷：Vercel 默认导出丢弃 `Response`、API 模板缺 CORS 中间件、前端从不消费 `VITE_API_BASE_URL`、`WRANGLER_LOG: 'none'` 同时破坏幂等判断与 Pages URL 解析、联合 Smoke 拿哈希域名而非分支别名校验 CORS | 在真实云端验证 PR 关闭清理；清理本轮遗留的 `workspace-verify-fresh-*` 两个真实项目 |
 | [Supabase Auth](supabase-auth.md) | 已确认降级 | CLI 写入项目边界外状态，已确认采用 Manual 降级路径（路径 C）；RealProviderRegistry 已实现自动降级 | 后续实现 Management API 自动基础设施 + 人工敏感配置审批的分阶段方案 |
 
 ## 当前本机前置状态
 
 ```text
-Codex CLI      installed, read-only and fixture workspace-write verified; real task recovery pending
-GitHub CLI     not installed (probe.mjs --online reports installed=false)
-Vercel CLI     not installed (probe.mjs --online reports installed=false)
-Wrangler       not installed (probe.mjs --online reports installed=false)
-Supabase CLI   not installed (probe.mjs --online reports installed=false)
+Codex CLI      installed, read-only, fixture workspace-write, and diff-producing feature execution verified
+GitHub CLI     installed
+Vercel CLI     installed and authenticated
+Wrangler       project-local 4.120.0 installed and OAuth authenticated
+Supabase CLI   not installed
 ```
 
-> 注：2026-08-09 本机预检显示当前环境未安装任何 Provider CLI。此前 Spike 验证在另一台已安装并认证的机器上完成。端到端 Composer 验证需要在安装了 `vercel` + `wrangler` CLI 的机器上进行。
+> 注：2026-08-09 已补齐并授权本机 `wrangler`，且确认 `vercel` 已登录。端到端 Composer 目前受当前网络无法访问新建 Vercel Deployment Domain 阻塞，不是 CLI 安装或认证问题。
 
 可重复检查：
 

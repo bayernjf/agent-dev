@@ -4,9 +4,11 @@ import { defaultRunner, runCliJson } from './cli.js';
 import { providerCredentialEnv } from './credentials.js';
 
 type GhRepo = {
+  id?: string;
   name: string;
   owner: { login: string } | string;
   isPrivate: boolean;
+  url?: string;
 };
 
 export class GitHubAdapter implements ProviderAdapter {
@@ -19,9 +21,16 @@ export class GitHubAdapter implements ProviderAdapter {
     private runner: CommandRunner = defaultRunner,
   ) {}
 
+  private runGh(args: string[], options: Parameters<CommandRunner>[2] = {}) {
+    return this.runner('gh', args, {
+      ...options,
+      env: { ...providerCredentialEnv(), ...options.env },
+    });
+  }
+
   private async resolveOwner(): Promise<string> {
     if (this.owner) return this.owner;
-    const result = await this.runner('gh', ['api', 'user', '--jq', '.login']);
+    const result = await this.runGh(['api', 'user', '--jq', '.login']);
     return result.success ? result.stdout.trim() : '';
   }
 
@@ -32,7 +41,9 @@ export class GitHubAdapter implements ProviderAdapter {
 
   async discover(): Promise<ProviderState> {
     const fullName = await this.resolveRepoFullName();
-    const repo = await runCliJson<GhRepo>(this.runner, 'gh', ['repo', 'view', fullName, '--json', 'name,owner,isPrivate']);
+    const repo = await runCliJson<GhRepo>(this.runner, 'gh', ['repo', 'view', fullName, '--json', 'id,name,owner,isPrivate,url'], {
+      env: providerCredentialEnv(),
+    });
     if (!repo) return { providerId: this.providerId, resources: [] };
     const ownerLogin = typeof repo.owner === 'string' ? repo.owner : repo.owner?.login ?? '';
     return {
@@ -42,6 +53,9 @@ export class GitHubAdapter implements ProviderAdapter {
         kind: 'repository',
         owner: ownerLogin,
         createdAt: new Date().toISOString(),
+        externalId: repo.id,
+        url: repo.url ?? `https://github.com/${ownerLogin}/${repo.name}`,
+        metadata: { repository: `${ownerLogin}/${repo.name}`, private: String(repo.isPrivate) },
       }],
     };
   }
@@ -69,7 +83,7 @@ export class GitHubAdapter implements ProviderAdapter {
     for (const resource of plan.resources) {
       if (resource.action === 'noop') continue;
       const repoName = owner ? `${owner}/${this.projectName}` : this.projectName;
-      const result = await this.runner('gh', ['repo', 'create', repoName, '--private', '--source', this.workspacePath, '--push'], { cwd: this.workspacePath, env: providerCredentialEnv() });
+      const result = await this.runGh(['repo', 'create', repoName, '--private', '--source', this.workspacePath, '--push'], { cwd: this.workspacePath });
       if (!result.success) throw new Error(`GitHub repository creation failed: ${result.stderr || result.stdout}`);
     }
     return { providerId: this.providerId, idempotencyKey: plan.idempotencyKey, applied: true, state: await this.discover() };

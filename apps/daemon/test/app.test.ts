@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createHmac } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -197,7 +198,12 @@ describe('daemon API', () => {
     await expect(runtimePlan.json()).resolves.toMatchObject({ plan: { mode: 'dry-run', executionAllowed: false, noExternalChanges: true }, probe: { executionVerified: false } });
     const catalog = await app.request('http://localhost/api/runtime/catalog');
     expect(catalog.status).toBe(200);
-    await expect(catalog.json()).resolves.toMatchObject({ agents: expect.arrayContaining([expect.objectContaining({ id: 'codex', source: 'built-in' })]) });
+    // The catalog only reports built-ins actually present on PATH, so asserting a specific Agent
+    // would only pass on a machine that happens to have it installed. The contract is the shape.
+    const catalogPayload = await catalog.json() as { agents: { source: string; detected: boolean; launchCommand: string }[] };
+    expect(Array.isArray(catalogPayload.agents)).toBe(true);
+    expect(catalogPayload.agents.every(agent => agent.detected && agent.launchCommand.length > 0)).toBe(true);
+    expect(catalogPayload.agents.every(agent => agent.source === 'built-in')).toBe(true);
     const customAgent = await app.request('http://localhost/api/runtime/catalog', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Node Fixture', launchCommand: 'node' }),
     });
@@ -234,6 +240,64 @@ describe('daemon API', () => {
       body: JSON.stringify({ confirmation: 'RETRY_APPLY' }),
     });
     expect(invalidRetry.status).toBe(409);
+    await store.close();
+  }, 30_000);
+
+  it('cleans a PR preview only after verifying a signed GitHub close event', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const cleanupCalls: { vercelProject?: string; cloudflareProject?: string; workspacePath: string }[] = [];
+    const { app } = createDaemonApp(store, undefined, {
+      resolveGitHubWebhookSecret: () => 'webhook-secret',
+      cleanupPreview: async options => {
+        cleanupCalls.push(options);
+        return { vercel: true, cloudflare: true, errors: [] };
+      },
+    });
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Receipt Desk',
+        answers: { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' },
+      }),
+    });
+    const { project } = await created.json() as { project: { id: string } };
+    await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+    });
+    await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+
+    const body = JSON.stringify({ action: 'closed', repository: { name: 'receipt-desk' }, pull_request: { number: 42 } });
+    const signature = `sha256=${createHmac('sha256', 'webhook-secret').update(body).digest('hex')}`;
+    const cleaned = await app.request('http://localhost/api/github/webhooks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-github-event': 'pull_request', 'x-hub-signature-256': signature },
+      body,
+    });
+    expect(cleaned.status).toBe(200);
+    await expect(cleaned.json()).resolves.toMatchObject({ projectId: project.id, previewBranch: 'pr-42', cleanup: { errors: [] } });
+    expect(cleanupCalls).toHaveLength(1);
+    expect(cleanupCalls[0]).toMatchObject({ vercelProject: 'receipt-desk-api-pr-42', cloudflareProject: 'receipt-desk-web-pr-42' });
+
+    const rejected = await app.request('http://localhost/api/github/webhooks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-github-event': 'pull_request', 'x-hub-signature-256': 'sha256=invalid' },
+      body,
+    });
+    expect(rejected.status).toBe(401);
+    expect(cleanupCalls).toHaveLength(1);
+
+    const ignored = await app.request('http://localhost/api/github/webhooks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-github-event': 'push' },
+      body: '{}',
+    });
+    expect(ignored.status).toBe(202);
+    expect(cleanupCalls).toHaveLength(1);
     await store.close();
   }, 30_000);
 });
