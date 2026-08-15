@@ -82,7 +82,7 @@ function deploymentUrl(output) {
 
 async function fetchWithRetry(url, options = {}) {
   let lastError;
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     try {
       const response = await fetch(url, {
         ...options,
@@ -93,7 +93,7 @@ async function fetchWithRetry(url, options = {}) {
     } catch (error) {
       lastError = new Error(error.cause?.code || error.name || 'fetch failed');
     }
-    await new Promise(resolve => setTimeout(resolve, 5_000));
+    await new Promise(resolve => setTimeout(resolve, 10_000));
   }
   throw new Error(`verification failed for ${new URL(url).hostname}: ${lastError?.message}`);
 }
@@ -124,6 +124,21 @@ async function main() {
       '--no-color',
     ]);
     vercelCreated = true;
+    const vercelOutput = run('vercel', [
+      'deploy',
+      apiDirectory,
+      '--yes',
+      '--non-interactive',
+      '--no-color',
+      '--format=json',
+      '--project',
+      vercelProject,
+      '--env',
+      `ALLOWED_ORIGIN=${pageOrigin}`,
+    ]);
+    const apiBaseUrl = deploymentUrl(vercelOutput);
+    // Deployment Protection can be re-applied to a newly created deployment;
+    // disable it after deploy and before the public health check.
     const protectionConfigPath = join(temporaryDirectory, 'vercel-protection.json');
     await writeFile(
       protectionConfigPath,
@@ -140,19 +155,6 @@ async function main() {
       '--silent',
       '--no-color',
     ]);
-    const vercelOutput = run('vercel', [
-      'deploy',
-      apiDirectory,
-      '--yes',
-      '--non-interactive',
-      '--no-color',
-      '--format=json',
-      '--project',
-      vercelProject,
-      '--env',
-      `ALLOWED_ORIGIN=${pageOrigin}`,
-    ]);
-    const apiBaseUrl = deploymentUrl(vercelOutput);
     run('vercel', [
       'inspect',
       apiBaseUrl,

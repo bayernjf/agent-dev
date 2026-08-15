@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  Activity, ArrowRight, Boxes, CheckCircle2, CircleDot, FolderKanban, KeyRound, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles,
+  Activity, ArrowRight, CheckCircle2, CircleDot, FolderKanban, KeyRound, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles,
 } from 'lucide-react';
 import { getBlueprintDecisions, type BaselinePlan, type BlueprintAnswers, type DryRunPlan, type ProductBlueprint } from '@agent-dev/blueprint';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
@@ -26,10 +26,13 @@ type FeatureTask = { id: string; blueprintRevision: number; title: string; objec
 type RuntimeAttempt = { attempt: number; status: 'running' | 'completed' | 'failed'; startedAt: string; completedAt?: string; result?: { exitCode: number | null; signal: string | null; timedOut: boolean; output: string } };
 type RuntimeRun = { id: string; status: 'planned' | 'running' | 'completed' | 'failed' | 'cancelled'; taskId: string; blueprintRevision: number; agentId: string; attempts: number; history: RuntimeAttempt[]; plan: { mode: 'dry-run' | 'execute'; executionAllowed: boolean; noExternalChanges: boolean; command: string[] }; result?: { exitCode: number | null; signal: string | null; timedOut: boolean; output: string } };
 type GitEvidence = { branch: string; head: string; status: string; diffStat: string };
+type PrEvidence = { url: string; checks: string[]; recordedAt: string };
+type PreviewEvidence = { apiUrl: string; webUrl: string; smokeTest: string; recordedAt: string };
 type AcceptanceRecord = { status: 'blocked' | 'ready' | 'approved'; summary: string; criteriaConfirmed: boolean; qualityStatus: 'passed' | 'failed' | 'missing'; approvedBy?: string; approvedAt?: string };
 type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
 type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
 type AgentDescriptor = { id: string; name: string; source: 'built-in' | 'custom'; launchCommand: string; detected: boolean; version: string | null; detail: string; capabilities: string[] };
+type AgentCapabilityProbe = { agentId: string; nonInteractive: boolean; nonInteractiveFlags: string[]; workspaceWrite: boolean; helpAvailable: boolean; adapterStatus: 'verified' | 'candidate' | 'unsupported' };
 type CredentialMeta = { version: 1; updatedAt: string; keys: string[] };
 type ProjectResources = { version: number; projectName: string; projectId: string; blueprintRevision: number; updatedAt: string; providers: Record<string, Record<string, unknown>> } | null;
 type CredentialVerifyResult = { providerId: string; status: 'valid' | 'invalid' | 'not_set'; detail: string };
@@ -116,12 +119,22 @@ export function App() {
   const [featureCriteria, setFeatureCriteria] = useState('');
   const [acceptanceSummary, setAcceptanceSummary] = useState('');
   const [criteriaConfirmed, setCriteriaConfirmed] = useState(false);
+  const [prEvidence, setPrEvidence] = useState<PrEvidence | null>(null);
+  const [previewEvidence, setPreviewEvidence] = useState<PreviewEvidence | null>(null);
+  const [prUrl, setPrUrl] = useState('');
+  const [prChecks, setPrChecks] = useState('');
+  const [previewApiUrl, setPreviewApiUrl] = useState('');
+  const [previewWebUrl, setPreviewWebUrl] = useState('');
+  const [previewSmokeTest, setPreviewSmokeTest] = useState('');
+  const [recordingDeliveryEvidence, setRecordingDeliveryEvidence] = useState(false);
   const [agents, setAgents] = useState<AgentDescriptor[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [savingAgent, setSavingAgent] = useState(false);
   const [customAgentName, setCustomAgentName] = useState('');
   const [customAgentCommand, setCustomAgentCommand] = useState('');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [agentProbes, setAgentProbes] = useState<Record<string, AgentCapabilityProbe>>({});
+  const [probingAgentId, setProbingAgentId] = useState<string | null>(null);
   const [credentialMeta, setCredentialMeta] = useState<CredentialMeta | null>(null);
   const [credentialInputs, setCredentialInputs] = useState<Record<string, string>>({});
   const [savingCredentials, setSavingCredentials] = useState(false);
@@ -175,6 +188,7 @@ export function App() {
       void loadFeatureTask(projectId);
       void loadRuntimePlan(projectId);
       void loadAcceptance(projectId);
+      void loadDeliveryEvidence(projectId);
       void loadFinalDeliveryReport(projectId);
       void loadProviderPlan(projectId);
       void loadProjectResources(projectId);
@@ -301,6 +315,60 @@ export function App() {
     }
   };
 
+  const loadDeliveryEvidence = async (projectId: string) => {
+    try {
+      const [prResponse, previewResponse] = await Promise.all([
+        fetch(`/api/projects/${projectId}/delivery/pr-evidence`),
+        fetch(`/api/projects/${projectId}/delivery/preview-evidence`),
+      ]);
+      if (!prResponse.ok || !previewResponse.ok) throw new Error('Unable to load delivery evidence.');
+      const prPayload = await prResponse.json() as { evidence: PrEvidence | null };
+      const previewPayload = await previewResponse.json() as { evidence: PreviewEvidence | null };
+      setPrEvidence(prPayload.evidence);
+      setPreviewEvidence(previewPayload.evidence);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load delivery evidence.');
+    }
+  };
+
+  const recordPrEvidence = async () => {
+    if (!selected || selected.state !== 'LOCAL_ACCEPTED' || !prUrl.trim() || !prChecks.trim()) return;
+    setRecordingDeliveryEvidence(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/delivery/pr-evidence`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'RECORD_PR_EVIDENCE', url: prUrl.trim(), checks: prChecks.split('\n').map(value => value.trim()).filter(Boolean) }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? 'Unable to record PR evidence.');
+      setPrUrl(''); setPrChecks('');
+      await selectProject(selected.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to record PR evidence.');
+    } finally {
+      setRecordingDeliveryEvidence(false);
+    }
+  };
+
+  const recordPreviewEvidence = async () => {
+    if (!selected || selected.state !== 'PR_OPEN' || !previewApiUrl.trim() || !previewWebUrl.trim() || !previewSmokeTest.trim()) return;
+    setRecordingDeliveryEvidence(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/delivery/preview-evidence`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'RECORD_PREVIEW_EVIDENCE', apiUrl: previewApiUrl.trim(), webUrl: previewWebUrl.trim(), smokeTest: previewSmokeTest.trim() }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? 'Unable to record Preview evidence.');
+      setPreviewApiUrl(''); setPreviewWebUrl(''); setPreviewSmokeTest('');
+      await selectProject(selected.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to record Preview evidence.');
+    } finally {
+      setRecordingDeliveryEvidence(false);
+    }
+  };
+
   const loadProviderPlan = async (projectId: string) => {
     try {
       const response = await fetch(`/api/projects/${projectId}/provider-plan`);
@@ -330,6 +398,23 @@ export function App() {
       setError(cause instanceof Error ? cause.message : 'Unable to load the Agent Catalog.');
     } finally {
       setLoadingAgents(false);
+    }
+  };
+
+  const probeAgent = async (agent: AgentDescriptor) => {
+    if (!agent.detected || probingAgentId === agent.id) return;
+    setSelectedAgentId(agent.id);
+    setProbingAgentId(agent.id);
+    try {
+      const response = await fetch(`/api/runtime/probe/${encodeURIComponent(agent.id)}`);
+      const payload = await response.json() as { probe?: Omit<AgentCapabilityProbe, 'adapterStatus'>; adapterStatus?: AgentCapabilityProbe['adapterStatus']; error?: string };
+      if (!response.ok || !payload.probe) throw new Error(payload.error ?? 'Unable to probe Agent capabilities.');
+      setAgentProbes(current => ({ ...current, [agent.id]: { ...payload.probe!, adapterStatus: payload.adapterStatus ?? 'unsupported' } }));
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to probe Agent capabilities.');
+    } finally {
+      setProbingAgentId(null);
     }
   };
 
@@ -968,7 +1053,7 @@ export function App() {
   return (
     <main className="shell">
       <aside className="sidebar">
-        <div className="brand"><Boxes size={20} aria-hidden="true" /><span>Agent-Dev</span></div>
+        <div className="brand"><img className="brand-mark" src="/favicon.svg" alt="" width={22} height={22} /><span>Agent-Dev</span></div>
         <nav aria-label="Studio navigation">
           <a className="nav-item active" href="#projects"><FolderKanban size={18} aria-hidden="true" />Projects</a>
           <a className="nav-item" href="#decisions"><ShieldCheck size={18} aria-hidden="true" />Decisions</a>
@@ -1017,6 +1102,11 @@ export function App() {
               <div className="artifact-list">{dryRun.artifacts.map(artifact => <button className={`artifact-button ${selectedArtifact?.id === artifact.id ? 'selected' : ''}`} type="button" key={artifact.id} onClick={() => setSelectedArtifactId(artifact.id)}><strong>{artifact.title}</strong><span>{artifact.path}</span></button>)}</div>
               {selectedArtifact && <article className="artifact-preview"><div><h3>{selectedArtifact.title}</h3><p>{selectedArtifact.path}</p></div><pre>{selectedArtifact.content}</pre></article>}
             </section>}
+
+            {selected?.state === 'LOCAL_ACCEPTED' && <section className="evidence-section"><div className="section-heading"><div><p className="eyebrow">Delivery evidence</p><h2>Record Pull Request</h2><p>Supply the real PR URL and checks before opening the Preview stage.</p></div><span className="dry-run-tag">LOCAL_ACCEPTED</span></div><div className="evidence-form"><label htmlFor="pr-url">Pull Request URL</label><input id="pr-url" type="url" value={prUrl} onChange={event => setPrUrl(event.target.value)} placeholder="https://github.com/org/repo/pull/42" /><label htmlFor="pr-checks">Checks passed <small>one per line</small></label><textarea id="pr-checks" value={prChecks} onChange={event => setPrChecks(event.target.value)} placeholder="GitHub Actions: quality\nReview approved" /><button className="primary-button" type="button" onClick={() => void recordPrEvidence()} disabled={recordingDeliveryEvidence || !prUrl.trim() || !prChecks.trim()}>{recordingDeliveryEvidence ? 'Recording...' : 'Record PR evidence'}<ArrowRight size={15} aria-hidden="true" /></button></div></section>}
+            {selected?.state === 'PR_OPEN' && <section className="evidence-section"><div className="section-heading"><div><p className="eyebrow">Delivery evidence</p><h2>Record Dual Preview</h2><p>Supply both public URLs and the smoke-test result before Preview is marked ready.</p></div><span className="dry-run-tag">PR_OPEN</span></div><div className="evidence-form"><label htmlFor="preview-api-url">API Preview URL</label><input id="preview-api-url" type="url" value={previewApiUrl} onChange={event => setPreviewApiUrl(event.target.value)} placeholder="https://api-preview.vercel.app" /><label htmlFor="preview-web-url">Web Preview URL</label><input id="preview-web-url" type="url" value={previewWebUrl} onChange={event => setPreviewWebUrl(event.target.value)} placeholder="https://preview.pages.dev" /><label htmlFor="preview-smoke-test">Smoke-test result</label><textarea id="preview-smoke-test" value={previewSmokeTest} onChange={event => setPreviewSmokeTest(event.target.value)} placeholder="Page loaded and API health returned 200 with exact CORS." /><button className="primary-button" type="button" onClick={() => void recordPreviewEvidence()} disabled={recordingDeliveryEvidence || !previewApiUrl.trim() || !previewWebUrl.trim() || !previewSmokeTest.trim()}>{recordingDeliveryEvidence ? 'Recording...' : 'Record Preview evidence'}<ArrowRight size={15} aria-hidden="true" /></button></div></section>}
+
+            {(prEvidence || previewEvidence) && <section className="evidence-section evidence-records"><div className="section-heading"><div><p className="eyebrow">Recorded evidence</p><h2>Delivery evidence history</h2><p>These records were read from the isolated workspace and can be reviewed after a refresh.</p></div><CheckCircle2 size={18} aria-hidden="true" /></div>{prEvidence && <article className="evidence-record"><strong>Pull Request</strong><a href={prEvidence.url} target="_blank" rel="noreferrer">{prEvidence.url}</a><small>{prEvidence.checks.join(' · ')} · {formatDate(prEvidence.recordedAt)}</small></article>}{previewEvidence && <article className="evidence-record"><strong>Dual Preview</strong><span>API: {previewEvidence.apiUrl}</span><span>Web: {previewEvidence.webUrl}</span><small>{previewEvidence.smokeTest} · {formatDate(previewEvidence.recordedAt)}</small></article>}</section>}
 
             {selected && baselinePlan && <section className="baseline-section">
               <div className="section-heading"><div><p className="eyebrow">Resource plan · Revision {baselinePlan.blueprintRevision}</p><h2>Baseline resources</h2><p>{baselinePlan.summary}</p></div><span className={`baseline-tag ${baselineApproval ? 'approved' : baselinePlan.readyForApproval ? 'ready' : 'blocked'}`}>{baselineApproval ? 'Approved' : baselinePlan.readyForApproval ? 'Ready for approval' : 'Ownership required'}</span></div>
@@ -1242,10 +1332,10 @@ export function App() {
             </section>
             <section className="agent-catalog-panel" id="agents">
               <div className="panel-title"><div><p className="eyebrow">Local runtime</p><h2>Agent Catalog</h2></div><button className="icon-button" type="button" onClick={() => void loadAgents()} disabled={loadingAgents} aria-label="Refresh agents" title="Refresh agents"><RefreshCw size={17} /></button></div>
-              <p className="form-note">Detected Agents can be selected for Runtime execution. Custom Agents are persisted in .agent-dev/agents.yaml.</p>
+              <p className="form-note">Detected Agents can be inspected here. Only verified execution adapters can run tasks. Custom Agents are persisted in .agent-dev/agents.conf.</p>
               {loadingAgents && agents.length === 0 ? <p className="empty-state">Detecting local Agents...</p> : agents.length === 0 ? <p className="empty-state">No Agents found.</p> : <div className="agent-list">{agents.map(agent => (
-                <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => setSelectedAgentId(agent.id)} disabled={!agent.detected}>
-                  <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}<code className="agent-command">{agent.launchCommand}</code></div>
+                <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => void probeAgent(agent)} disabled={!agent.detected || probingAgentId !== null}>
+                  <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? 'Running read-only capability probe...' : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{agentProbes[agent.id] && <div className="agent-caps"><span className="agent-cap">{agentProbes[agent.id].nonInteractive ? 'non-interactive: yes' : 'non-interactive: unknown'}</span><span className="agent-cap">{agentProbes[agent.id].workspaceWrite ? 'workspace-write: yes' : 'workspace-write: no'}</span><span className="agent-cap">{`adapter: ${agentProbes[agent.id].adapterStatus}`}</span></div>}<code className="agent-command">{agent.launchCommand}</code></div>
                   <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? 'Detected' : 'Not found'}</span>
                 </button>
               ))}</div>}

@@ -75,6 +75,11 @@ export class RealProviderRegistry {
     return available;
   }
 
+  /** Credentials may be updated while the daemon is running. Recheck on next use. */
+  invalidateCredentials(): void {
+    this.cliAvailability.clear();
+  }
+
   private async createAdapter(providerId: string, spec: ProviderResourceSpec, ctx: ProviderContext): Promise<ProviderAdapter> {
     if (providerId === 'supabase') {
       return new ManualProviderAdapter('supabase', this.supabaseReason);
@@ -109,7 +114,9 @@ export class RealProviderRegistry {
         if (!spec) throw new Error(`No spec found for provider ${plan.providerId}.`);
         const adapter = await this.createAdapter(plan.providerId, spec, ctx);
         const result = await adapter.apply(plan, approval);
-        if (ctx.projectId && ctx.blueprintRevision) writeProjectResources(ctx.workspacePath, ctx.projectName, ctx.projectId, ctx.blueprintRevision, plan.providerId, result.state as unknown as Record<string, unknown>);
+        if (ctx.projectId && ctx.blueprintRevision) {
+          writeProjectResources(ctx.workspacePath, ctx.projectName, ctx.projectId, ctx.blueprintRevision, plan.providerId, providerResourceFacts(result.state));
+        }
         return result;
       }),
     );
@@ -153,4 +160,18 @@ export class RealProviderRegistry {
     }
     return specs;
   }
+}
+
+function providerResourceFacts(state: { providerId: string; resources: Array<{ id: string; kind: string; owner: string; createdAt: string; externalId?: string; url?: string; metadata?: Record<string, string> }> }): Record<string, unknown> {
+  const resource = state.resources[0];
+  if (!resource) return { resources: [] };
+  return {
+    resourceId: resource.id,
+    kind: resource.kind,
+    owner: resource.owner,
+    externalId: resource.externalId,
+    url: resource.url,
+    createdAt: resource.createdAt,
+    ...resource.metadata,
+  };
 }

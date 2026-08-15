@@ -1,5 +1,6 @@
 export { DeploymentComposer } from './composer.js';
 export { cleanupPreviewProjects, type CleanupResult } from './cleanup.js';
+export { previewProjectNames, type PreviewProjectNames } from './names.js';
 export type {
   PreviewStepId,
   PreviewStepStatus,

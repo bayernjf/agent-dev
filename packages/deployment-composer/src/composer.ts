@@ -2,6 +2,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CommandRunner, CliResult } from '@agent-dev/provider-cli';
 import { defaultRunner, providerCredentialEnv } from '@agent-dev/provider-cli';
+import { previewProjectNames } from './names.js';
 import type { PreviewStep, PreviewStepId, PreviewComposerOptions, PreviewDeploymentResult, PreviewEvidence } from './steps.js';
 
 const STEP_DEFINITIONS: { id: PreviewStepId; title: string }[] = [
@@ -26,8 +27,11 @@ export class DeploymentComposer {
   private steps: PreviewStep[];
   private apiBaseUrl: string | undefined;
   private pagesUrl: string | undefined;
+  private pagesUrlSource: 'cli-output' | 'derived-fallback' | undefined;
   private vercelProjectName: string | undefined;
   private cloudflareProjectName: string | undefined;
+  private vercelProjectMayExist = false;
+  private cloudflareProjectMayExist = false;
 
   constructor(options: PreviewComposerOptions, runner?: CommandRunner) {
     this.workspacePath = options.workspacePath;
@@ -38,8 +42,9 @@ export class DeploymentComposer {
     this.frontendDistDirectory = options.frontendDistDirectory ?? join(this.frontendDirectory, 'dist');
     this.runner = runner ?? defaultRunner;
     this.steps = STEP_DEFINITIONS.map(def => ({ ...def, status: 'pending' as const }));
-    this.vercelProjectName = `${this.projectName}-api-${this.previewBranch}`;
-    this.cloudflareProjectName = `${this.projectName}-web-${this.previewBranch}`;
+    const names = previewProjectNames(this.projectName, this.previewBranch);
+    this.vercelProjectName = names.vercelProject;
+    this.cloudflareProjectName = names.cloudflareProject;
   }
 
   get idempotencyKey(): string {
@@ -76,13 +81,14 @@ export class DeploymentComposer {
       steps: this.steps.map(s => ({ ...s })),
       apiBaseUrl: this.apiBaseUrl,
       pagesUrl: this.pagesUrl,
+      pagesUrlSource: this.pagesUrlSource,
       corsOrigin: this.corsOrigin,
     };
 
-    if (status === 'failed') {
+    if (status === 'failed' && (this.vercelProjectMayExist || this.cloudflareProjectMayExist)) {
       result.cleanupRequired = {
-        vercel: this.vercelProjectName,
-        cloudflare: this.cloudflareProjectName,
+        vercel: this.vercelProjectMayExist ? this.vercelProjectName : undefined,
+        cloudflare: this.cloudflareProjectMayExist ? this.cloudflareProjectName : undefined,
       };
     }
 
@@ -116,7 +122,10 @@ export class DeploymentComposer {
   }
 
   private async deployVercelPreview(step: PreviewStep): Promise<void> {
-    const env = { ...providerCredentialEnv(), CI: 'true', VERCEL_TELEMETRY_DISABLED: '1' };
+    const credentialEnv: Record<string, string> = providerCredentialEnv();
+    const env = { ...credentialEnv, CI: 'true', VERCEL_TELEMETRY_DISABLED: '1' };
+    await this.ensureVercelAuth(env);
+    this.vercelProjectMayExist = true;
 
     // Create project if it does not exist (idempotent: vercel project add is safe to re-run)
     const projectResult = await this.runner('vercel', ['project', 'add', this.vercelProjectName!, '--no-color'], {
@@ -158,10 +167,25 @@ export class DeploymentComposer {
     step.detail = `Deployed to ${this.apiBaseUrl}`;
   }
 
+  private async ensureVercelAuth(env: Record<string, string>): Promise<void> {
+    if (env.VERCEL_TOKEN || process.env.VERCEL_TOKEN) return;
+    const whoami = await this.runner('vercel', ['whoami', '--no-color'], {
+      cwd: this.workspacePath,
+      timeout: 30_000,
+      env,
+    });
+    if (!whoami.success) {
+      throw new Error('Vercel is not authenticated; set VERCEL_TOKEN or run `vercel login` before creating a Vercel preview.');
+    }
+  }
+
   private async disableVercelDeploymentProtection(): Promise<void> {
     const env = providerCredentialEnv();
     const token = env.VERCEL_TOKEN ?? process.env.VERCEL_TOKEN;
-    if (!token) throw new Error('VERCEL_TOKEN is not set; cannot disable deployment protection via Vercel API.');
+    if (!token) {
+      await this.disableVercelDeploymentProtectionViaCli(env);
+      return;
+    }
 
     const response = await fetch(`https://api.vercel.com/v9/projects/${this.vercelProjectName}`, {
       method: 'PATCH',
@@ -179,6 +203,32 @@ export class DeploymentComposer {
     if (!response.ok) {
       const body = await response.text().catch(() => 'unreadable');
       throw new Error(`Failed to disable Vercel deployment protection (HTTP ${response.status}): ${body}`);
+    }
+  }
+
+  // `vercel api` reuses the CLI's existing login, so no long-lived personal token has to exist.
+  // The body goes through a file because the request needs literal JSON `null`, which `--field` coerces to "".
+  private async disableVercelDeploymentProtectionViaCli(env: Record<string, string>): Promise<void> {
+    const bodyDir = join(this.workspacePath, '.agent-dev');
+    mkdirSync(bodyDir, { recursive: true });
+    const bodyPath = join(bodyDir, 'vercel-deployment-protection.json');
+    writeFileSync(bodyPath, `${JSON.stringify({ ssoProtection: null, passwordProtection: null })}\n`, 'utf8');
+
+    const result = await this.runner('vercel', [
+      'api',
+      `/v9/projects/${this.vercelProjectName}`,
+      '-X', 'PATCH',
+      '--input', bodyPath,
+      '--silent',
+      '--no-color',
+    ], {
+      cwd: this.workspacePath,
+      timeout: 30_000,
+      env: { ...env, CI: 'true', VERCEL_TELEMETRY_DISABLED: '1' },
+    });
+
+    if (!result.success) {
+      throw new Error(`Failed to disable Vercel deployment protection via \`vercel api\`: ${result.stderr || result.stdout}`);
     }
   }
 
@@ -224,18 +274,24 @@ export class DeploymentComposer {
 
   private async deployCloudflarePreview(step: PreviewStep): Promise<void> {
     const env = providerCredentialEnv();
+    this.cloudflareProjectMayExist = true;
 
     // Create Cloudflare Pages project (idempotent)
+    // `WRANGLER_LOG: 'none'` is deliberately not set here: it suppresses the "already exists" message
+    // that the idempotency check below depends on, which made every re-run fail after the first.
     const createResult = await this.runner('npx', ['wrangler', 'pages', 'project', 'create', this.cloudflareProjectName!, '--production-branch', 'main'], {
       cwd: this.workspacePath,
       timeout: 60_000,
-      env: { ...env, WRANGLER_LOG: 'none' },
+      env,
     });
-    if (!createResult.success && !createResult.stderr.includes('already exists')) {
+    const alreadyExists = `${createResult.stderr}${createResult.stdout}`.includes('already exists');
+    if (!createResult.success && !alreadyExists) {
       throw new Error(`Cloudflare Pages project creation failed: ${createResult.stderr || createResult.stdout}`);
     }
 
-    // Deploy to preview branch
+    // Deploy to preview branch. Logging stays enabled for the same reason as the create step above:
+    // Wrangler reports the real deployment URL through its log output, and suppressing it forced the
+    // derived-URL fallback on every run.
     const deployResult = await this.runner('npx', [
       'wrangler', 'pages', 'deploy',
       this.frontendDistDirectory,
@@ -245,14 +301,16 @@ export class DeploymentComposer {
     ], {
       cwd: this.workspacePath,
       timeout: 180_000,
-      env: { ...env, WRANGLER_LOG: 'none' },
+      env,
     });
     if (!deployResult.success) {
       throw new Error(`Cloudflare Pages deployment failed: ${deployResult.stderr || deployResult.stdout}`);
     }
 
-    this.pagesUrl = this.corsOrigin;
-    step.detail = `Deployed to ${this.pagesUrl}`;
+    const actualPagesUrl = this.parsePagesUrl(deployResult.stdout) ?? this.parsePagesUrl(deployResult.stderr);
+    this.pagesUrl = actualPagesUrl ?? this.corsOrigin;
+    this.pagesUrlSource = actualPagesUrl ? 'cli-output' : 'derived-fallback';
+    step.detail = `Deployed to ${this.pagesUrl} (${this.pagesUrlSource})`;
   }
 
   private async verifyJointSmoke(step: PreviewStep): Promise<void> {
@@ -266,13 +324,15 @@ export class DeploymentComposer {
       throw new Error('Page source does not contain the injected API base URL.');
     }
 
-    // Verify API CORS with Pages origin
+    // CORS is verified against the branch alias, not the per-deployment hash URL that Wrangler
+    // reports. The alias is the stable origin the API was deployed with and the link a reviewer
+    // opens; the hash URL changes on every deploy and would never match ALLOWED_ORIGIN.
     const apiResponse = await fetchWithRetry(`${this.apiBaseUrl}/api/health`, {
-      headers: { Origin: this.pagesUrl },
+      headers: { Origin: this.corsOrigin },
     });
     const corsHeader = apiResponse.headers.get('access-control-allow-origin');
-    if (corsHeader !== this.pagesUrl) {
-      throw new Error(`Joint CORS check failed: expected ${this.pagesUrl}, got ${corsHeader ?? 'none'}`);
+    if (corsHeader !== this.corsOrigin) {
+      throw new Error(`Joint CORS check failed: expected ${this.corsOrigin}, got ${corsHeader ?? 'none'}`);
     }
 
     step.detail = 'Joint smoke passed: page contains API URL, CORS is exact.';
@@ -286,6 +346,7 @@ export class DeploymentComposer {
       previewBranch: this.previewBranch,
       apiBaseUrl: this.apiBaseUrl,
       pagesUrl: this.pagesUrl,
+      pagesUrlSource: this.pagesUrlSource ?? 'derived-fallback',
       corsOrigin: this.corsOrigin,
       apiHealth: 'passed',
       exactCors: 'passed',
@@ -318,9 +379,14 @@ export class DeploymentComposer {
     if (match) return match[0];
     throw new Error('Could not parse deployment URL from Vercel output.');
   }
+
+  private parsePagesUrl(output: string): string | undefined {
+    const match = output.match(/https:\/\/[^\s"']+\.pages\.dev/);
+    return match?.[0];
+  }
 }
 
-async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 5): Promise<Response> {
+async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 12): Promise<Response> {
   let lastError: Error | undefined;
   for (let attempt = 0; attempt < maxRetries; attempt += 1) {
     try {
@@ -333,7 +399,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
     }
-    await new Promise(resolve => setTimeout(resolve, 4_000));
+    await new Promise(resolve => setTimeout(resolve, 10_000));
   }
   throw new Error(`Verification failed for ${new URL(url).hostname}: ${lastError?.message ?? 'unknown'}`);
 }

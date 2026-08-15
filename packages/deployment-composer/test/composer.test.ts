@@ -23,7 +23,7 @@ function createFullSuccessRunner(): CommandRunner {
     if (key.includes('vercel deploy')) return { stdout: JSON.stringify({ url: 'https://test-api-preview.vercel.app' }), stderr: '', exitCode: 0, success: true };
     if (key.includes('npm run build')) return { stdout: 'Build complete', stderr: '', exitCode: 0, success: true };
     if (key.includes('wrangler pages project create')) return { stdout: 'Created', stderr: '', exitCode: 0, success: true };
-    if (key.includes('wrangler pages deploy')) return { stdout: 'Deployed', stderr: '', exitCode: 0, success: true };
+    if (key.includes('wrangler pages deploy')) return { stdout: 'Deployed: https://feature-x.test-project-web-feature-x.pages.dev', stderr: '', exitCode: 0, success: true };
     return { stdout: '', stderr: 'not found', exitCode: 1, success: false };
   };
 }
@@ -77,6 +77,74 @@ describe('DeploymentComposer', () => {
   });
 
   describe('execute()', () => {
+    it('fails before creating a Vercel project when neither a token nor a CLI session exists', async () => {
+      vi.stubEnv('VERCEL_TOKEN', '');
+      const calls: string[] = [];
+      const runner: CommandRunner = async (command, args) => {
+        calls.push(`${command} ${args.join(' ')}`);
+        return { stdout: '', stderr: 'Not authenticated', exitCode: 1, success: false };
+      };
+
+      const composer = new DeploymentComposer({ workspacePath: tempDir, projectName: 'test-project', previewBranch: 'feature-x' }, runner);
+      const result = await composer.execute();
+
+      expect(result.status).toBe('failed');
+      expect(result.steps[0].detail).toContain('set VERCEL_TOKEN or run `vercel login`');
+      expect(result.cleanupRequired).toBeUndefined();
+      expect(calls).toEqual(['vercel whoami --no-color']);
+      vi.unstubAllEnvs();
+    });
+
+    it('disables deployment protection through `vercel api` when only a CLI session exists', async () => {
+      vi.stubEnv('VERCEL_TOKEN', '');
+      const mockFetch = vi.fn().mockImplementation((url: string) => Promise.resolve(new Response(
+        url.includes('.pages.dev') ? '<script>https://test-api-preview.vercel.app</script>' : JSON.stringify({ ok: true }),
+        { headers: { 'content-type': 'application/json', 'access-control-allow-origin': 'https://feature-x.test-project-web-feature-x.pages.dev' } },
+      )));
+      vi.stubGlobal('fetch', mockFetch);
+
+      const calls: string[] = [];
+      const base = createFullSuccessRunner();
+      const runner: CommandRunner = async (command, args, options) => {
+        calls.push(`${command} ${args.join(' ')}`);
+        if (args[0] === 'whoami') return { stdout: 'test-user', stderr: '', exitCode: 0, success: true };
+        if (args[0] === 'api') return { stdout: '', stderr: '', exitCode: 0, success: true };
+        return base(command, args, options);
+      };
+
+      const composer = new DeploymentComposer({ workspacePath: tempDir, projectName: 'test-project', previewBranch: 'feature-x' }, runner);
+      const result = await composer.execute();
+
+      expect(result.status).toBe('completed');
+      const apiCall = calls.find(call => call.startsWith('vercel api'));
+      expect(apiCall).toContain('/v9/projects/test-project-api-feature-x');
+      expect(apiCall).toContain('-X PATCH');
+      expect(mockFetch).not.toHaveBeenCalledWith(expect.stringContaining('api.vercel.com'), expect.anything());
+
+      const body = await readFile(join(tempDir, '.agent-dev/vercel-deployment-protection.json'), 'utf8');
+      expect(JSON.parse(body)).toEqual({ ssoProtection: null, passwordProtection: null });
+
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    });
+
+    it('records the Cloudflare Pages URL emitted by Wrangler', async () => {
+      const mockFetch = vi.fn().mockImplementation((url: string) => Promise.resolve(new Response(
+        url.includes('.pages.dev') ? '<script>https://test-api-preview.vercel.app</script>' : JSON.stringify({ ok: true }),
+        { headers: { 'content-type': 'application/json', 'access-control-allow-origin': 'https://feature-x.test-project-web-feature-x.pages.dev' } },
+      )));
+      vi.stubGlobal('fetch', mockFetch);
+      vi.stubEnv('VERCEL_TOKEN', 'test-token');
+      const composer = new DeploymentComposer({ workspacePath: tempDir, projectName: 'test-project', previewBranch: 'feature-x' }, createFullSuccessRunner());
+      const result = await composer.execute();
+      expect(result.status).toBe('completed');
+      expect(result.pagesUrl).toBe('https://feature-x.test-project-web-feature-x.pages.dev');
+      expect(result.pagesUrlSource).toBe('cli-output');
+      const evidence = await readFile(join(tempDir, '.agent-dev/previews/test-project-feature-x.json'), 'utf8');
+      expect(JSON.parse(evidence).pagesUrlSource).toBe('cli-output');
+      vi.unstubAllGlobals();
+    });
+
     it('fails gracefully when vercel deploy fails', async () => {
       const runner = createMockRunner({
         'vercel project add': { stdout: 'Created', stderr: '', exitCode: 0, success: true },
@@ -122,6 +190,40 @@ describe('DeploymentComposer', () => {
       const result = await composer.execute();
       // Should not fail due to "already exists" errors
       expect(result.steps[0].status).toBe('completed');
+
+      vi.unstubAllGlobals();
+    });
+
+    it('does not suppress Wrangler logs when creating the Pages project', async () => {
+      // Real Wrangler prints "already exists" only when logging is enabled, so suppressing it here
+      // silently broke re-runs: the idempotency check had no message left to match.
+      const mockFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json', 'access-control-allow-origin': 'https://feature-x.test-project-web-feature-x.pages.dev' },
+      }));
+      vi.stubGlobal('fetch', mockFetch);
+      vi.stubEnv('VERCEL_TOKEN', 'test-token');
+
+      let createEnv: Record<string, string> | undefined;
+      const runner: CommandRunner = async (command, args, options) => {
+        const key = `${command} ${args.join(' ')}`;
+        if (key.includes('wrangler pages project create')) {
+          createEnv = options?.env;
+          return { stdout: '', stderr: '', exitCode: 1, success: false };
+        }
+        if (key.includes('vercel project add')) return { stdout: 'Created', stderr: '', exitCode: 0, success: true };
+        if (key.includes('vercel deploy')) return { stdout: JSON.stringify({ url: 'https://test.vercel.app' }), stderr: '', exitCode: 0, success: true };
+        if (key.includes('npm run build')) return { stdout: 'Built', stderr: '', exitCode: 0, success: true };
+        return { stdout: '', stderr: 'not found', exitCode: 1, success: false };
+      };
+
+      const composer = new DeploymentComposer({
+        workspacePath: tempDir,
+        projectName: 'test-project',
+        previewBranch: 'feature-x',
+      }, runner);
+
+      await composer.execute();
+      expect(createEnv?.WRANGLER_LOG).toBeUndefined();
 
       vi.unstubAllGlobals();
     });
