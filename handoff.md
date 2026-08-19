@@ -1,11 +1,14 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-14
+> 更新时间：2026-08-15
 > 当前阶段：Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；Dual Preview 部署编排已实现为 Deployment Composer（精确 CORS + 签名验证的 PR 关闭清理）；凭证管理 Phase 2 已实现（Studio 凭证面板 + 引导模式 + 凭证验证）
 > 工作目录：仓库根目录
 
 ## 最近进度
 
+- **CI 首次真实运行暴露一个环境依赖测试**：`quality` 在 PR #3 上失败，原因是 `apps/daemon/test/app.test.ts` 断言 runtime catalog 含 `id: 'codex'` 的内置 Agent，而 catalog 的设计是只返回 PATH 上真实存在的内置 Agent，runner 上没装 Codex CLI 因此返回空数组。这个测试只在装了 Codex 的机器上能通过，是测试依赖本机环境而非产品缺陷；已改为断言路由真正拥有的契约（200、数组、每项 detected 且有 launchCommand、内置项 source 正确）。修复方式经过 CI 条件复现验证：用剥掉 codex 的最小 PATH 跑，先确认 `which codex` 返回 1，再确认全部 74 个测试通过，排除同类环境依赖测试潜伏。同时把 `actions/checkout` 与 `setup-node` 升到 v5（v4 target 已废弃的 Node 20，被强制跑在 Node 24 上并告警）。PR #3 → `dev`、PR #4 → `main` 均已合并，`main` 上 `quality` 为绿。
+- **Studio 启用产品 logo**：此前 Studio 完全没有 favicon，侧边栏用的是 lucide 通用 `Boxes` 图标，与 landing 站没有任何视觉一致性。logo 从 landing 站 `public/favicon.svg` 原样复制（保持两边字节一致），挂为 favicon 并替换侧边栏品牌位。注意：**未做浏览器肉眼验证**（本机无可用预览浏览器），仅验证了 dev server 下两个资源均 200、构建产物包含它们且 `index.html` 引用正确。
+- **市场分析补入实证注记**（`docs/market-analysis.md` 6.1）：壁垒清单此前全部是判断，真实云端首跑为其中"真实 Gate 和证据链"一项提供了数据支撑，同时说明为何结论不是移除模板生成器——模板不构成壁垒但承载新手模式，该修的是它的冻结形态。
 - **Dual Preview 真实云端端到端已跑通（7/7 步），过程中修掉 5 个真实缺陷**。最终 Evidence：`.agent-dev/previews/workspace-verify-fresh-preview.json`，`pagesUrlSource: cli-output`，`apiHealth` / `exactCors` / `pageContainsApiUrl` / `jointSmoke` 全部 passed。已在编排之外独立复验：分支别名与每次部署的哈希域名两个 Pages URL 都返回 200 且 HTML 中带正确的 API 域名，API 对别名 Origin 回精确 `access-control-allow-origin`。修掉的缺陷：
   1. **生成的 API 模板在 Vercel 上永久挂起**。`export default handle(app)` 返回 Web fetch 风格的 `Response`，但 Vercel 按传统 `(req, res) => void` 签名处理默认导出并丢弃返回值，请求永远拿不到响应（Vercel 运行时日志：`WARN: default export returned a Response`）。根路径能瞬间 404 而 `/api/health` 挂满 40 秒，正好排除了网络因素。改为按 HTTP 方法导出 fetch-style handler（`export const GET/POST/OPTIONS = handle(app)`）；本地 dev 的 `serve()` 守卫从宽泛的 `NODE_ENV !== 'production'` 改为精确的 `!process.env.VERCEL`，避免删掉 `serve()` 破坏 `npm run dev`。
   2. **生成的 API 模板没有 CORS 中间件**。Composer 一直注入 `ALLOWED_ORIGIN`，但模板从不读它，响应完全没有 `access-control-allow-origin`，而健康检查要求它精确等于 CORS origin。补上 `hono/cors`，`origin: process.env.ALLOWED_ORIGIN ?? '*'`。
@@ -186,7 +189,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 
 1. ✅ ~~实现凭证管理 Phase 2~~：已于 2026-08-08 完成（Studio 凭证面板 + 引导模式 + 凭证验证 + Supabase 手动配置）；
 2. ✅ ~~将 Dual Preview 部署编排实现为幂等 Step~~：已于 2026-08-09 完成（`packages/deployment-composer`，精确 CORS + 临时项目清理）；
-3. 重跑 Deployment Composer 端到端（`VERCEL_TOKEN` 依赖已移除，无阻塞），验证 Studio 部署区块 → Daemon → Vercel/Cloudflare 的完整链路，并确认资源清单中的外部 ID/URL 与 Provider 控制台一致；
+3. ✅ ~~重跑 Deployment Composer 端到端~~：已于 2026-08-14 完成，真实云端 7/7 步通过并独立复验（Evidence 见 [Dual Preview](docs/spikes/dual-preview.md)）；**Studio 部署区块 → Daemon 这一段仍未走过界面**，本轮是直接调 Daemon API 触发的，资源清单外部 ID/URL 与 Provider 控制台的一致性也尚未逐项核对；
 4. ✅ ~~为 Catalog 增加只读 Capability Probe~~：Daemon API 已提供探测结果，Studio 选择 Agent 后显示非交互、workspace-write 和 Adapter 状态；仍需在各 Agent 实际安装环境逐个验证 Adapter；
 5. ✅ ~~用一次必然产生 Git diff 的真实功能任务验证 Runtime 写入和 Quality Gate~~：已于 2026-08-11 完成；Human Acceptance 仍需由用户明确确认；
 6. ✅ ~~将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联~~：已于 2026-08-10 完成；本地批准进入 `LOCAL_ACCEPTED`，不代表生产交付；
