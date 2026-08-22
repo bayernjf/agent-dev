@@ -71,9 +71,13 @@
 - 本地 Runner 从暂停 Gate 或失败 Step 恢复：Workflow Resume 已通过真实本地 Probe；
 - Deployment Composer 真实云端端到端：2026-08-14 正式代码跑通 7/7 步，Evidence 四项检查全部 passed，并在编排之外独立复验。过程修掉 5 个"单元测试全绿但真实链路必然失败"的缺陷（详见 [Dual Preview](spikes/dual-preview.md)），印证了"没有真实 Evidence 不算完成"这条原则的必要性。
 
+- 失败 workspace 恢复：已实现为"新建干净 workspace、旧的保留待查"，并在 Daemon 测试中用被改坏的 workspace 验证；
+- 生产发布的人工闸门：请求与具名批准由状态机和 Schema 强制，未批准的发布不会写下任何日志行（有测试覆盖）。
+
 仍待验证：
 
-- Codex 取消能力、真实会话 resume 与失败 workspace 恢复；
+- 真实云端的生产发布：整条链路一次都没有对真实 Provider 执行过；
+- Codex 取消能力与真实会话 resume；
 - PR 关闭后的临时项目清理在真实云端的链路（部署链路已验证，清理链路仍只有本地测试覆盖）；
 - Supabase Auth Redirect URL 同步仍为手动步骤，未自动化；
 - 本地 Runner 的安装与升级路径（崩溃恢复已由 Workflow Resume 覆盖）。
@@ -84,7 +88,7 @@
 
 | 决策 | 结论 | 影响 |
 | --- | --- | --- |
-| 生产前端域名 | `app.example.com`，保留 apex 选择 | DNS、Cookie、品牌入口 |
+| 生产前端域名 | `app.example.com`，保留 apex 选择 | DNS、Cookie、品牌入口。**当前实现未使用该域名**：Blueprint 没有生产域名字段，`ReleaseComposer` 因此把生产 Web origin 推导为 Cloudflare Pages 项目 apex（`https://<name>-web.pages.dev`），使 API 的 `ALLOWED_ORIGIN` 与被验证的 URL 必然相等。接入自定义域名需要先给 Blueprint 加字段 |
 | dev 与 production Supabase | 独立项目 | 成本更高，但隔离和回滚更清晰 |
 | v0.1 初始产品能力 | 登录、基础用户资料、健康检查 | 模板大小和验收范围 |
 
@@ -115,5 +119,5 @@
 3. ✅ 定义首版 Web SaaS 模板包含的最小业务能力；
 4. ✅ 确定 Provider 授权和 Supabase 环境隔离方案；
 5. ✅ 创建工程骨架（`apps/` 三个应用 + `packages/` 八个包）；
-6. 跑通第一个真实端到端 Delivery Run；
+6. 跑通第一个真实端到端 Delivery Run（Preview 段已于 2026-08-14 真实通过；生产段路径已实现但尚未真实执行）；
 7. 确认 Analytics 默认、Ruleset 自动化与 Blueprint 开源时机三项待决事项。
