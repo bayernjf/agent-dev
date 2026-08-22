@@ -44,4 +44,67 @@ describe('delivery workflow', () => {
     expect(restored.getSnapshot().value).toBe('BASELINE_READY');
     restored.stop();
   });
+
+  it('retries the step that failed instead of a fixed state', () => {
+    const advanceTo = (target: 'PROVISIONING' | 'IMPLEMENTING' | 'VERIFYING' | 'PR_OPEN' | 'RELEASING') => {
+      const actor = createNeedsInputRun({ projectId: 'project-1', runId: 'run-1' });
+      actor.send({ type: 'PLAN_COMPLETE' });
+      actor.send({ type: 'APPROVE_PROVISIONING' });
+      if (target === 'PROVISIONING') return actor;
+      actor.send({ type: 'BASELINE_CREATED' });
+      actor.send({ type: 'START_IMPLEMENTATION' });
+      if (target === 'IMPLEMENTING') return actor;
+      actor.send({ type: 'IMPLEMENTATION_COMPLETE' });
+      if (target === 'VERIFYING') return actor;
+      actor.send({ type: 'VERIFY_COMPLETE' });
+      actor.send({ type: 'PR_CREATED' });
+      if (target === 'PR_OPEN') return actor;
+      actor.send({ type: 'PREVIEW_AVAILABLE' });
+      actor.send({ type: 'APPROVE_RELEASE' });
+      actor.send({ type: 'APPROVE_RELEASE' });
+      return actor;
+    };
+
+    for (const origin of ['PROVISIONING', 'IMPLEMENTING', 'VERIFYING', 'PR_OPEN', 'RELEASING'] as const) {
+      const actor = advanceTo(origin);
+      expect(actor.getSnapshot().value).toBe(origin);
+      actor.send({ type: 'FAIL' });
+      expect(actor.getSnapshot().value).toBe('FAILED');
+      actor.send({ type: 'RETRY' });
+      expect(actor.getSnapshot().value).toBe(origin);
+      expect(actor.getSnapshot().context.retryCount).toBe(1);
+      actor.stop();
+    }
+  });
+
+  it('resumes a paused run at the step that was paused', () => {
+    const actor = createNeedsInputRun({ projectId: 'project-1', runId: 'run-1' });
+    actor.send({ type: 'PLAN_COMPLETE' });
+    actor.send({ type: 'APPROVE_PROVISIONING' });
+    actor.send({ type: 'BASELINE_CREATED' });
+    actor.send({ type: 'START_IMPLEMENTATION' });
+    actor.send({ type: 'PAUSE' });
+    expect(actor.getSnapshot().value).toBe('PAUSED');
+    actor.send({ type: 'RESUME' });
+    expect(actor.getSnapshot().value).toBe('IMPLEMENTING');
+    actor.stop();
+  });
+
+  it('falls back to VERIFYING when a snapshot predates resumeTarget', () => {
+    const original = createNeedsInputRun({ projectId: 'project-1', runId: 'run-1' });
+    original.send({ type: 'PLAN_COMPLETE' });
+    original.send({ type: 'APPROVE_PROVISIONING' });
+    original.send({ type: 'FAIL' });
+    const snapshot = original.getPersistedSnapshot() as { context: Record<string, unknown> };
+    original.stop();
+
+    // Snapshots already stored in existing databases were written before resumeTarget existed.
+    delete snapshot.context.resumeTarget;
+
+    const restored = restoreDeliveryActor({ projectId: 'project-1', runId: 'run-1' }, snapshot as never);
+    expect(restored.getSnapshot().value).toBe('FAILED');
+    restored.send({ type: 'RETRY' });
+    expect(restored.getSnapshot().value).toBe('VERIFYING');
+    restored.stop();
+  });
 });
