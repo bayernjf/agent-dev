@@ -95,7 +95,7 @@ describe('delivery workflow', () => {
     original.send({ type: 'PLAN_COMPLETE' });
     original.send({ type: 'APPROVE_PROVISIONING' });
     original.send({ type: 'FAIL' });
-    const snapshot = original.getPersistedSnapshot() as { context: Record<string, unknown> };
+    const snapshot = original.getPersistedSnapshot() as unknown as { context: Record<string, unknown> };
     original.stop();
 
     // Snapshots already stored in existing databases were written before resumeTarget existed.
