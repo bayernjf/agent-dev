@@ -36,6 +36,15 @@ export type PreviewComposerOptions = {
   frontendDistDirectory?: string;
 };
 
+// Each field holds what the verification step actually observed. Recording a verdict string
+// instead would make the evidence file a restatement of the code path rather than evidence.
+export type PreviewObservations = {
+  apiHealth: { url: string; httpStatus: number; contentType: string };
+  exactCors: { expectedOrigin: string; observedHeader: string };
+  pageContainsApiUrl: { url: string; httpStatus: number; sourceBytes: number; matchedApiBaseUrl: string };
+  jointSmoke: { apiHealthUrl: string; apiHttpStatus: number; observedCorsHeader: string };
+};
+
 export type PreviewEvidence = {
   projectName: string;
   previewBranch: string;
@@ -43,9 +52,6 @@ export type PreviewEvidence = {
   pagesUrl: string;
   pagesUrlSource: 'cli-output' | 'derived-fallback';
   corsOrigin: string;
-  apiHealth: string;
-  exactCors: string;
-  pageContainsApiUrl: string;
-  jointSmoke: string;
+  observations: PreviewObservations;
   completedAt: string;
 };
