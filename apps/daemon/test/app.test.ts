@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -327,6 +327,62 @@ describe('daemon API', () => {
     const plan = await app.request(`http://localhost/api/projects/${project.id}/preview/plan`);
     const planPayload = await plan.json() as { idempotencyKey: string };
     expect(planPayload.idempotencyKey).toBe('preview:receipt-desk-2026:preview');
+    await store.close();
+  }, 30_000);
+  it('recovers a stale workspace into a clean one and leaves the old one on disk', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const { app } = createDaemonApp(store);
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Receipt Desk',
+        answers: { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' },
+      }),
+    });
+    const { project } = await created.json() as { project: { id: string } };
+    await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+    });
+    const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+    const { run: firstRun } = await applied.json() as { run: { id: string; workspacePath: string } };
+
+    const badConfirmation = await app.request(`http://localhost/api/projects/${project.id}/apply/recover`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RECOVER' }),
+    });
+    expect(badConfirmation.status).toBe(400);
+
+    // A healthy workspace is not a recovery case: nothing has gone wrong to recover from.
+    const refused = await app.request(`http://localhost/api/projects/${project.id}/apply/recover`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RECOVER_WORKSPACE' }),
+    });
+    expect(refused.status).toBe(409);
+
+    // Simulate the workspace an older generator produced: deployment configuration content drifts.
+    await writeFile(join(firstRun.workspacePath, '.github/workflows/quality.yml'), 'name: stale\n', 'utf8');
+    const recovered = await app.request(`http://localhost/api/projects/${project.id}/apply/recover`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RECOVER_WORKSPACE' }),
+    });
+    expect(recovered.status).toBe(200);
+    const payload = await recovered.json() as {
+      run: { id: string; workspacePath: string; recoveryIndex: number; status: string };
+      abandoned: { workspacePath: string; git: { branch: string } | null; workspace: { staleConfig: string[] } };
+    };
+    expect(payload.run.id).not.toBe(firstRun.id);
+    expect(payload.run.status).toBe('completed');
+    expect(payload.run.recoveryIndex).toBe(1);
+    expect(payload.run.workspacePath).toContain('revision-1-recovery-1');
+    expect(payload.abandoned.workspacePath).toBe(firstRun.workspacePath);
+    expect(payload.abandoned.workspace.staleConfig).toContain('.github/workflows/quality.yml');
+    expect(payload.abandoned.git?.branch).toBe('feature/agent-dev/revision-1');
+
+    // The old workspace is kept exactly as it was so its failure stays inspectable.
+    await expect(readFile(join(firstRun.workspacePath, '.github/workflows/quality.yml'), 'utf8')).resolves.toBe('name: stale\n');
+    await expect(readFile(join(payload.run.workspacePath, '.github/workflows/quality.yml'), 'utf8')).resolves.toContain('actions/checkout@v5');
     await store.close();
   }, 30_000);
 });

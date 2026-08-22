@@ -40,6 +40,10 @@ const retryApplySchema = z.object({
   confirmation: z.literal('RETRY_APPLY'),
 });
 
+const recoverApplySchema = z.object({
+  confirmation: z.literal('RECOVER_WORKSPACE'),
+});
+
 const qualityGateSchema = z.object({
   blueprintRevision: z.number().int().positive(),
   confirmation: z.literal('RUN_QUALITY_GATE'),
@@ -284,6 +288,34 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const run = await store.executeApplyRun(existing.id);
     events.emit({ type: run.status === 'completed' ? 'apply.completed' : 'apply.failed', projectId, projectName: project.name, occurredAt: run.updatedAt });
     return context.json({ run }, run.status === 'completed' ? 200 : 422);
+  });
+
+  // A workspace that is unusable cannot be repaired in place: a failed run may have left a partial
+  // tree, and a stale one was written by an older generator. Recovery therefore starts a clean
+  // workspace and reports the Git state of the old one instead of deleting it.
+  app.post('/api/projects/:projectId/apply/recover', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = recoverApplySchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Recovery requires confirmation RECOVER_WORKSPACE.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const revision = project.blueprint.metadata.revision;
+    const existing = store.getLatestApplyRun(projectId, revision);
+    if (!existing) return context.json({ error: 'No Apply run is available to recover; start Apply instead.' }, 404);
+
+    const workspace = await verifyWorkspaceArtifacts(existing.workspacePath, project.blueprint);
+    if (existing.status !== 'failed' && workspace.usable) {
+      return context.json({ error: 'The current workspace is usable; recovery is only for a failed or stale workspace.', workspace }, 409);
+    }
+
+    const abandoned = await store.describeApplyWorkspace(existing.id);
+    const recovery = await store.createRecoveryApplyRun(projectId, revision);
+    const run = await store.executeApplyRun(recovery.id);
+    events.emit({ type: run.status === 'completed' ? 'apply.recovered' : 'apply.failed', projectId, projectName: project.name, occurredAt: run.updatedAt });
+    return context.json({
+      run,
+      abandoned: { ...abandoned, status: existing.status, workspace },
+    }, run.status === 'completed' ? 200 : 422);
   });
 
   app.post('/api/projects/:projectId/quality-gate', async context => {
