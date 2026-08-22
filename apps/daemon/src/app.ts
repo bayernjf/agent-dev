@@ -106,8 +106,10 @@ const githubPullRequestWebhookSchema = z.object({
   pull_request: z.object({ number: z.number().int().positive() }),
 });
 
+// Vercel and Cloudflare both reject names that are empty, contain anything outside
+// [a-z0-9-], or start or end with a hyphen, so collapse runs and trim them here.
 function projectSlug(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 function hasValidGitHubSignature(body: string, signature: string | undefined, secret: string) {
@@ -130,7 +132,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       if (!project) return null;
       const run = store.getLatestApplyRun(projectId, project.blueprint.metadata.revision);
       if (!run || run.status !== 'completed') return null;
-      return { workspacePath: run.workspacePath, projectName: project.name, projectId, blueprintRevision: project.blueprint.metadata.revision };
+      return { workspacePath: run.workspacePath, projectName: projectSlug(project.name), projectId, blueprintRevision: project.blueprint.metadata.revision };
     },
   });
   const executePreviewCleanup = dependencies.cleanupPreview ?? (options => cleanupPreviewProjects(defaultRunner, options));
@@ -683,7 +685,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const workspace = await verifyWorkspaceArtifacts(run.workspacePath, project.blueprint);
     const composer = new DeploymentComposer({
       workspacePath: run.workspacePath,
-      projectName: project.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      projectName: projectSlug(project.name),
       previewBranch: 'preview',
     });
     return context.json({
