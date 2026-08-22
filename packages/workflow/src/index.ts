@@ -37,6 +37,7 @@ export type DeliveryEvent =
   | { type: 'VERIFY_COMPLETE' }
   | { type: 'PR_CREATED' }
   | { type: 'PREVIEW_AVAILABLE' }
+  | { type: 'REQUEST_RELEASE' }
   | { type: 'APPROVE_RELEASE' }
   | { type: 'RELEASE_COMPLETE' }
   | { type: 'PAUSE' }
@@ -94,7 +95,9 @@ export const deliveryMachine = createMachine({
         FAIL: { target: 'FAILED', actions: assign({ resumeTarget: () => 'PR_OPEN' as const }) },
       },
     },
-    PREVIEW_READY: { on: { APPROVE_RELEASE: 'AWAITING_APPROVAL' } },
+    // Asking for a release and approving one are two distinct human acts, so they are two
+    // distinct events. Sharing one name made both gates look like a single approval.
+    PREVIEW_READY: { on: { REQUEST_RELEASE: 'AWAITING_APPROVAL' } },
     AWAITING_APPROVAL: {
       on: {
         APPROVE_RELEASE: 'RELEASING',

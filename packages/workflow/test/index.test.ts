@@ -60,7 +60,7 @@ describe('delivery workflow', () => {
       actor.send({ type: 'PR_CREATED' });
       if (target === 'PR_OPEN') return actor;
       actor.send({ type: 'PREVIEW_AVAILABLE' });
-      actor.send({ type: 'APPROVE_RELEASE' });
+      actor.send({ type: 'REQUEST_RELEASE' });
       actor.send({ type: 'APPROVE_RELEASE' });
       return actor;
     };
@@ -87,6 +87,31 @@ describe('delivery workflow', () => {
     expect(actor.getSnapshot().value).toBe('PAUSED');
     actor.send({ type: 'RESUME' });
     expect(actor.getSnapshot().value).toBe('IMPLEMENTING');
+    actor.stop();
+  });
+
+  it('keeps requesting a release separate from approving one', () => {
+    const actor = createNeedsInputRun({ projectId: 'project-1', runId: 'run-1' });
+    actor.send({ type: 'PLAN_COMPLETE' });
+    actor.send({ type: 'APPROVE_PROVISIONING' });
+    actor.send({ type: 'BASELINE_CREATED' });
+    actor.send({ type: 'START_IMPLEMENTATION' });
+    actor.send({ type: 'IMPLEMENTATION_COMPLETE' });
+    actor.send({ type: 'VERIFY_COMPLETE' });
+    actor.send({ type: 'PR_CREATED' });
+    actor.send({ type: 'PREVIEW_AVAILABLE' });
+    expect(actor.getSnapshot().value).toBe('PREVIEW_READY');
+
+    // An approval alone must not move a preview into the approval gate.
+    actor.send({ type: 'APPROVE_RELEASE' });
+    expect(actor.getSnapshot().value).toBe('PREVIEW_READY');
+
+    actor.send({ type: 'REQUEST_RELEASE' });
+    expect(actor.getSnapshot().value).toBe('AWAITING_APPROVAL');
+    actor.send({ type: 'APPROVE_RELEASE' });
+    expect(actor.getSnapshot().value).toBe('RELEASING');
+    actor.send({ type: 'RELEASE_COMPLETE' });
+    expect(actor.getSnapshot().value).toBe('DELIVERED');
     actor.stop();
   });
 

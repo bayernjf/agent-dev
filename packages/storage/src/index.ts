@@ -11,14 +11,14 @@ import type { ProductBlueprint } from '@agent-dev/blueprint';
 import { createBaselinePlan, createDryRunPlan, productBlueprintSchema } from '@agent-dev/blueprint';
 import { buildAgentExecutionPlan, executeCodexPlan, isAgentExecutable, type CodexExecutionPlan, type CodexExecutionResult, type CodexProcessRunner } from '@agent-dev/agent-runtime';
 import { createNeedsInputRun, restoreDeliveryActor, type DeliveryEvent, type DeliverySnapshot, type DeliveryState } from '@agent-dev/workflow';
-import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects } from './schema.js';
+import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects, releaseRuns } from './schema.js';
 import { migrations } from './migrations.js';
 
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
 
 function createOrm(database: Database) {
-  return drizzle(database, { schema: { applyRuns, baselineApprovals, projects, blueprintRevisions, deliveryRuns } });
+  return drizzle(database, { schema: { applyRuns, baselineApprovals, projects, blueprintRevisions, deliveryRuns, releaseRuns } });
 }
 
 export type CreateProjectInput = {
@@ -64,6 +64,7 @@ export type ApplyRun = {
   blueprintRevision: number;
   status: 'queued' | 'running' | 'completed' | 'failed';
   attempts: number;
+  recoveryIndex: number;
   workspacePath: string;
   steps: ApplyStep[];
   createdAt: string;
@@ -72,6 +73,47 @@ export type ApplyRun = {
 
 export type ApplyExecutionOptions = {
   failStep?: ApplyStep['id'];
+};
+
+// The release journal stores whatever steps the release composer produced. Keeping the step
+// ids opaque here avoids a storage dependency on the composer just to name them.
+export type ReleaseStep = {
+  id: string;
+  title: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  detail?: string;
+  startedAt?: string;
+  completedAt?: string;
+};
+
+export type ReleaseRun = {
+  id: string;
+  projectId: string;
+  blueprintRevision: number;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  attempts: number;
+  approvedBy: string;
+  approvalSummary: string;
+  steps: ReleaseStep[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ReleaseApprovalInput = {
+  approvedBy: string;
+  summary: string;
+  steps: ReleaseStep[];
+};
+
+export type ReleaseEvidence = {
+  projectName: string;
+  apiBaseUrl: string;
+  webUrl: string;
+  corsOrigin: string;
+  approvedBy: string;
+  approvalSummary: string;
+  observations: Record<string, unknown>;
+  recordedAt: string;
 };
 
 export type QualityGateResult = {
@@ -406,12 +448,19 @@ export class AgentDevStore {
   }
 
   getLatestApplyRun(projectId: string, blueprintRevision: number): ApplyRun | null {
-    const row = this.orm.select().from(applyRuns)
+    const row = this.listApplyRuns(projectId, blueprintRevision)[0];
+    return row ?? null;
+  }
+
+  // A recovery run is a second row for the same revision, so ordering has to be deterministic.
+  // created_at alone is not: two inserts in the same millisecond would be interchangeable.
+  listApplyRuns(projectId: string, blueprintRevision: number): ApplyRun[] {
+    return this.orm.select().from(applyRuns)
       .where(eq(applyRuns.projectId, projectId))
-      .orderBy(desc(applyRuns.createdAt))
+      .orderBy(desc(applyRuns.recoveryIndex), desc(applyRuns.createdAt))
       .all()
-      .find(candidate => candidate.blueprintRevision === blueprintRevision);
-    return row ? this.parseApplyRun(row) : null;
+      .filter(candidate => candidate.blueprintRevision === blueprintRevision)
+      .map(row => this.parseApplyRun(row));
   }
 
   async createApplyRun(projectId: string, blueprintRevision: number): Promise<ApplyRun> {
@@ -434,9 +483,9 @@ export class AgentDevStore {
       { id: 'create-feature-branch', title: 'Create local feature branch', status: 'pending' },
       { id: 'write-report', title: 'Write delivery report', status: 'pending' },
     ];
-    this.orm.insert(applyRuns).values({ id, projectId, blueprintRevision, status: 'queued', attempts: 0, workspacePath, stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now }).run();
+    this.orm.insert(applyRuns).values({ id, projectId, blueprintRevision, status: 'queued', attempts: 0, recoveryIndex: 0, workspacePath, stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now }).run();
     await this.persist();
-    return { id, projectId, blueprintRevision, status: 'queued', attempts: 0, workspacePath, steps, createdAt: now, updatedAt: now };
+    return { id, projectId, blueprintRevision, status: 'queued', attempts: 0, recoveryIndex: 0, workspacePath, steps, createdAt: now, updatedAt: now };
   }
 
   async executeApplyRun(runId: string, options: ApplyExecutionOptions = {}): Promise<ApplyRun> {
@@ -853,6 +902,125 @@ export class AgentDevStore {
     catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null; throw error; }
   }
 
+  getReleaseRun(runId: string): ReleaseRun | null {
+    const row = this.orm.select().from(releaseRuns).where(eq(releaseRuns.id, runId)).get();
+    return row ? this.parseReleaseRun(row) : null;
+  }
+
+  getLatestReleaseRun(projectId: string, blueprintRevision: number): ReleaseRun | null {
+    const row = this.orm.select().from(releaseRuns)
+      .where(eq(releaseRuns.projectId, projectId))
+      .orderBy(desc(releaseRuns.createdAt))
+      .all()
+      .find(candidate => candidate.blueprintRevision === blueprintRevision);
+    return row ? this.parseReleaseRun(row) : null;
+  }
+
+  // Asking for a release is not approving one. This only opens the approval gate.
+  async requestRelease(projectId: string, blueprintRevision: number): Promise<StoredProject> {
+    const project = this.getProject(projectId);
+    if (!project || project.blueprint.metadata.revision !== blueprintRevision) throw new Error('A release request must target the current Blueprint revision.');
+    if (project.state !== 'PREVIEW_READY') throw new Error(`A release can only be requested from PREVIEW_READY, current state is ${project.state}.`);
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before requesting a release.');
+    return this.advanceDelivery(projectId, [{ type: 'REQUEST_RELEASE' }]);
+  }
+
+  async approveRelease(projectId: string, blueprintRevision: number, input: ReleaseApprovalInput): Promise<ReleaseRun> {
+    const project = this.getProject(projectId);
+    if (!project || project.blueprint.metadata.revision !== blueprintRevision) throw new Error('A release approval must target the current Blueprint revision.');
+    if (project.state !== 'AWAITING_APPROVAL') throw new Error(`A release can only be approved from AWAITING_APPROVAL, current state is ${project.state}.`);
+    if (!input.approvedBy.trim()) throw new Error('A release approval must name who approved it.');
+    if (!input.summary.trim()) throw new Error('A release approval must record what is being released.');
+
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    const steps = input.steps.map(step => ({ ...step }));
+    this.orm.insert(releaseRuns).values({
+      id, projectId, blueprintRevision, status: 'queued', attempts: 0,
+      approvedBy: input.approvedBy, approvalSummary: input.summary,
+      stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now,
+    }).run();
+    await this.advanceDelivery(projectId, [{ type: 'APPROVE_RELEASE' }]);
+    return { id, projectId, blueprintRevision, status: 'queued', attempts: 0, approvedBy: input.approvedBy, approvalSummary: input.summary, steps, createdAt: now, updatedAt: now };
+  }
+
+  async updateReleaseRun(runId: string, status: ReleaseRun['status'], steps: ReleaseStep[], attempts?: number): Promise<ReleaseRun> {
+    const run = this.getReleaseRun(runId);
+    if (!run) throw new Error(`Release run ${runId} was not found.`);
+    const updatedAt = new Date().toISOString();
+    const nextAttempts = attempts ?? run.attempts;
+    this.orm.update(releaseRuns).set({ status, attempts: nextAttempts, stepsJson: JSON.stringify(steps), updatedAt }).where(eq(releaseRuns.id, runId)).run();
+    await this.persist();
+    return { ...run, status, attempts: nextAttempts, steps, updatedAt };
+  }
+
+  async failRelease(runId: string, steps: ReleaseStep[]): Promise<ReleaseRun> {
+    const failed = await this.updateReleaseRun(runId, 'failed', steps);
+    await this.advanceDelivery(failed.projectId, [{ type: 'FAIL' }]);
+    return failed;
+  }
+
+  async recordReleaseEvidence(projectId: string, blueprintRevision: number, evidence: Omit<ReleaseEvidence, 'recordedAt'>): Promise<ReleaseEvidence> {
+    const project = this.getProject(projectId);
+    if (!project || project.blueprint.metadata.revision !== blueprintRevision) throw new Error('Release evidence must target the current Blueprint revision.');
+    if (project.state !== 'RELEASING') throw new Error(`Release evidence requires RELEASING state, current state is ${project.state}.`);
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before recording release evidence.');
+    const record: ReleaseEvidence = { ...evidence, recordedAt: new Date().toISOString() };
+    await writeFile(join(run.workspacePath, 'production-evidence.json'), JSON.stringify(record, null, 2) + '\n', 'utf8');
+    await writeFile(join(run.workspacePath, 'PRODUCTION_EVIDENCE.md'), this.buildReleaseEvidenceReport(record), 'utf8');
+    await execFileAsync('git', ['add', 'production-evidence.json', 'PRODUCTION_EVIDENCE.md'], { cwd: run.workspacePath });
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', 'delivery: record production release evidence'], { cwd: run.workspacePath });
+    await this.advanceDelivery(projectId, [{ type: 'RELEASE_COMPLETE' }]);
+    return record;
+  }
+
+  async getReleaseEvidence(projectId: string, blueprintRevision: number): Promise<ReleaseEvidence | null> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run) return null;
+    try { return JSON.parse(await readFile(join(run.workspacePath, 'production-evidence.json'), 'utf8')) as ReleaseEvidence; }
+    catch (error) { if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null; throw error; }
+  }
+
+  private buildReleaseEvidenceReport(record: ReleaseEvidence): string {
+    const observations = Object.entries(record.observations)
+      .map(([key, value]) => `- ${key}: \`${JSON.stringify(value)}\``)
+      .join('\n');
+    return [
+      '# Production Release Evidence',
+      '',
+      `- Product: ${record.projectName}`,
+      `- API: ${record.apiBaseUrl}`,
+      `- Web: ${record.webUrl}`,
+      `- Allowed origin: ${record.corsOrigin}`,
+      `- Approved by: ${record.approvedBy}`,
+      `- Recorded: ${record.recordedAt}`,
+      '',
+      '## Approval',
+      '',
+      record.approvalSummary,
+      '',
+      '## Observations',
+      '',
+      observations || '- none recorded',
+      '',
+      'Every value above was observed against the deployed production URLs. A step without an',
+      'observation cannot reach this report.',
+      '',
+    ].join('\n');
+  }
+
+  private parseReleaseRun(row: typeof releaseRuns.$inferSelect): ReleaseRun {
+    return {
+      id: row.id, projectId: row.projectId, blueprintRevision: row.blueprintRevision,
+      status: row.status as ReleaseRun['status'], attempts: row.attempts,
+      approvedBy: row.approvedBy, approvalSummary: row.approvalSummary,
+      steps: JSON.parse(row.stepsJson) as ReleaseStep[],
+      createdAt: row.createdAt, updatedAt: row.updatedAt,
+    };
+  }
+
   async close() {
     await this.persist();
     this.sqlite.close();
@@ -897,7 +1065,7 @@ export class AgentDevStore {
   }
 
   private parseApplyRun(row: typeof applyRuns.$inferSelect): ApplyRun {
-    return { id: row.id, projectId: row.projectId, blueprintRevision: row.blueprintRevision, status: row.status as ApplyRun['status'], attempts: row.attempts, workspacePath: row.workspacePath, steps: JSON.parse(row.stepsJson) as ApplyStep[], createdAt: row.createdAt, updatedAt: row.updatedAt };
+    return { id: row.id, projectId: row.projectId, blueprintRevision: row.blueprintRevision, status: row.status as ApplyRun['status'], attempts: row.attempts, recoveryIndex: row.recoveryIndex, workspacePath: row.workspacePath, steps: JSON.parse(row.stepsJson) as ApplyStep[], createdAt: row.createdAt, updatedAt: row.updatedAt };
   }
 
   private async runApplyStep(step: ApplyStep, operation: () => Promise<void>) {
