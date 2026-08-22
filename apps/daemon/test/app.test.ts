@@ -300,4 +300,33 @@ describe('daemon API', () => {
     expect(cleanupCalls).toHaveLength(1);
     await store.close();
   }, 30_000);
+
+  it('derives provider project names from a slug that Vercel and Cloudflare accept', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const { app } = createDaemonApp(store);
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Receipt Desk (2026)!',
+        answers: { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' },
+      }),
+    });
+    const { project } = await created.json() as { project: { id: string } };
+    await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+    });
+    await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+
+    // The raw name would produce an invalid provider project name: spaces, parentheses,
+    // punctuation and a trailing separator are all rejected by both providers.
+    const plan = await app.request(`http://localhost/api/projects/${project.id}/preview/plan`);
+    const planPayload = await plan.json() as { idempotencyKey: string };
+    expect(planPayload.idempotencyKey).toBe('preview:receipt-desk-2026:preview');
+    await store.close();
+  }, 30_000);
 });
