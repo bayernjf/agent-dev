@@ -58,6 +58,18 @@ export type ApplyStep = {
   completedAt?: string;
 };
 
+function createApplySteps(): ApplyStep[] {
+  return [
+    { id: 'validate-blueprint', title: 'Validate Blueprint revision', status: 'pending' },
+    { id: 'create-workspace', title: 'Create isolated local workspace', status: 'pending' },
+    { id: 'write-artifacts', title: 'Write generated delivery artifacts', status: 'pending' },
+    { id: 'write-manifest', title: 'Write execution manifest', status: 'pending' },
+    { id: 'initialize-git', title: 'Initialize local Git baseline', status: 'pending' },
+    { id: 'create-feature-branch', title: 'Create local feature branch', status: 'pending' },
+    { id: 'write-report', title: 'Write delivery report', status: 'pending' },
+  ];
+}
+
 export type ApplyRun = {
   id: string;
   projectId: string;
@@ -474,18 +486,31 @@ export class AgentDevStore {
     const now = new Date().toISOString();
     const id = randomUUID();
     const workspacePath = join(dirname(this.databasePath), 'apply', projectId, `revision-${blueprintRevision}`);
-    const steps: ApplyStep[] = [
-      { id: 'validate-blueprint', title: 'Validate Blueprint revision', status: 'pending' },
-      { id: 'create-workspace', title: 'Create isolated local workspace', status: 'pending' },
-      { id: 'write-artifacts', title: 'Write generated delivery artifacts', status: 'pending' },
-      { id: 'write-manifest', title: 'Write execution manifest', status: 'pending' },
-      { id: 'initialize-git', title: 'Initialize local Git baseline', status: 'pending' },
-      { id: 'create-feature-branch', title: 'Create local feature branch', status: 'pending' },
-      { id: 'write-report', title: 'Write delivery report', status: 'pending' },
-    ];
+    const steps = createApplySteps();
     this.orm.insert(applyRuns).values({ id, projectId, blueprintRevision, status: 'queued', attempts: 0, recoveryIndex: 0, workspacePath, stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now }).run();
     await this.persist();
     return { id, projectId, blueprintRevision, status: 'queued', attempts: 0, recoveryIndex: 0, workspacePath, steps, createdAt: now, updatedAt: now };
+  }
+
+  // Recovery is a new workspace, not a repair of the old one. The failed workspace is left on disk
+  // so its Git state stays inspectable, and the new run gets its own directory so a half-written
+  // workspace cannot contaminate the retry.
+  async createRecoveryApplyRun(projectId: string, blueprintRevision: number): Promise<ApplyRun> {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error(`Project ${projectId} was not found.`);
+    if (project.blueprint.metadata.revision !== blueprintRevision) throw new Error('Recovery must target the latest Blueprint revision.');
+    if (!this.getBaselineApproval(projectId, blueprintRevision)) throw new Error('Approve the baseline before recovering a workspace.');
+    const existing = this.listApplyRuns(projectId, blueprintRevision);
+    if (existing.length === 0) throw new Error('There is no Apply run to recover; start Apply instead.');
+
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    const recoveryIndex = existing[0].recoveryIndex + 1;
+    const workspacePath = join(dirname(this.databasePath), 'apply', projectId, `revision-${blueprintRevision}-recovery-${recoveryIndex}`);
+    const steps = createApplySteps();
+    this.orm.insert(applyRuns).values({ id, projectId, blueprintRevision, status: 'queued', attempts: 0, recoveryIndex, workspacePath, stepsJson: JSON.stringify(steps), createdAt: now, updatedAt: now }).run();
+    await this.persist();
+    return { id, projectId, blueprintRevision, status: 'queued', attempts: 0, recoveryIndex, workspacePath, steps, createdAt: now, updatedAt: now };
   }
 
   async executeApplyRun(runId: string, options: ApplyExecutionOptions = {}): Promise<ApplyRun> {
@@ -803,6 +828,22 @@ export class AgentDevStore {
     await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: run.plan.workspacePath });
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', 'runtime: cancel dry-run'], { cwd: run.plan.workspacePath });
     return cancelled;
+  }
+
+  // Diagnosing the workspace being left behind is what makes recovery inspectable rather than a
+  // silent do-over: whatever Git state the failed run reached is reported before the new run starts.
+  async describeApplyWorkspace(runId: string): Promise<{ workspacePath: string; git: GitEvidence | null; gitReason?: string }> {
+    const run = this.getApplyRun(runId);
+    if (!run) throw new Error(`Apply run ${runId} was not found.`);
+    try {
+      const execute = async (args: string[]) => (await execFileAsync('git', args, { cwd: run.workspacePath })).stdout.trim();
+      return {
+        workspacePath: run.workspacePath,
+        git: { branch: await execute(['branch', '--show-current']), head: await execute(['rev-parse', 'HEAD']), status: await execute(['status', '--short']), diffStat: await execute(['diff', '--stat']) },
+      };
+    } catch (error) {
+      return { workspacePath: run.workspacePath, git: null, gitReason: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async getGitEvidence(projectId: string, blueprintRevision: number): Promise<GitEvidence> {
