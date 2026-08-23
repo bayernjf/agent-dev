@@ -189,8 +189,29 @@ export class ReleaseComposer {
       throw new Error(`Vercel production deployment failed: ${deployResult.stderr || deployResult.stdout}`);
     }
 
-    this.apiBaseUrl = parseVercelUrl(deployResult.stdout);
-    step.detail = `Production API deployed to ${this.apiBaseUrl}`;
+    const deploymentUrl = parseVercelUrl(deployResult.stdout);
+    this.apiBaseUrl = await this.resolveProductionAlias(deploymentUrl, env);
+    step.detail = `Production API deployed to ${deploymentUrl}, served at ${this.apiBaseUrl}`;
+  }
+
+  // Deployment Protection guards the immutable deployment URL, and this composer deliberately keeps
+  // it enabled for production. Verifying that URL reports a healthy API as broken, and worse, the
+  // frontend would be built against it and ship a production site that cannot reach its own API.
+  private async resolveProductionAlias(deploymentUrl: string, env: Record<string, string>): Promise<string> {
+    const inspected = await this.runner('vercel', ['inspect', deploymentUrl, '--format=json', '--no-color'], {
+      cwd: this.workspacePath, timeout: 60_000, env,
+    });
+    if (!inspected.success) {
+      throw new Error(`Unable to inspect the production deployment ${deploymentUrl}: ${inspected.stderr || inspected.stdout}`);
+    }
+    const aliases = parseVercelAliases(inspected.stdout);
+    if (!aliases.length) {
+      throw new Error(`The production deployment ${deploymentUrl} has no alias, so it is only reachable at its protected deployment URL.`);
+    }
+    // The shortest alias is the project's own production hostname. The longer ones carry the team
+    // scope and stay behind Deployment Protection, exactly like the deployment URL.
+    const alias = [...aliases].sort((left, right) => left.length - right.length)[0];
+    return alias.startsWith('http') ? alias : `https://${alias}`;
   }
 
   private async ensureVercelAuth(env: Record<string, string>): Promise<void> {
@@ -304,6 +325,18 @@ export class ReleaseComposer {
     const evidencePath = join(outputDir, `${this.projectName}-production.json`);
     await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
     step.detail = `Release evidence written to ${evidencePath}`;
+  }
+}
+
+function parseVercelAliases(output: string): string[] {
+  try {
+    const jsonStart = output.indexOf('{');
+    const jsonEnd = output.lastIndexOf('}');
+    if (jsonStart < 0 || jsonEnd <= jsonStart) return [];
+    const parsed = JSON.parse(output.slice(jsonStart, jsonEnd + 1));
+    return Array.isArray(parsed.aliases) ? parsed.aliases.filter((alias: unknown): alias is string => typeof alias === 'string' && alias.length > 0) : [];
+  } catch {
+    return [];
   }
 }
 
