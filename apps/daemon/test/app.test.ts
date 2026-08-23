@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -298,6 +298,274 @@ describe('daemon API', () => {
     });
     expect(ignored.status).toBe(202);
     expect(cleanupCalls).toHaveLength(1);
+    await store.close();
+  }, 30_000);
+
+  it('derives provider project names from a slug that Vercel and Cloudflare accept', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const { app } = createDaemonApp(store);
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Receipt Desk (2026)!',
+        answers: { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' },
+      }),
+    });
+    const { project } = await created.json() as { project: { id: string } };
+    await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+    });
+    await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+
+    // The raw name would produce an invalid provider project name: spaces, parentheses,
+    // punctuation and a trailing separator are all rejected by both providers.
+    const plan = await app.request(`http://localhost/api/projects/${project.id}/preview/plan`);
+    const planPayload = await plan.json() as { idempotencyKey: string };
+    expect(planPayload.idempotencyKey).toBe('preview:receipt-desk-2026:preview');
+    await store.close();
+  }, 30_000);
+  it('recovers a stale workspace into a clean one and leaves the old one on disk', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const { app } = createDaemonApp(store);
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Receipt Desk',
+        answers: { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' },
+      }),
+    });
+    const { project } = await created.json() as { project: { id: string } };
+    await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+    });
+    const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+    const { run: firstRun } = await applied.json() as { run: { id: string; workspacePath: string } };
+
+    const badConfirmation = await app.request(`http://localhost/api/projects/${project.id}/apply/recover`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RECOVER' }),
+    });
+    expect(badConfirmation.status).toBe(400);
+
+    // A healthy workspace is not a recovery case: nothing has gone wrong to recover from.
+    const refused = await app.request(`http://localhost/api/projects/${project.id}/apply/recover`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RECOVER_WORKSPACE' }),
+    });
+    expect(refused.status).toBe(409);
+
+    // Simulate the workspace an older generator produced: deployment configuration content drifts.
+    await writeFile(join(firstRun.workspacePath, '.github/workflows/quality.yml'), 'name: stale\n', 'utf8');
+    const recovered = await app.request(`http://localhost/api/projects/${project.id}/apply/recover`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RECOVER_WORKSPACE' }),
+    });
+    expect(recovered.status).toBe(200);
+    const payload = await recovered.json() as {
+      run: { id: string; workspacePath: string; recoveryIndex: number; status: string };
+      abandoned: { workspacePath: string; git: { branch: string } | null; workspace: { staleConfig: string[] } };
+    };
+    expect(payload.run.id).not.toBe(firstRun.id);
+    expect(payload.run.status).toBe('completed');
+    expect(payload.run.recoveryIndex).toBe(1);
+    expect(payload.run.workspacePath).toContain('revision-1-recovery-1');
+    expect(payload.abandoned.workspacePath).toBe(firstRun.workspacePath);
+    expect(payload.abandoned.workspace.staleConfig).toContain('.github/workflows/quality.yml');
+    expect(payload.abandoned.git?.branch).toBe('feature/agent-dev/revision-1');
+
+    // The old workspace is kept exactly as it was so its failure stays inspectable.
+    await expect(readFile(join(firstRun.workspacePath, '.github/workflows/quality.yml'), 'utf8')).resolves.toBe('name: stale\n');
+    await expect(readFile(join(payload.run.workspacePath, '.github/workflows/quality.yml'), 'utf8')).resolves.toContain('actions/checkout@v5');
+    await store.close();
+  }, 30_000);
+  it('requires a separate request and approval before any production deploy runs', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const releaseCalls: { workspacePath: string; projectName: string }[] = [];
+    const { app } = createDaemonApp(store, undefined, {
+      deployRelease: async options => {
+        releaseCalls.push(options);
+        return {
+          status: 'completed',
+          steps: [{ id: 'verify-release-quality', title: 'Verify release quality gate', status: 'completed' }],
+          apiBaseUrl: 'https://receipt-desk-api.vercel.app',
+          webUrl: 'https://receipt-desk-web.pages.dev',
+          corsOrigin: 'https://receipt-desk-web.pages.dev',
+          observations: {
+            releaseQuality: { command: 'npm run quality', exitCode: 0 },
+            apiHealth: { url: 'https://receipt-desk-api.vercel.app/api/health', httpStatus: 200, contentType: 'application/json', observedCorsHeader: 'https://receipt-desk-web.pages.dev' },
+            webPage: { url: 'https://receipt-desk-web.pages.dev', httpStatus: 200, sourceBytes: 128, matchedApiBaseUrl: 'https://receipt-desk-api.vercel.app' },
+            productionSmoke: { apiHealthUrl: 'https://receipt-desk-api.vercel.app/api/health', apiHttpStatus: 200, observedCorsHeader: 'https://receipt-desk-web.pages.dev' },
+          },
+        };
+      },
+    });
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Receipt Desk',
+        answers: { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' },
+      }),
+    });
+    const { project } = await created.json() as { project: { id: string } };
+    await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+    });
+    await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+
+    const plan = await app.request(`http://localhost/api/projects/${project.id}/release/plan`);
+    expect(plan.status).toBe(200);
+    await expect(plan.json()).resolves.toMatchObject({
+      idempotencyKey: 'release:receipt-desk:production',
+      corsOrigin: 'https://receipt-desk-web.pages.dev',
+      productionApproval: 'required',
+      releaseRun: null,
+    });
+
+    // Approval cannot be reached without a request first, and neither can deploy anything on its own.
+    const prematureApproval = await app.request(`http://localhost/api/projects/${project.id}/release/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'APPROVE_RELEASE', approvedBy: 'test-user', summary: 'Ship revision 1.' }),
+    });
+    expect(prematureApproval.status).toBe(409);
+    expect(releaseCalls).toHaveLength(0);
+
+    // The project has to be at PREVIEW_READY for a release request; nothing else may skip ahead.
+    const prematureRequest = await app.request(`http://localhost/api/projects/${project.id}/release/request`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
+    });
+    expect(prematureRequest.status).toBe(409);
+    expect(releaseCalls).toHaveLength(0);
+
+    await store.advanceDelivery(project.id, [
+      { type: 'START_IMPLEMENTATION' }, { type: 'IMPLEMENTATION_COMPLETE' },
+      { type: 'VERIFY_COMPLETE' }, { type: 'PR_CREATED' }, { type: 'PREVIEW_AVAILABLE' },
+    ]);
+
+    const requested = await app.request(`http://localhost/api/projects/${project.id}/release/request`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
+    });
+    expect(requested.status).toBe(200);
+    await expect(requested.json()).resolves.toMatchObject({ state: 'AWAITING_APPROVAL' });
+    expect(releaseCalls).toHaveLength(0);
+
+    const missingApprover = await app.request(`http://localhost/api/projects/${project.id}/release/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'APPROVE_RELEASE', summary: 'Ship revision 1.' }),
+    });
+    expect(missingApprover.status).toBe(400);
+    expect(releaseCalls).toHaveLength(0);
+
+    const approved = await app.request(`http://localhost/api/projects/${project.id}/release/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'APPROVE_RELEASE', approvedBy: 'test-user', summary: 'Ship revision 1.' }),
+    });
+    expect(approved.status).toBe(200);
+    expect(releaseCalls).toEqual([{ workspacePath: expect.stringContaining('revision-1'), projectName: 'receipt-desk' }]);
+    await expect(approved.json()).resolves.toMatchObject({
+      releaseRun: { status: 'completed', approvedBy: 'test-user' },
+      evidence: { webUrl: 'https://receipt-desk-web.pages.dev', approvedBy: 'test-user' },
+    });
+
+    const state = await app.request(`http://localhost/api/projects/${project.id}/release`);
+    await expect(state.json()).resolves.toMatchObject({
+      state: 'DELIVERED',
+      releaseRun: { status: 'completed' },
+      evidence: { observations: { releaseQuality: { exitCode: 0 } } },
+    });
+    await store.close();
+  }, 30_000);
+
+  it('journals a failed release and lets the retry resume the approved release', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    let attempt = 0;
+    const { app } = createDaemonApp(store, undefined, {
+      deployRelease: async () => {
+        attempt += 1;
+        if (attempt === 1) {
+          return {
+            status: 'failed',
+            steps: [
+              { id: 'verify-release-quality', title: 'Verify release quality gate', status: 'completed' },
+              { id: 'deploy-api-production', title: 'Deploy production API', status: 'failed', detail: 'vercel deploy failed' },
+            ],
+            corsOrigin: 'https://receipt-desk-web.pages.dev',
+          };
+        }
+        return {
+          status: 'completed',
+          steps: [
+            { id: 'verify-release-quality', title: 'Verify release quality gate', status: 'completed' },
+            { id: 'deploy-api-production', title: 'Deploy production API', status: 'completed' },
+          ],
+          apiBaseUrl: 'https://receipt-desk-api.vercel.app',
+          webUrl: 'https://receipt-desk-web.pages.dev',
+          corsOrigin: 'https://receipt-desk-web.pages.dev',
+          observations: {
+            releaseQuality: { command: 'npm run quality', exitCode: 0 },
+            apiHealth: { url: 'https://receipt-desk-api.vercel.app/api/health', httpStatus: 200, contentType: 'application/json', observedCorsHeader: 'https://receipt-desk-web.pages.dev' },
+            webPage: { url: 'https://receipt-desk-web.pages.dev', httpStatus: 200, sourceBytes: 128, matchedApiBaseUrl: 'https://receipt-desk-api.vercel.app' },
+            productionSmoke: { apiHealthUrl: 'https://receipt-desk-api.vercel.app/api/health', apiHttpStatus: 200, observedCorsHeader: 'https://receipt-desk-web.pages.dev' },
+          },
+        };
+      },
+    });
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Receipt Desk',
+        answers: { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' },
+      }),
+    });
+    const { project } = await created.json() as { project: { id: string } };
+    await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+    });
+    await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+    await store.advanceDelivery(project.id, [
+      { type: 'START_IMPLEMENTATION' }, { type: 'IMPLEMENTATION_COMPLETE' },
+      { type: 'VERIFY_COMPLETE' }, { type: 'PR_CREATED' }, { type: 'PREVIEW_AVAILABLE' },
+    ]);
+    await app.request(`http://localhost/api/projects/${project.id}/release/request`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
+    });
+
+    const failed = await app.request(`http://localhost/api/projects/${project.id}/release/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'APPROVE_RELEASE', approvedBy: 'test-user', summary: 'Ship revision 1.' }),
+    });
+    expect(failed.status).toBe(422);
+    await expect(failed.json()).resolves.toMatchObject({ releaseRun: { status: 'failed' } });
+    expect(store.getProject(project.id)?.state).toBe('FAILED');
+    await expect(store.getReleaseEvidence(project.id, 1)).resolves.toBeNull();
+
+    const retried = await app.request(`http://localhost/api/projects/${project.id}/release/retry`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RETRY_RELEASE' }),
+    });
+    expect(retried.status).toBe(200);
+    // The retry resumes the approved release: the same journal row, no second approval gate.
+    await expect(retried.json()).resolves.toMatchObject({ releaseRun: { status: 'completed', attempts: 1, approvedBy: 'test-user' } });
+    expect(store.getProject(project.id)?.state).toBe('DELIVERED');
+
+    const again = await app.request(`http://localhost/api/projects/${project.id}/release/retry`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RETRY_RELEASE' }),
+    });
+    expect(again.status).toBe(409);
     await store.close();
   }, 30_000);
 });

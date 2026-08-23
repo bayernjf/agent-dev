@@ -145,7 +145,41 @@ describe('DeploymentComposer', () => {
       vi.unstubAllGlobals();
     });
 
+    it('writes observed values into the evidence file rather than verdict constants', async () => {
+      const pageSource = '<script>https://test-api-preview.vercel.app</script>';
+      const corsOrigin = 'https://feature-x.test-project-web-feature-x.pages.dev';
+      const mockFetch = vi.fn().mockImplementation((url: string) => Promise.resolve(new Response(
+        url.includes('.pages.dev') ? pageSource : JSON.stringify({ ok: true }),
+        { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': corsOrigin } },
+      )));
+      vi.stubGlobal('fetch', mockFetch);
+      vi.stubEnv('VERCEL_TOKEN', 'test-token');
+
+      const composer = new DeploymentComposer({ workspacePath: tempDir, projectName: 'test-project', previewBranch: 'feature-x' }, createFullSuccessRunner());
+      expect((await composer.execute()).status).toBe('completed');
+
+      const evidence = JSON.parse(await readFile(join(tempDir, '.agent-dev/previews/test-project-feature-x.json'), 'utf8'));
+      expect(evidence.observations).toEqual({
+        apiHealth: { url: 'https://test-api-preview.vercel.app/api/health', httpStatus: 200, contentType: 'application/json; charset=utf-8' },
+        exactCors: { expectedOrigin: corsOrigin, observedHeader: corsOrigin },
+        pageContainsApiUrl: {
+          url: corsOrigin,
+          httpStatus: 200,
+          sourceBytes: Buffer.byteLength(pageSource, 'utf8'),
+          matchedApiBaseUrl: 'https://test-api-preview.vercel.app',
+        },
+        jointSmoke: { apiHealthUrl: 'https://test-api-preview.vercel.app/api/health', apiHttpStatus: 200, observedCorsHeader: corsOrigin },
+      });
+      expect(JSON.stringify(evidence)).not.toContain('"passed"');
+
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    });
+
     it('fails gracefully when vercel deploy fails', async () => {
+      // The token has to be stubbed explicitly: without it the composer stops at the auth
+      // precheck and never reaches the deploy failure this test is about.
+      vi.stubEnv('VERCEL_TOKEN', 'test-token');
       const runner = createMockRunner({
         'vercel project add': { stdout: 'Created', stderr: '', exitCode: 0, success: true },
         'vercel deploy': { stdout: '', stderr: 'Insufficient permissions', exitCode: 1, success: false },
@@ -163,6 +197,7 @@ describe('DeploymentComposer', () => {
       expect(result.steps[0].detail).toContain('Vercel preview deployment failed');
       expect(result.steps[1].status).toBe('pending');
       expect(result.cleanupRequired?.vercel).toBe('test-project-api-feature-x');
+      vi.unstubAllEnvs();
     });
 
     it('handles already-existing project gracefully', async () => {

@@ -57,6 +57,8 @@ describe('ProductBlueprint', () => {
       expect.objectContaining({ path: 'apps/api/vercel.json', content: expect.stringContaining('"@vercel/node"') }),
       expect.objectContaining({ path: 'apps/api/vercel.json', content: expect.not.stringContaining('nodejs22.x') }),
       expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('npm install') }),
+      expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('actions/checkout@v5') }),
+      expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('actions/setup-node@v5') }),
     ]));
   });
 });
