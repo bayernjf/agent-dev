@@ -1,12 +1,20 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-23
-> 当前阶段：第一个真实项目已走完 Blueprint → Preview → Production 全周期并交付上线（`Receipt Test`，1/3）；项目 2 `Workspace Verify Fresh` 已推进到 PR + Preview（生产发布待用户批准）；Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；凭证管理 Phase 2 已实现
+> 更新时间：2026-08-24
+> 当前阶段：三个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3）——BluePrint → Preview → Production 全周期在真实云端跑通，3/3 验证目标达成；Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；凭证管理 Phase 2 已实现
 > 工作目录：仓库根目录
 
 ## 最近进度
 
-- **项目 2（`Workspace Verify Fresh`）已推进到 PR + Preview，生产发布停在人工批准前**（本节写于 2026-08-23，是项目 2 的第一次真实走查）。从 Blueprint revision 到 Preview 的每一步都在真实 Provider 上执行：
+- **项目 3（`Link Vault`）已完整交付上线（3/3，2026-08-24 完成）**。三个真实项目验证目标全部达成：
+  - **Runtime 用 OpenCode 2.0 + 免费模型跑通**：Codex 因火山方舟套餐额度耗尽持续 429，改为 OpenCode 2.0 会话式执行。OpenCode 2.0 去掉了 v1 的 `-p --print`，非交互执行走 `api` 子命令 + `opencode2-driver.mjs`（会话创建 → 轮询 `message` 端点 → 按 `finish === 'stop'` 判定完成）。驱动在 `576b701` 提交（`fix(runtime): complete opencode runs on finish=stop and switch to nemotron-3-ultra-free`）。
+  - **免费模型选型（实测结论）**：目录里挂着的免费模型 ≠ 网关实际可用。`ling-3.0-flash-free`/`deepseek-v4-flash-free` 实测 401/400（网关不认模型名或凭证无权）；`big-pickle` 实测 429 限流；`hy3-free` 已废弃。最终锁定 `nemotron-3-ultra-free`（内置 `opencode` provider 的免费模型，1M 上下文 / 128K 输出，工具调用可用），设为 OpenCode 默认模型。默认模型定义见 `packages/agent-runtime/src/index.ts` 的 `opencode.buildCommand`。
+  - **功能与证据**：功能「API 保存并返回链接 + 页面表单与列表」。Quality Gate `passed`（lint/typecheck/5 单测/build/smoke），验收由 `feng` 批准（status=approved）。工作区提交链 `121deab`→`9ac2290`→`ab6fe73`→`640cee1`→`204f709`。
+  - **真实云端交付**：PR #1（feature→dev，`quality` SUCCESS、MERGEABLE，merged）；Preview 7/7 步 completed（首跑联合 Smoke 因新建 Pages 域名生效延迟失败，重跑即过——已知环境问题，非代码缺陷），`pr-1.link-vault-web-pr-1.pages.dev` + `link-vault-api-pr-1`；生产发布从 `main` 独立 checkout（修复路径 `962932a` 验证），9/9 步 completed，evidence 记录观测值。**独立复验**：生产 API `https://link-vault-api.vercel.app/api/links` 200、生产页面 `https://link-vault-web.pages.dev` 200、POST `/api/links` 真实返回 `{link:{...}}`。
+  - **生产发布卡点修复（首次尝试暴露并修掉第 9 个真实缺陷）**：`release/approve` 首跑第一步 `checkout-production-source` 失败——被验收提交 `640cee16` 不在 `main` 上（PR #1 只合到 `dev`，而生产从 `main` 发布）。修复：补开 PR #2（dev→main，`quality` SUCCESS、MERGEABLE，merged）把验收提交带上 `main` 后 `release/retry` 一次通过。**注意：`release/approve` 只校验「被验收提交是 `main` 祖先」，不会自动把 `dev` 合入 `main`——若 PR 目标分支是 `dev`，发布前需显式把 `dev` 提升到 `main`（对 `requirePullRequest: true` 即补开 dev→main PR）。**
+  - **项目 3 产出**：仓库 `bayernjf/link-vault`（PR #1 feature→dev、PR #2 dev→main）；生产 API `link-vault-api.vercel.app`、生产页面 `link-vault-web.pages.dev`；批准人 `feng`。遗留 Preview 资源 `link-vault-api-pr-1`（Vercel）与 `link-vault-web-pr-1`（Cloudflare）可走 `preview/cleanup` 清理。
+
+- **项目 2（`Workspace Verify Fresh`）已完整交付上线（2/3，2026-08-23 生产批准后完成）**。此前状态是 PR + Preview、生产停在人工批准前；用户批准后走 `release/request` + `release/approve`，生产从 `main` 独立 checkout 发布（修复路径 `962932a` 的第一次真实云端验证）。详情见下节（写于 2026-08-23）：
   - **归属修订**：旧 Blueprint 里四个归属字段全是 `test` 占位。发新 revision 3，把 `githubOwner`/`vercelTeam` 换成 `bayernjf`、`cloudflareAccount` 换成 `Jiangfengkxi@outlook.com's Account`、`supabaseOrganization` 换成 `jiangfengkx@163.com's Org`（前三个用 `gh api user`/`vercel whoami`/`wrangler whoami` 现场核实，与 `Receipt Test` 一致）。基线、Feature Task、交付验收三处闸门都按新规则具名 `feng` 通过——这是 Studio 新闸门输入框之外，通过 API 第一次验证「每个闸门都要求具名」。
   - **真实 Provider 接入**：`providers/apply` 创建私有仓库 `bayernjf/workspace-verify-fresh`；Vercel/Cloudflare 同名 Preview 项目已存在（上一轮 `workspace-verify-fresh-*` 按用户要求保留），noop 记录归属；Supabase 走 Manual noop。
   - **Feature Task + Codex 执行**：功能是「API 新增 `GET /api/version` 返回版本号，页面渲染 `API v1.0.0`」。Codex 改了 3 个文件 23 行（`apps/api/src/index.ts`、`apps/web/src/main.tsx`、`apps/api/src/health.test.ts`），本地 Quality Gate `passed`，人工验收批准后平台开 PR #1、状态 `PR_OPEN`。
@@ -200,6 +208,7 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 10. [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)
 11. [通用开发 SOP](ai-agent-development-sop.md)
 12. [Agent Runtime Catalog](docs/agent-runtime-catalog.md)
+13. [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目暴露的 17 个缺陷、架构规则、免费模型选型、环境前提与遗留资源
 
 市场判断和长期范围见 [市场分析](docs/market-analysis.md) 与 [路线图](docs/roadmap.md)。现有项目事实依据见 [项目组合复盘](portfolio-development-review.md)。
 
