@@ -1,4 +1,9 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 export { discoverAgentRuntimes, probeAgentCapabilities, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource, type CapabilityProbe } from './catalog.js';
 
 const SAFE_ENV_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'TMP', 'TEMP', 'NO_COLOR'];
@@ -78,8 +83,26 @@ const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
   codex: { status: 'verified', buildCommand: (prompt, cwd) => ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', cwd, prompt] },
   'claude-code': { status: 'candidate', buildCommand: (prompt, cwd) => ['claude', '-p', prompt, '--allowedTools', 'Read,Write,Edit,Bash', '--cwd', cwd] },
   aider: { status: 'candidate', buildCommand: (prompt, cwd) => ['aider', '--message', prompt, '--yes', '--cwd', cwd] },
-  opencode: { status: 'candidate', buildCommand: (prompt, cwd) => ['opencode', '-p', prompt, '--cwd', cwd] },
+  // OpenCode 2.0 (`lildax`) dropped the v1 `-p --print` interface, so tasks run through the
+  // session-based driver script. The default model is the free `nemotron-3-ultra-free` from the
+  // built-in `opencode` provider: it is the strongest free model verified working on the Zen
+  // gateway (1M context / 128K output), avoiding the exhausted paid/plan quota that blocks Codex
+  // and the deprecated/rate-limited free models (`hy3-free`, `big-pickle`, `ling-3.0-flash-free`).
+  // Execution contract exercised locally: the driver wrote a file, ran `ls`, and exited 0.
+  opencode: { status: 'verified', buildCommand: (prompt, cwd) => {
+    const promptDir = join(tmpdir(), 'agent-dev-opencode');
+    mkdirSync(promptDir, { recursive: true });
+    const promptFile = join(promptDir, `${randomUUID()}.md`);
+    writeFileSync(promptFile, prompt);
+    const driver = fileURLToPath(new URL('../scripts/opencode2-driver.mjs', import.meta.url));
+    return ['node', driver, cwd, 'nemotron-3-ultra-free', 'opencode', `--prompt=${promptFile}`];
+  } },
   openclaw: { status: 'candidate', buildCommand: (prompt, cwd) => ['openclaw', 'exec', '--json', '--sandbox', 'workspace-write', '--cd', cwd, prompt] },
+  // CodeBuddy runs non-interactively via `-p`, with permissions bypassed because it executes inside
+  // an already-isolated task workspace. `--no-session-persistence` keeps each run stateless.
+  // Execution contract exercised locally: `codebuddy -p ... "READY"` returned the response and
+  // exited 0, and the child is captured through the same stdout/stderr runner as Codex.
+  codebuddy: { status: 'verified', buildCommand: (prompt, cwd) => ['codebuddy', '-p', '--permission-mode', 'bypassPermissions', '--no-session-persistence', prompt] },
 };
 
 export function buildAgentExecutionPlan(task: ApprovedTask, workspacePath: string, agentId: string, options: { execute?: boolean } = {}): CodexExecutionPlan {
