@@ -8,6 +8,9 @@ import { ReleaseComposer } from '../src/release.js';
 const PROJECT = 'receipt-desk';
 const CORS_ORIGIN = `https://${PROJECT}-web.pages.dev`;
 const API_URL = 'https://receipt-desk-api.vercel.app';
+// What `vercel deploy --prod` reports: the immutable deployment URL, which Deployment Protection
+// guards. The public production address is the alias.
+const DEPLOYMENT_URL = 'https://receipt-desk-api-h88ixdrws-team.vercel.app';
 
 function successRunner(overrides: Record<string, CliResult> = {}): CommandRunner {
   return async (command, args) => {
@@ -17,7 +20,8 @@ function successRunner(overrides: Record<string, CliResult> = {}): CommandRunner
     }
     if (key.includes('vercel whoami')) return { stdout: 'test-user', stderr: '', exitCode: 0, success: true };
     if (key.includes('vercel project add')) return { stdout: 'Created', stderr: '', exitCode: 0, success: true };
-    if (key.includes('vercel deploy')) return { stdout: JSON.stringify({ url: API_URL }), stderr: '', exitCode: 0, success: true };
+    if (key.includes('vercel deploy')) return { stdout: JSON.stringify({ url: DEPLOYMENT_URL }), stderr: '', exitCode: 0, success: true };
+    if (key.includes('vercel inspect')) return { stdout: JSON.stringify({ url: DEPLOYMENT_URL, aliases: ['receipt-desk-api-team.vercel.app', 'receipt-desk-api.vercel.app'] }), stderr: '', exitCode: 0, success: true };
     if (key.includes('npm run quality')) return { stdout: 'quality ok', stderr: '', exitCode: 0, success: true };
     if (key.includes('npm run build')) return { stdout: 'built', stderr: '', exitCode: 0, success: true };
     if (key.includes('wrangler pages project create')) return { stdout: 'Created', stderr: '', exitCode: 0, success: true };
@@ -85,7 +89,38 @@ describe('ReleaseComposer', () => {
     // Preview disables SSO/password protection because previews are disposable. Production must
     // keep whatever protection the account configured, so no `vercel api` PATCH may be issued.
     expect(calls.some(call => call.startsWith('vercel api'))).toBe(false);
-    expect(calls.every(call => !call.includes('receipt-desk-api-'))).toBe(true);
+    // Only the project name matters here: Vercel's own deployment URL carries a hash suffix.
+    expect(calls.every(call => !call.includes('--project receipt-desk-api-'))).toBe(true);
+    expect(calls.every(call => !call.includes('vercel project add receipt-desk-api-'))).toBe(true);
+  });
+
+  it('verifies and ships the production alias, not the protected deployment URL', async () => {
+    stubProductionFetch();
+    const calls: string[] = [];
+    const base = successRunner();
+    const runner: CommandRunner = async (command, args, options) => {
+      calls.push(`${command} ${args.join(' ')}`);
+      return base(command, args, options);
+    };
+
+    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT }, runner).execute();
+    expect(result.status).toBe('completed');
+    expect(calls.some(call => call.includes(`vercel inspect ${DEPLOYMENT_URL}`))).toBe(true);
+    // Deployment Protection answers the deployment URL with an SSO redirect, so verifying it reports
+    // a healthy API as broken and the frontend would be built against an address users cannot reach.
+    expect(result.apiBaseUrl).toBe(API_URL);
+    expect(result.observations?.apiHealth.url).toBe(`${API_URL}/api/health`);
+    expect(await readFile(join(tempDir, 'apps/web/.env.production'), 'utf8')).toBe(`VITE_API_BASE_URL=${API_URL}\n`);
+  });
+
+  it('fails the release when the production deployment has no alias to serve', async () => {
+    stubProductionFetch();
+    const runner = successRunner({ 'vercel inspect': { stdout: JSON.stringify({ url: DEPLOYMENT_URL, aliases: [] }), stderr: '', exitCode: 0, success: true } });
+    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT }, runner).execute();
+    expect(result.status).toBe('failed');
+    const failed = result.steps.find(step => step.status === 'failed');
+    expect(failed?.id).toBe('deploy-api-production');
+    expect(failed?.detail).toContain('no alias');
   });
 
   it('records observed values as release evidence rather than verdict constants', async () => {
