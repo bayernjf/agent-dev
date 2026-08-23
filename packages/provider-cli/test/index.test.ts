@@ -63,6 +63,44 @@ describe('GitHubAdapter', () => {
     expect(calls).toContain('gh repo edit bayernjf/test-project --default-branch main');
   });
 
+  it('pushes the branch and opens a pull request', async () => {
+    const calls: string[] = [];
+    const runner: CommandRunner = async (command, args) => {
+      const key = `${command} ${args.join(' ')}`;
+      calls.push(key);
+      if (key.includes('git remote get-url')) return { stdout: 'https://github.com/bayernjf/test-project.git\n', stderr: '', exitCode: 0, success: true };
+      if (key.includes('git push')) return { stdout: '', stderr: '', exitCode: 0, success: true };
+      if (key.includes('git rev-parse')) return { stdout: 'deadbee\n', stderr: '', exitCode: 0, success: true };
+      if (key.includes('gh pr create')) return { stdout: 'https://github.com/bayernjf/test-project/pull/1\n', stderr: '', exitCode: 0, success: true };
+      return { stdout: '', stderr: '', exitCode: 1, success: false };
+    };
+    const adapter = new GitHubAdapter('bayernjf', 'test-project', '/tmp/workspace', runner);
+    const published = await adapter.publishPullRequest({ branch: 'feature/x', base: 'dev', title: 'Feature', body: 'Evidence', expectedRepository: 'bayernjf/test-project' });
+    expect(published).toEqual({ url: 'https://github.com/bayernjf/test-project/pull/1', head: 'deadbee' });
+    expect(calls).toContain('git push -u origin feature/x');
+  });
+
+  it('refuses to push when origin is not the recorded repository', async () => {
+    const runner = mockRunner({ 'git remote get-url': { stdout: 'https://github.com/someone-else/other.git', stderr: '', exitCode: 0, success: true } });
+    const adapter = new GitHubAdapter('bayernjf', 'test-project', '/tmp/workspace', runner);
+    // Pushing an accepted delivery to an unrecorded remote would publish the product somewhere the
+    // evidence does not describe.
+    await expect(adapter.publishPullRequest({ branch: 'feature/x', base: 'dev', title: 'Feature', body: 'Evidence', expectedRepository: 'bayernjf/test-project' })).rejects.toThrow(/Refusing to push/);
+  });
+
+  it('reuses the pull request a previous attempt already opened', async () => {
+    const runner = mockRunner({
+      'git remote get-url': { stdout: 'https://github.com/bayernjf/test-project.git', stderr: '', exitCode: 0, success: true },
+      'git push': { stdout: '', stderr: '', exitCode: 0, success: true },
+      'git rev-parse': { stdout: 'deadbee', stderr: '', exitCode: 0, success: true },
+      'gh pr create': { stdout: '', stderr: 'a pull request for branch feature/x already exists', exitCode: 1, success: false },
+      'gh pr view': { stdout: 'https://github.com/bayernjf/test-project/pull/7', stderr: '', exitCode: 0, success: true },
+    });
+    const adapter = new GitHubAdapter('bayernjf', 'test-project', '/tmp/workspace', runner);
+    const published = await adapter.publishPullRequest({ branch: 'feature/x', base: 'dev', title: 'Feature', body: 'Evidence', expectedRepository: 'bayernjf/test-project' });
+    expect(published.url).toBe('https://github.com/bayernjf/test-project/pull/7');
+  });
+
   it('creates repo on apply', async () => {
     let createCalled = false;
     const runner: CommandRunner = async (command, args) => {
