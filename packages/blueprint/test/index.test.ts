@@ -61,4 +61,18 @@ describe('ProductBlueprint', () => {
       expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('actions/setup-node@v5') }),
     ]));
   });
+
+  it('backs every declared quality check with a script that actually runs', () => {
+    const blueprint = createBlueprint('Receipt Desk', {}, 1);
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    const rootPackage = JSON.parse(artifacts.find(artifact => artifact.path === 'package.json')!.content) as { scripts: Record<string, string> };
+
+    for (const check of blueprint.spec.quality.required) {
+      expect(rootPackage.scripts[check], `spec.quality.required names "${check}" but no script runs it`).toBeDefined();
+      expect(rootPackage.scripts.quality).toContain(`npm run ${check}`);
+    }
+    // A `unit` script with no test file, or a `lint` script with no config, exits non-zero rather
+    // than reporting a passing gate — so the scaffold has to ship both.
+    expect(artifacts.map(artifact => artifact.path)).toEqual(expect.arrayContaining(['eslint.config.js', 'apps/api/src/health.test.ts', 'scripts/smoke.mjs', '.gitignore']));
+  });
 });

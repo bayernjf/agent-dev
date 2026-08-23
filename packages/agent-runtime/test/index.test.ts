@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAgentExecutionPlan, buildCodexExecutionPlan, executeCodexPlan, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime } from '../src/index.js';
+import { buildAgentExecutionPlan, buildCodexExecutionPlan, executeCodexPlan, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, runCodexProcess } from '../src/index.js';
 
 describe('Local Codex Runtime', () => {
   it('builds a non-executing sandboxed plan for an approved task', () => {
@@ -41,5 +41,23 @@ describe('Local Codex Runtime', () => {
     expect(getAgentAdapterStatus('claude-code')).toBe('candidate');
     expect(getAgentAdapterStatus('custom-1')).toBe('unsupported');
     expect(() => buildAgentExecutionPlan(task, '/tmp/agent-task', 'claude-code', { execute: true })).toThrow('has not passed execution verification');
+  });
+
+  it('force-kills a process that keeps running through SIGTERM', async () => {
+    const plan = buildCodexExecutionPlan({ id: 'task-5', title: 'Ignore signals', objective: 'Keep working.', acceptanceCriteria: ['Never finishes.'] }, process.cwd(), { execute: true });
+    const ignoresSigterm = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
+    const result = await executeCodexPlan({ ...plan, command: ['node', '-e', ignoresSigterm] }, runCodexProcess, 500);
+    expect(result.timedOut).toBe(true);
+    expect(result.signal).toBe('SIGKILL');
+  }, 20_000);
+
+  it('gives a real feature task more than three minutes by default', async () => {
+    const plan = buildCodexExecutionPlan({ id: 'task-6', title: 'Add status', objective: 'Show status.', acceptanceCriteria: ['Status renders.'] }, '/tmp/agent-task', { execute: true });
+    let observed = 0;
+    await executeCodexPlan(plan, async (_command, _arguments, options) => {
+      observed = options.timeoutMs;
+      return { exitCode: 0, signal: null, timedOut: false, output: '', startedAt: '2026-08-23T00:00:00.000Z', completedAt: '2026-08-23T00:00:01.000Z' };
+    });
+    expect(observed).toBeGreaterThan(180_000);
   });
 });
