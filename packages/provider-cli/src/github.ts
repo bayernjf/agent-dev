@@ -86,20 +86,22 @@ export class GitHubAdapter implements ProviderAdapter {
     if (plan.providerId !== this.providerId) throw new Error('Provider plan does not match this adapter.');
     if (approval.status !== 'approved') throw new Error('Provider Apply requires an approved plan.');
     const owner = await this.resolveOwner();
+    const repoName = owner ? `${owner}/${this.projectName}` : this.projectName;
     for (const resource of plan.resources) {
       if (resource.action === 'noop') continue;
-      const repoName = owner ? `${owner}/${this.projectName}` : this.projectName;
       const result = await this.runGh(['repo', 'create', repoName, '--private', '--source', this.workspacePath, '--push'], { cwd: this.workspacePath });
       if (!result.success) throw new Error(`GitHub repository creation failed: ${result.stderr || result.stdout}`);
-      await this.createDeclaredBranches(repoName);
     }
+    // Also on a repository that already exists: a repository provisioned before the platform declared
+    // these branches would otherwise never gain them, and its first pull request has no base.
+    await this.ensureDeclaredBranches(repoName);
     return { providerId: this.providerId, idempotencyKey: plan.idempotencyKey, applied: true, state: await this.discover() };
   }
 
   // `repo create --push` publishes the feature branch alone, so the repository has no base for the
   // documented `feature/* -> dev -> main` flow and the first pull request cannot be opened at all.
   // Both branches start at the baseline commit: the feature under review must not already be on them.
-  private async createDeclaredBranches(repoName: string) {
+  private async ensureDeclaredBranches(repoName: string) {
     const declared = [this.branches.productionBranch, this.branches.integrationBranch].filter((branch): branch is string => Boolean(branch));
     if (!declared.length) return;
     const baseline = await this.runner('git', ['rev-list', '--max-parents=0', 'HEAD'], { cwd: this.workspacePath });
