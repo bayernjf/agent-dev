@@ -163,13 +163,22 @@ describe('daemon API', () => {
     });
     expect(beforeApproval.status).toBe(409);
 
-    const approved = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan/approve`, {
+    // An approval nobody is named on cannot be traced to a person, so there is no default identity.
+    const anonymous = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan/approve`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
     });
+    expect(anonymous.status).toBe(400);
+    await expect(anonymous.json()).resolves.toMatchObject({ error: expect.stringContaining('name of who approves it') });
+
+    const approved = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
+    });
     expect(approved.status).toBe(200);
-    await expect(approved.json()).resolves.toMatchObject({ approval: { status: 'approved', blueprintRevision: 1 }, plan: { noExternalChanges: true } });
+    await expect(approved.json()).resolves.toMatchObject({ approval: { status: 'approved', blueprintRevision: 1, approvedBy: 'test-user' }, plan: { noExternalChanges: true } });
 
     const plan = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan`);
     await expect(plan.json()).resolves.toMatchObject({ approval: { status: 'approved' } });
@@ -296,7 +305,7 @@ describe('daemon API', () => {
     });
     const { project } = await created.json() as { project: { id: string } };
     await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
     });
     await app.request(`http://localhost/api/projects/${project.id}/apply`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
@@ -347,7 +356,7 @@ describe('daemon API', () => {
     });
     const { project } = await created.json() as { project: { id: string } };
     await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
     });
     await app.request(`http://localhost/api/projects/${project.id}/apply`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
@@ -375,7 +384,7 @@ describe('daemon API', () => {
     });
     const { project } = await created.json() as { project: { id: string } };
     await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
     });
     const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
@@ -450,7 +459,7 @@ describe('daemon API', () => {
     });
     const { project } = await created.json() as { project: { id: string } };
     await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
     });
     const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
@@ -599,7 +608,7 @@ describe('daemon API', () => {
     });
     const { project } = await created.json() as { project: { id: string } };
     await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
     });
     const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
