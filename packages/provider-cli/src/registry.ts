@@ -14,6 +14,8 @@ export type ProviderContext = {
   projectName: string;
   projectId?: string;
   blueprintRevision?: number;
+  integrationBranch?: string;
+  productionBranch?: string;
 };
 
 export type RealProviderOptions = {
@@ -35,7 +37,7 @@ type AdapterConfig = {
 
 const ADAPTER_FACTORIES: Record<string, AdapterConfig> = {
   github: {
-    factory: (spec, ctx, runner) => new GitHubAdapter(spec.owner, ctx.projectName, ctx.workspacePath, runner),
+    factory: (spec, ctx, runner) => new GitHubAdapter(spec.owner, ctx.projectName, ctx.workspacePath, runner, { integrationBranch: ctx.integrationBranch, productionBranch: ctx.productionBranch }),
     checkCommand: ['gh', ['auth', 'status', '--active']],
     manualReason: 'GitHub CLI is not authenticated. Run `gh auth login` first.',
   },
