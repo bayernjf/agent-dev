@@ -342,6 +342,65 @@ describe('AgentDevStore', () => {
     }
   }, 30_000);
 
+  it('pushes and opens the pull request itself once the delivery is accepted', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const created = await store.createProject({
+        name: 'Publish PR',
+        blueprint: createBlueprint('publish-pr', { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' }),
+      });
+      await store.approveBaseline(created.id, 1, 'test-user');
+      const run = await store.executeApplyRun((await store.createApplyRun(created.id, 1)).id);
+      const publisher = async (request: { branch: string; base: string; title: string; body: string }) => {
+        calls.push(request);
+        return { url: 'https://github.com/acme/publish-pr/pull/1', head: 'pushedsha' };
+      };
+      const calls: { branch: string; base: string; title: string; body: string }[] = [];
+
+      // Nothing is accepted yet, so there is no delivery a pull request could carry.
+      await expect(store.publishPullRequest(created.id, 1, publisher)).rejects.toThrow('A Feature Task is required before opening a pull request.');
+
+      await store.createFeatureTask({ projectId: created.id, blueprintRevision: 1, title: 'Add receipt list', objective: 'Show the user a list of saved receipts.', acceptanceCriteria: ['The list renders saved receipts.'] });
+      await store.approveFeatureTask(created.id, 1, 'test-user');
+      await expect(store.publishPullRequest(created.id, 1, publisher)).rejects.toThrow('Approve the delivery before opening a pull request.');
+      await store.prepareRuntimeRun(created.id, 1);
+      await store.executeRuntimeRun(created.id, 1, async () => {
+        await writeFile(join(run.workspacePath, 'apps', 'web', 'src', 'ReceiptList.tsx'), 'export const ReceiptList = () => null;\n', 'utf8');
+        return { exitCode: 0, signal: null, timedOut: false, output: 'fixture success', startedAt: new Date().toISOString(), completedAt: new Date().toISOString() };
+      });
+      await writeFile(join(run.workspacePath, 'package.json'), JSON.stringify({ name: 'publish-pr', private: true, scripts: { quality: 'node -e ""' } }, null, 2) + '\n', 'utf8');
+      expect((await store.runQualityGate(created.id, 1)).status).toBe('passed');
+      await store.submitAcceptance(created.id, 1, 'The receipt list renders and the quality gate passes.', true);
+      const acceptance = await store.approveAcceptance(created.id, 1, 'test-user');
+      expect(store.getProject(created.id)?.state).toBe('LOCAL_ACCEPTED');
+
+      // The quality-gate edit above is still untracked, and a pull request must carry everything.
+      await expect(store.publishPullRequest(created.id, 1, publisher)).rejects.toThrow('Commit or discard the workspace changes');
+      await execFileAsync('git', ['add', '-A'], { cwd: run.workspacePath });
+      await execFileAsync('git', ['-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-qm', 'chore: quality command'], { cwd: run.workspacePath });
+
+      const evidence = await store.publishPullRequest(created.id, 1, publisher);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ branch: 'feature/agent-dev/revision-1', base: 'dev', title: 'Add receipt list' });
+      expect(calls[0].body).toContain(acceptance.gitEvidence.head);
+      expect(evidence.url).toBe('https://github.com/acme/publish-pr/pull/1');
+      expect(evidence.checks.join('\n')).toContain('Pushed commit: pushedsha');
+      expect(store.getProject(created.id)?.state).toBe('PR_OPEN');
+
+      // A branch rewritten so it no longer carries the accepted commit must not be published as the
+      // accepted delivery, even when the acceptance record itself is still on it.
+      const tip = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: run.workspacePath })).stdout.trim();
+      await execFileAsync('git', ['reset', '--hard', `${acceptance.gitEvidence.head}~1`], { cwd: run.workspacePath });
+      await execFileAsync('git', ['checkout', tip, '--', 'acceptance.json', 'ACCEPTANCE_REPORT.md'], { cwd: run.workspacePath });
+      await execFileAsync('git', ['-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-qm', 'chore: rewritten history'], { cwd: run.workspacePath });
+      await expect(store.publishPullRequest(created.id, 1, publisher)).rejects.toThrow(`The accepted commit ${acceptance.gitEvidence.head} is not part of`);
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('orders apply runs deterministically when several exist for one revision', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
     const databasePath = join(directory, 'agent-dev.sqlite');
