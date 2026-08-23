@@ -96,7 +96,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 身份发现只读取本机 CLI 已有登录状态；资源基线计划只显示阻塞项和待批准的创建意图。审批当前只是一条本地审计记录；Apply Simulator 只写入本仓库忽略的本地工作区，绝不写入 GitHub、Supabase、Vercel 或 Cloudflare。
 
-已实现本地生成物物化、Provider 计划与真实 CLI Adapter、凭证连接、模板代码生成、受控 Codex 执行、Dual Preview 编排和交付报告。真实云端全链路已于 2026-08-23 跑通一次：`Receipt Test` 从 Blueprint 走到 `DELIVERED`，PR 经 GitHub Actions 质量门禁后合并，生产 API 与页面均对外可访问并在平台报告之外独立复验。这一轮暴露的两处架构缺口随后修掉：生产改为从记录仓库的生产分支 checkout 后发布（并要求该分支已带上被验收的提交），每个人工闸门都必须具名。两处修复目前只有测试覆盖，真实云端验证放在第二个项目。
+已实现本地生成物物化、Provider 计划与真实 CLI Adapter、凭证连接、模板代码生成、受控 Codex 执行、Dual Preview 编排和交付报告。真实云端全链路已于 2026-08-23 跑通一次：`Receipt Test` 从 Blueprint 走到 `DELIVERED`，PR 经 GitHub Actions 质量门禁后合并，生产 API 与页面均对外可访问并在平台报告之外独立复验。这一轮暴露的两处架构缺口随后修掉：生产改为从记录仓库的生产分支 checkout 后发布（并要求该分支已带上被验收的提交），每个人工闸门都必须具名。两处修复的验证放在第二个项目 `Workspace Verify Fresh`，目前已推进到 PR + Preview：具名闸门已通过 API 走通（基线/Feature Task/交付验收三处 `feng`），「从生产分支发布」的生产阶段停在人工批准前。项目 2 还暴露并修掉第 7 个真实缺陷——Agent 以 workspace 外部符号链接绕过产物提交拦截（`commitAgentChanges` 新增外部 symlink 守卫，生成器 `.gitignore` 改用 `node_modules` 同时匹配目录/文件/symlink）。
 
 已经取得本地 Evidence：
 
