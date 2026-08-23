@@ -18,7 +18,7 @@ type ProjectDetail = Project & { blueprint: ProductBlueprint };
 type ActivityEntry = { id: string; text: string; time: string };
 type BaselineApproval = { projectId: string; blueprintRevision: number; status: 'approved'; approvedBy: string; approvedAt: string };
 type ApplyStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed'; detail?: string };
-type ApplyRun = { id: string; projectId: string; blueprintRevision: number; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; workspacePath: string; steps: ApplyStep[]; createdAt: string; updatedAt: string };
+type ApplyRun = { id: string; projectId: string; blueprintRevision: number; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; recoveryIndex: number; workspacePath: string; steps: ApplyStep[]; createdAt: string; updatedAt: string };
 type DependencyReadiness = { status: 'not-applied' | 'missing-dependencies' | 'ready'; workspacePath: string | null; packageLockPresent: boolean; nodeModulesPresent: boolean; qualityCommandPresent: boolean; nextAction: string };
 type QualityGateResult = { status: 'passed' | 'failed'; command: string; exitCode: number; output: string; completedAt: string };
 type DependencyInstallResult = { status: 'installed' | 'failed'; exitCode: number; output: string; completedAt: string };
@@ -37,7 +37,12 @@ type CredentialMeta = { version: 1; updatedAt: string; keys: string[] };
 type ProjectResources = { version: number; projectName: string; projectId: string; blueprintRevision: number; updatedAt: string; providers: Record<string, Record<string, unknown>> } | null;
 type CredentialVerifyResult = { providerId: string; status: 'valid' | 'invalid' | 'not_set'; detail: string };
 type PreviewStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped'; detail?: string };
-type PreviewDeploymentResult = { status: 'completed' | 'failed' | 'cancelled'; steps: PreviewStep[]; apiBaseUrl?: string; pagesUrl?: string; corsOrigin?: string; evidence?: Record<string, string>; cleanupRequired?: { vercel?: string; cloudflare?: string } };
+type PreviewDeploymentResult = { status: 'completed' | 'failed' | 'cancelled'; steps: PreviewStep[]; apiBaseUrl?: string; pagesUrl?: string; pagesUrlSource?: 'cli-output' | 'derived-fallback'; corsOrigin?: string; evidence?: Record<string, string>; cleanupRequired?: { vercel?: string; cloudflare?: string } };
+type WorkspaceVerification = { usable: boolean; workspaceMissing: boolean; missing: string[]; staleConfig: string[]; reason?: string };
+type ReleaseStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed'; detail?: string; startedAt?: string; completedAt?: string };
+type ReleaseRun = { id: string; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; approvedBy: string; approvalSummary: string; steps: ReleaseStep[]; createdAt: string; updatedAt: string };
+type ReleaseEvidence = { projectName: string; apiBaseUrl: string; webUrl: string; corsOrigin: string; approvedBy: string; approvalSummary: string; observations: Record<string, unknown>; recordedAt: string };
+type ReleasePlan = { steps: ReleaseStep[]; idempotencyKey: string; corsOrigin: string; productionApproval: string; state: string; workspace: WorkspaceVerification; releaseRun: ReleaseRun | null };
 
 const PROVIDER_FIELDS = [
   { key: 'GITHUB_TOKEN', label: 'GitHub Token', tutorial: 'https://github.com/settings/tokens', hint: 'Generate a classic token with repo and workflow scopes.', providerId: 'github' },
@@ -149,6 +154,13 @@ export function App() {
   const [supabaseInputs, setSupabaseInputs] = useState<{ SUPABASE_URL: string; SUPABASE_ANON_KEY: string; SUPABASE_SERVICE_ROLE_KEY: string }>({ SUPABASE_URL: '', SUPABASE_ANON_KEY: '', SUPABASE_SERVICE_ROLE_KEY: '' });
   const [previewBranch, setPreviewBranch] = useState('preview');
   const [previewResult, setPreviewResult] = useState<PreviewDeploymentResult | null>(null);
+  const [releasePlan, setReleasePlan] = useState<ReleasePlan | null>(null);
+  const [releaseRun, setReleaseRun] = useState<ReleaseRun | null>(null);
+  const [releaseEvidence, setReleaseEvidence] = useState<ReleaseEvidence | null>(null);
+  const [releaseApprover, setReleaseApprover] = useState('');
+  const [releaseSummary, setReleaseSummary] = useState('');
+  const [releaseBusy, setReleaseBusy] = useState(false);
+  const [recoveringWorkspace, setRecoveringWorkspace] = useState(false);
   const [deployingPreview, setDeployingPreview] = useState(false);
 
   const decisions = useMemo(() => selected ? getBlueprintDecisions(selected.blueprint) : [], [selected]);
@@ -192,6 +204,7 @@ export function App() {
       void loadFinalDeliveryReport(projectId);
       void loadProviderPlan(projectId);
       void loadProjectResources(projectId);
+      void loadRelease(projectId);
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load this Blueprint.');
@@ -232,6 +245,113 @@ export function App() {
       setApplyRun(payload.run);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to load the local Apply run.');
+    }
+  };
+
+  const loadRelease = async (projectId: string) => {
+    try {
+      const [planResponse, stateResponse] = await Promise.all([
+        fetch(`/api/projects/${projectId}/release/plan`),
+        fetch(`/api/projects/${projectId}/release`),
+      ]);
+      // A 409 here is informative, not an error: it carries the reason the workspace is unusable.
+      const plan = planResponse.status === 404 ? null : await planResponse.json() as ReleasePlan;
+      setReleasePlan(plan && 'steps' in plan ? plan : null);
+      if (stateResponse.ok) {
+        const payload = await stateResponse.json() as { releaseRun: ReleaseRun | null; evidence: ReleaseEvidence | null };
+        setReleaseRun(payload.releaseRun);
+        setReleaseEvidence(payload.evidence);
+      }
+    } catch {
+      setReleasePlan(null);
+    }
+  };
+
+  const requestRelease = async () => {
+    if (!selected || releaseBusy) return;
+    setReleaseBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/release/request`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
+      });
+      const payload = await response.json() as { state?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? 'Unable to request a release.');
+      await selectProject(selected.id);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to request a release.');
+    } finally {
+      setReleaseBusy(false);
+    }
+  };
+
+  const approveRelease = async () => {
+    if (!selected || releaseBusy) return;
+    if (releaseApprover.trim().length === 0 || releaseSummary.trim().length === 0) {
+      setError('A production release needs the approver name and what is being released.');
+      return;
+    }
+    if (!window.confirm(`Release ${selected.name} to production as ${releaseApprover.trim()}?`)) return;
+    setReleaseBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/release/approve`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'APPROVE_RELEASE', approvedBy: releaseApprover.trim(), summary: releaseSummary.trim() }),
+      });
+      const payload = await response.json() as { releaseRun?: ReleaseRun; evidence?: ReleaseEvidence; error?: string };
+      if (payload.error) throw new Error(payload.error);
+      if (payload.releaseRun) setReleaseRun(payload.releaseRun);
+      if (payload.evidence) setReleaseEvidence(payload.evidence);
+      setError(response.ok ? '' : 'The release failed. Review the step details, then retry the approved release.');
+      await selectProject(selected.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to approve the release.');
+    } finally {
+      setReleaseBusy(false);
+    }
+  };
+
+  const retryRelease = async () => {
+    if (!selected || releaseBusy) return;
+    setReleaseBusy(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/release/retry`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'RETRY_RELEASE' }),
+      });
+      const payload = await response.json() as { releaseRun?: ReleaseRun; evidence?: ReleaseEvidence; error?: string };
+      if (payload.error) throw new Error(payload.error);
+      if (payload.releaseRun) setReleaseRun(payload.releaseRun);
+      if (payload.evidence) setReleaseEvidence(payload.evidence);
+      setError(response.ok ? '' : 'The release failed again. Review the step details before retrying.');
+      await selectProject(selected.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to retry the release.');
+    } finally {
+      setReleaseBusy(false);
+    }
+  };
+
+  const recoverWorkspace = async () => {
+    if (!selected || recoveringWorkspace) return;
+    if (!window.confirm('Create a clean workspace? The current one stays on disk so its failure remains inspectable.')) return;
+    setRecoveringWorkspace(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/apply/recover`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'RECOVER_WORKSPACE' }),
+      });
+      const payload = await response.json() as { run?: ApplyRun; abandoned?: { workspacePath: string }; error?: string };
+      if (!payload.run) throw new Error(payload.error ?? 'Unable to recover the workspace.');
+      setApplyRun(payload.run);
+      setPreviewResult(null);
+      setError(response.ok ? '' : 'The recovery workspace also failed. Review the step details.');
+      await selectProject(selected.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to recover the workspace.');
+    } finally {
+      setRecoveringWorkspace(false);
     }
   };
 
@@ -1115,9 +1235,15 @@ export function App() {
               </article>)}</div>
               {baselineApproval ? <div className="approval-record"><CheckCircle2 size={17} aria-hidden="true" /><div><strong>Baseline approval recorded</strong><small>Revision {baselineApproval.blueprintRevision} · {baselineApproval.approvedBy} · {formatDate(baselineApproval.approvedAt)}</small></div></div> : baselinePlan.readyForApproval ? <div className="approval-action"><p>This records intent only. It does not create remote resources or reveal secrets.</p><button className="primary-button" type="button" onClick={() => void approveBaseline()} disabled={approvingBaseline}>{approvingBaseline ? 'Recording approval...' : 'Approve baseline plan'}<ShieldCheck size={16} aria-hidden="true" /></button></div> : null}
               {baselineApproval && !applyRun && <div className="approval-action"><p>Run the local simulator to create the delivery package in the ignored `.agent-dev` workspace.</p><button className="primary-button" type="button" onClick={() => void applyBaseline()} disabled={applyingBaseline}>{applyingBaseline ? 'Applying locally...' : 'Run local Apply'}<ArrowRight size={16} aria-hidden="true" /></button></div>}
-              {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>Attempt {applyRun.attempts} of 3 · {applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? 'Retrying...' : 'Retry local Apply'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}
+              {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>Local Apply {applyRun.status}</strong><small>Attempt {applyRun.attempts} of 3 · {applyRun.workspacePath}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? 'Retrying...' : 'Retry local Apply'}<RefreshCw size={15} aria-hidden="true" /></button>}{(applyRun.status === 'failed' || releasePlan?.workspace.usable === false) && <div className="workspace-recovery"><p>{releasePlan?.workspace.usable === false ? `This workspace is not usable: ${[...releasePlan.workspace.missing, ...releasePlan.workspace.staleConfig].join(', ') || releasePlan.workspace.reason}` : 'Retrying in place reuses whatever the failed run left behind.'}</p><button className="secondary-button" type="button" onClick={() => void recoverWorkspace()} disabled={recoveringWorkspace}>{recoveringWorkspace ? 'Recovering...' : 'Recover into a clean workspace'}<RefreshCw size={15} aria-hidden="true" /></button></div>}</div>}
               {applyRun?.status === 'completed' && dependencyReadiness && <div className={`quality-gate ${dependencyReadiness.status}`}><div><p className="eyebrow">Local quality gate</p><h3>{qualityGateResult ? `Last run: ${qualityGateResult.status}` : dependencyReadiness.status === 'ready' ? 'Ready to run' : 'Dependencies required'}</h3><p>{dependencyReadiness.nextAction}</p></div>{dependencyReadiness.status === 'missing-dependencies' && <button className="secondary-button" type="button" onClick={() => void installDependencies()} disabled={installingDependencies}>{installingDependencies ? 'Installing...' : 'Install dependencies'}<ArrowRight size={15} aria-hidden="true" /></button>}{dependencyReadiness.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void runQualityGate()} disabled={applyingBaseline}>{applyingBaseline ? 'Running...' : 'Run quality gate'}<CheckCircle2 size={15} aria-hidden="true" /></button>}</div>}
               {applyRun?.status === 'completed' && qualityGateResult?.status === 'passed' && <div className="preview-deployment"><div className="runtime-heading"><div><p className="eyebrow">Dual Preview</p><h3>{previewResult ? `Preview ${previewResult.status}` : 'Deploy Preview Environment'}</h3><p>{previewResult?.status === 'completed' ? `API: ${previewResult.apiBaseUrl} · Pages: ${previewResult.pagesUrl}` : previewResult?.status === 'failed' ? 'Deployment failed. Review steps and cleanup if needed.' : 'Deploy Vercel API + Cloudflare Pages as a joint preview with exact CORS.'}</p></div></div>{!previewResult ? <div className="preview-deploy-form"><label htmlFor="preview-branch">Preview branch</label><input id="preview-branch" value={previewBranch} onChange={event => setPreviewBranch(event.target.value)} placeholder="e.g. pr-42 or feature-x" pattern="[a-z0-9-]+" maxLength={100} /><button className="primary-button" type="button" onClick={() => void deployPreview()} disabled={deployingPreview}>{deployingPreview ? 'Deploying preview...' : 'Deploy Preview'}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="preview-steps"><ol>{previewResult.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{previewResult.status === 'completed' && <div className="preview-urls"><span>API: <a href={previewResult.apiBaseUrl} target="_blank" rel="noreferrer">{previewResult.apiBaseUrl}</a></span><span>Pages: <a href={previewResult.pagesUrl} target="_blank" rel="noreferrer">{previewResult.pagesUrl}</a></span><span>CORS: <code>{previewResult.corsOrigin}</code></span></div>}{previewResult.cleanupRequired && <button className="secondary-button" type="button" onClick={() => void cleanupPreview()} disabled={deployingPreview}>{deployingPreview ? 'Cleaning up...' : 'Cleanup Preview Projects'}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}</div>}
+              {releasePlan && <div className={`production-release ${selected.state.toLowerCase()}`}><div className="runtime-heading"><div><p className="eyebrow">Production release</p><h3>{selected.state === 'DELIVERED' ? 'Released to production' : selected.state === 'AWAITING_APPROVAL' ? 'Waiting for a human approval' : selected.state === 'RELEASING' ? 'Releasing' : 'Request a production release'}</h3><p>Production origin <code>{releasePlan.corsOrigin}</code> · approval is <strong>{releasePlan.productionApproval}</strong> and never automatic.</p></div></div>
+                <ol className="release-steps">{(releaseRun?.steps ?? releasePlan.steps).map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{step.status}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>
+                {selected.state === 'PREVIEW_READY' && <button className="primary-button" type="button" onClick={() => void requestRelease()} disabled={releaseBusy || !releasePlan.workspace.usable}>{releaseBusy ? 'Requesting...' : 'Request production release'}<ArrowRight size={15} aria-hidden="true" /></button>}
+                {selected.state === 'AWAITING_APPROVAL' && <div className="release-approval"><label htmlFor="release-approver">Who approves this release?</label><input id="release-approver" value={releaseApprover} onChange={event => setReleaseApprover(event.target.value)} placeholder="e.g. Jiang Feng" maxLength={80} /><label htmlFor="release-summary">What is being released?</label><textarea id="release-summary" value={releaseSummary} onChange={event => setReleaseSummary(event.target.value)} placeholder="Scope of this production release." maxLength={500} /><button className="primary-button" type="button" onClick={() => void approveRelease()} disabled={releaseBusy}>{releaseBusy ? 'Releasing...' : 'Approve and release to production'}<ShieldCheck size={15} aria-hidden="true" /></button></div>}
+                {releaseRun?.status === 'failed' && <button className="secondary-button retry-button" type="button" onClick={() => void retryRelease()} disabled={releaseBusy || releaseRun.attempts >= 3}>{releaseBusy ? 'Retrying...' : releaseRun.attempts >= 3 ? 'Retry limit reached' : 'Retry the approved release'}<RefreshCw size={15} aria-hidden="true" /></button>}
+                {releaseEvidence && <div className="release-evidence"><p>Approved by <strong>{releaseEvidence.approvedBy}</strong> at {new Date(releaseEvidence.recordedAt).toLocaleString()} · {releaseEvidence.approvalSummary}</p><div className="preview-urls"><span>API: <a href={releaseEvidence.apiBaseUrl} target="_blank" rel="noreferrer">{releaseEvidence.apiBaseUrl}</a></span><span>Web: <a href={releaseEvidence.webUrl} target="_blank" rel="noreferrer">{releaseEvidence.webUrl}</a></span><span>CORS: <code>{releaseEvidence.corsOrigin}</code></span></div><pre className="evidence-observations">{JSON.stringify(releaseEvidence.observations, null, 2)}</pre></div>}</div>}
               {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">Feature delivery</p><h3>{featureTask ? featureTask.title : 'Define the next feature'}</h3><p>{featureTask ? `Task is ${featureTask.status}. Acceptance criteria are the Agent boundary.` : 'Create a focused task package before asking an Agent to change code.'}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{featureTask.status}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">Task title</label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder="e.g. Add receipt list" maxLength={120} /><label htmlFor="feature-objective">Objective</label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder="What user outcome should this feature deliver?" maxLength={2000} /><label htmlFor="feature-criteria">Acceptance criteria <small>one per line</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder="The list renders saved receipts.\nEmpty state is visible." maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Creating task...' : 'Create feature task'}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.status === 'draft' ? <button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Approving...' : 'Approve task for Agent'}<ShieldCheck size={15} aria-hidden="true" /></button> : <small>Approved by {featureTask.approvedBy} · {featureTask.approvedAt && formatDate(featureTask.approvedAt)}</small>}</div>}</div>}
               {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">Agent runtime{selectedAgentId && agents.find(a => a.id === selectedAgentId) ? ` · ${agents.find(a => a.id === selectedAgentId)!.name}` : ''}</p><h3>{runtimeRun ? `${runtimeRun.plan.mode === 'execute' ? 'Codex' : 'Dry-run'} ${runtimeRun.status}` : 'Runtime not prepared'}</h3><p>{runtimeRun?.status === 'completed' ? 'Codex finished. Review the diff and run the Quality Gate before acceptance.' : runtimeRun?.status === 'failed' ? `Codex failed on attempt ${runtimeRun.attempts}. Review the report or retry.` : runtimeRun?.status === 'running' ? 'Codex is working in the approved workspace.' : runtimeRun ? 'No Codex process has started. Review the local plan before explicitly starting execution.' : 'Prepare a guarded Runtime plan from the approved task.'}</p></div>{runtimeRun?.status === 'planned' ? <div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Cancelling...' : 'Cancel dry-run'}<RefreshCw size={15} aria-hidden="true" /></button><button className="primary-button" type="button" onClick={() => void executeRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Running Codex...' : 'Run Codex'}<ArrowRight size={15} aria-hidden="true" /></button></div> : runtimeRun?.status === 'failed' ? <button className="primary-button" type="button" onClick={() => void retryRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Retrying Codex...' : 'Retry Codex'}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime}>{preparingRuntime ? 'Preparing...' : 'Prepare Runtime'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{gitEvidence && <div className="git-evidence"><span>Branch <strong>{gitEvidence.branch}</strong></span><span>HEAD <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>Working tree <strong>{gitEvidence.status || 'clean'}</strong></span><span>Diff <strong>{gitEvidence.diffStat || 'no changes'}</strong></span></div>}{runtimeRun?.result?.output && <pre className="provider-report">{runtimeRun.result.output}</pre>}{runtimeRun?.history.length ? <div className="runtime-history"><small>{runtimeRun.history.length} attempt{runtimeRun.history.length === 1 ? '' : 's'} recorded</small></div> : null}</div>}
               {featureTask?.status === 'approved' && runtimeRun && <div className={`acceptance-panel ${acceptance?.status ?? 'pending'}`}><div className="runtime-heading"><div><p className="eyebrow">Human acceptance</p><h3>{acceptance ? `Acceptance ${acceptance.status}` : 'Submit delivery evidence'}</h3><p>{acceptance?.status === 'blocked' ? `Blocked: Quality Gate is ${acceptance.qualityStatus}.` : 'Confirm the acceptance criteria and record what was verified.'}</p></div>{acceptance?.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void approveDelivery()} disabled={submittingAcceptance}>{submittingAcceptance ? 'Approving...' : 'Approve delivery'}<ShieldCheck size={15} aria-hidden="true" /></button>}</div>{acceptance?.status !== 'approved' && <div className="acceptance-form"><label htmlFor="acceptance-summary">Acceptance summary</label><textarea id="acceptance-summary" value={acceptanceSummary} onChange={event => setAcceptanceSummary(event.target.value)} placeholder="Describe what was verified and what remains." maxLength={2000} /><label className="check-row"><input type="checkbox" checked={criteriaConfirmed} onChange={event => setCriteriaConfirmed(event.target.checked)} /> I reviewed every acceptance criterion</label><button className="primary-button" type="button" onClick={() => void submitAcceptance()} disabled={submittingAcceptance}>{submittingAcceptance ? 'Submitting...' : 'Submit acceptance evidence'}<ArrowRight size={15} aria-hidden="true" /></button></div>}</div>}

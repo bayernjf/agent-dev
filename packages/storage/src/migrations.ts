@@ -67,4 +67,26 @@ export const migrations = [
     id: '0004_apply_attempts',
     sql: `ALTER TABLE apply_runs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;`,
   },
+  {
+    id: '0005_release_runs',
+    sql: `
+      CREATE TABLE IF NOT EXISTS release_runs (
+        id TEXT PRIMARY KEY NOT NULL,
+        project_id TEXT NOT NULL,
+        blueprint_revision INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        approved_by TEXT NOT NULL,
+        approval_summary TEXT NOT NULL,
+        steps_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(project_id) REFERENCES projects(id)
+      );
+
+      -- A recovery run is a second apply row for the same revision. The index makes the
+      -- ordering deterministic, which created_at alone is not for same-millisecond inserts.
+      ALTER TABLE apply_runs ADD COLUMN recovery_index INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ] as const;

@@ -180,4 +180,123 @@ describe('AgentDevStore', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it('journals a release only after a human approves it, and survives a reopen', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    const databasePath = join(directory, 'agent-dev.sqlite');
+    try {
+      const store = await AgentDevStore.open(databasePath);
+      const created = await store.createProject({
+        name: 'Releasable',
+        blueprint: createBlueprint('releasable', {
+          mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme',
+        }),
+      });
+      await store.approveBaseline(created.id, 1, 'test-user');
+      const applied = await store.executeApplyRun((await store.createApplyRun(created.id, 1)).id);
+      await store.advanceDelivery(created.id, [
+        { type: 'START_IMPLEMENTATION' }, { type: 'IMPLEMENTATION_COMPLETE' },
+        { type: 'VERIFY_COMPLETE' }, { type: 'PR_CREATED' }, { type: 'PREVIEW_AVAILABLE' },
+      ]);
+      expect(store.getProject(created.id)?.state).toBe('PREVIEW_READY');
+
+      // Approval is the gate: from PREVIEW_READY there is nothing to approve yet.
+      await expect(store.approveRelease(created.id, 1, { approvedBy: 'test-user', summary: 'ship', steps: [] })).rejects.toThrow('AWAITING_APPROVAL');
+      expect(store.getLatestReleaseRun(created.id, 1)).toBeNull();
+
+      await store.requestRelease(created.id, 1);
+      expect(store.getProject(created.id)?.state).toBe('AWAITING_APPROVAL');
+      await expect(store.approveRelease(created.id, 1, { approvedBy: '  ', summary: 'ship', steps: [] })).rejects.toThrow('name who approved it');
+      expect(store.getLatestReleaseRun(created.id, 1)).toBeNull();
+
+      const release = await store.approveRelease(created.id, 1, {
+        approvedBy: 'test-user',
+        summary: 'Release revision 1 to production.',
+        steps: [{ id: 'verify-release-quality', title: 'Verify release quality', status: 'pending' }],
+      });
+      expect(release).toMatchObject({ status: 'queued', attempts: 0, approvedBy: 'test-user' });
+      expect(store.getProject(created.id)?.state).toBe('RELEASING');
+
+      await store.updateReleaseRun(release.id, 'running', [{ id: 'verify-release-quality', title: 'Verify release quality', status: 'completed', startedAt: '2026-08-23T00:00:00.000Z', completedAt: '2026-08-23T00:00:01.000Z' }], 1);
+      const evidence = await store.recordReleaseEvidence(created.id, 1, {
+        projectName: 'releasable',
+        apiBaseUrl: 'https://releasable-api.vercel.app',
+        webUrl: 'https://releasable-web.pages.dev',
+        corsOrigin: 'https://releasable-web.pages.dev',
+        approvedBy: 'test-user',
+        approvalSummary: 'Release revision 1 to production.',
+        observations: { apiHealth: { httpStatus: 200 } },
+      });
+      expect(evidence.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(store.getProject(created.id)?.state).toBe('DELIVERED');
+      await expect(readFile(join(applied.workspacePath, 'PRODUCTION_EVIDENCE.md'), 'utf8')).resolves.toContain('"httpStatus":200');
+      await store.close();
+
+      const reopened = await AgentDevStore.open(databasePath);
+      const journalled = reopened.getLatestReleaseRun(created.id, 1);
+      expect(journalled).toMatchObject({ id: release.id, attempts: 1, status: 'running' });
+      expect(journalled?.steps[0]).toMatchObject({ id: 'verify-release-quality', completedAt: '2026-08-23T00:00:01.000Z' });
+      await expect(reopened.getReleaseEvidence(created.id, 1)).resolves.toMatchObject({ webUrl: 'https://releasable-web.pages.dev' });
+      await reopened.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('sends a failed release back to the step that failed', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    const databasePath = join(directory, 'agent-dev.sqlite');
+    try {
+      const store = await AgentDevStore.open(databasePath);
+      const created = await store.createProject({
+        name: 'Failing Release',
+        blueprint: createBlueprint('failing-release', {
+          mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme',
+        }),
+      });
+      await store.approveBaseline(created.id, 1, 'test-user');
+      await store.executeApplyRun((await store.createApplyRun(created.id, 1)).id);
+      await store.advanceDelivery(created.id, [
+        { type: 'START_IMPLEMENTATION' }, { type: 'IMPLEMENTATION_COMPLETE' },
+        { type: 'VERIFY_COMPLETE' }, { type: 'PR_CREATED' }, { type: 'PREVIEW_AVAILABLE' },
+      ]);
+      await store.requestRelease(created.id, 1);
+      const release = await store.approveRelease(created.id, 1, {
+        approvedBy: 'test-user', summary: 'Release revision 1.',
+        steps: [{ id: 'deploy-api-production', title: 'Deploy API', status: 'pending' }],
+      });
+
+      const failed = await store.failRelease(release.id, [{ id: 'deploy-api-production', title: 'Deploy API', status: 'failed', detail: 'fixture failure' }]);
+      expect(failed.status).toBe('failed');
+      expect(store.getProject(created.id)?.state).toBe('FAILED');
+      // The retry has to come back to RELEASING, not to the old fixed VERIFYING target.
+      const retried = await store.advanceDelivery(created.id, [{ type: 'RETRY' }]);
+      expect(retried.state).toBe('RELEASING');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('orders apply runs deterministically when several exist for one revision', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    const databasePath = join(directory, 'agent-dev.sqlite');
+    try {
+      const store = await AgentDevStore.open(databasePath);
+      const created = await store.createProject({
+        name: 'Ordered Applies',
+        blueprint: createBlueprint('ordered-applies', {
+          mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme',
+        }),
+      });
+      await store.approveBaseline(created.id, 1, 'test-user');
+      const first = await store.createApplyRun(created.id, 1);
+      expect(first.recoveryIndex).toBe(0);
+      expect(store.listApplyRuns(created.id, 1)).toHaveLength(1);
+      expect(store.getLatestApplyRun(created.id, 1)?.id).toBe(first.id);
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

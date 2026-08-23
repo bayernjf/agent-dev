@@ -10,8 +10,8 @@ import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
 import { RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
-import { DeploymentComposer, cleanupPreviewProjects, previewProjectNames } from '@agent-dev/deployment-composer';
-import type { CleanupResult, PreviewDeploymentResult } from '@agent-dev/deployment-composer';
+import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin } from '@agent-dev/deployment-composer';
+import type { CleanupResult, PreviewDeploymentResult, ReleaseResult } from '@agent-dev/deployment-composer';
 import { DaemonEventBus } from './events.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
 import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
@@ -38,6 +38,10 @@ const applyBaselineSchema = z.object({
 
 const retryApplySchema = z.object({
   confirmation: z.literal('RETRY_APPLY'),
+});
+
+const recoverApplySchema = z.object({
+  confirmation: z.literal('RECOVER_WORKSPACE'),
 });
 
 const qualityGateSchema = z.object({
@@ -98,6 +102,7 @@ export type DaemonDependencies = {
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
   resolveGitHubWebhookSecret?: () => string | undefined;
   cleanupPreview?: (options: { vercelProject?: string; cloudflareProject?: string; workspacePath: string }) => Promise<CleanupResult>;
+  deployRelease?: (options: { workspacePath: string; projectName: string }) => Promise<ReleaseResult>;
 };
 
 const githubPullRequestWebhookSchema = z.object({
@@ -106,8 +111,10 @@ const githubPullRequestWebhookSchema = z.object({
   pull_request: z.object({ number: z.number().int().positive() }),
 });
 
+// Vercel and Cloudflare both reject names that are empty, contain anything outside
+// [a-z0-9-], or start or end with a hyphen, so collapse runs and trim them here.
 function projectSlug(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 function hasValidGitHubSignature(body: string, signature: string | undefined, secret: string) {
@@ -130,10 +137,11 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       if (!project) return null;
       const run = store.getLatestApplyRun(projectId, project.blueprint.metadata.revision);
       if (!run || run.status !== 'completed') return null;
-      return { workspacePath: run.workspacePath, projectName: project.name, projectId, blueprintRevision: project.blueprint.metadata.revision };
+      return { workspacePath: run.workspacePath, projectName: projectSlug(project.name), projectId, blueprintRevision: project.blueprint.metadata.revision };
     },
   });
   const executePreviewCleanup = dependencies.cleanupPreview ?? (options => cleanupPreviewProjects(defaultRunner, options));
+  const executeRelease = dependencies.deployRelease ?? (options => new ReleaseComposer(options).execute());
 
   app.post('/api/github/webhooks', async context => {
     if (context.req.header('x-github-event') !== 'pull_request') return context.json({ ignored: true }, 202);
@@ -282,6 +290,34 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const run = await store.executeApplyRun(existing.id);
     events.emit({ type: run.status === 'completed' ? 'apply.completed' : 'apply.failed', projectId, projectName: project.name, occurredAt: run.updatedAt });
     return context.json({ run }, run.status === 'completed' ? 200 : 422);
+  });
+
+  // A workspace that is unusable cannot be repaired in place: a failed run may have left a partial
+  // tree, and a stale one was written by an older generator. Recovery therefore starts a clean
+  // workspace and reports the Git state of the old one instead of deleting it.
+  app.post('/api/projects/:projectId/apply/recover', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = recoverApplySchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Recovery requires confirmation RECOVER_WORKSPACE.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const revision = project.blueprint.metadata.revision;
+    const existing = store.getLatestApplyRun(projectId, revision);
+    if (!existing) return context.json({ error: 'No Apply run is available to recover; start Apply instead.' }, 404);
+
+    const workspace = await verifyWorkspaceArtifacts(existing.workspacePath, project.blueprint);
+    if (existing.status !== 'failed' && workspace.usable) {
+      return context.json({ error: 'The current workspace is usable; recovery is only for a failed or stale workspace.', workspace }, 409);
+    }
+
+    const abandoned = await store.describeApplyWorkspace(existing.id);
+    const recovery = await store.createRecoveryApplyRun(projectId, revision);
+    const run = await store.executeApplyRun(recovery.id);
+    events.emit({ type: run.status === 'completed' ? 'apply.recovered' : 'apply.failed', projectId, projectName: project.name, occurredAt: run.updatedAt });
+    return context.json({
+      run,
+      abandoned: { ...abandoned, status: existing.status, workspace },
+    }, run.status === 'completed' ? 200 : 422);
   });
 
   app.post('/api/projects/:projectId/quality-gate', async context => {
@@ -683,7 +719,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const workspace = await verifyWorkspaceArtifacts(run.workspacePath, project.blueprint);
     const composer = new DeploymentComposer({
       workspacePath: run.workspacePath,
-      projectName: project.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      projectName: projectSlug(project.name),
       previewBranch: 'preview',
     });
     return context.json({
@@ -712,6 +748,145 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to cleanup preview projects.' }, 409);
     }
+  });
+
+  // --- Production Release ---
+
+  // Production is the one path where the human decision is load-bearing, so the request and the
+  // approval are separate calls with separate confirmations. Nothing here can be reached by a
+  // single click, and the release is journalled before any provider call runs.
+  const resolveReleaseContext = async (projectId: string) => {
+    const project = store.getProject(projectId);
+    if (!project) return { error: 'Project not found.' as const, statusCode: 404 as const };
+    const revision = project.blueprint.metadata.revision;
+    const run = store.getLatestApplyRun(projectId, revision);
+    if (!run || run.status !== 'completed') return { error: 'Complete the baseline Apply before releasing to production.' as const, statusCode: 409 as const };
+    const workspace = await verifyWorkspaceArtifacts(run.workspacePath, project.blueprint);
+    return { project, revision, run, workspace };
+  };
+
+  const runRelease = async (
+    projectId: string,
+    projectName: string,
+    revision: number,
+    workspacePath: string,
+    releaseRunId: string,
+  ) => {
+    const result = await executeRelease({ workspacePath, projectName: projectSlug(projectName) });
+    if (result.status !== 'completed' || !result.apiBaseUrl || !result.webUrl || !result.observations) {
+      const failed = await store.failRelease(releaseRunId, result.steps);
+      events.emit({ type: 'release.failed', projectId, projectName, occurredAt: failed.updatedAt });
+      return { result, releaseRun: failed, statusCode: 422 as const };
+    }
+    const journalled = await store.updateReleaseRun(releaseRunId, 'completed', result.steps);
+    const evidence = await store.recordReleaseEvidence(projectId, revision, {
+      projectName: projectSlug(projectName),
+      apiBaseUrl: result.apiBaseUrl,
+      webUrl: result.webUrl,
+      corsOrigin: result.corsOrigin ?? productionWebOrigin(projectSlug(projectName)),
+      approvedBy: journalled.approvedBy,
+      approvalSummary: journalled.approvalSummary,
+      observations: result.observations as unknown as Record<string, unknown>,
+    });
+    events.emit({ type: 'release.completed', projectId, projectName, occurredAt: evidence.recordedAt });
+    return { result, releaseRun: journalled, evidence, statusCode: 200 as const };
+  };
+
+  app.get('/api/projects/:projectId/release/plan', async context => {
+    const projectId = context.req.param('projectId');
+    const resolved = await resolveReleaseContext(projectId);
+    if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
+    const { project, revision, run, workspace } = resolved;
+    const composer = new ReleaseComposer({ workspacePath: run.workspacePath, projectName: projectSlug(project.name) });
+    return context.json({
+      steps: composer.plan(),
+      idempotencyKey: composer.idempotencyKey,
+      corsOrigin: composer.corsOrigin,
+      productionApproval: project.blueprint.spec.policy.productionApproval,
+      state: project.state,
+      workspace,
+      releaseRun: store.getLatestReleaseRun(projectId, revision),
+    }, workspace.usable ? 200 : 409);
+  });
+
+  app.get('/api/projects/:projectId/release', async context => {
+    const projectId = context.req.param('projectId');
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const revision = project.blueprint.metadata.revision;
+    return context.json({
+      state: project.state,
+      releaseRun: store.getLatestReleaseRun(projectId, revision),
+      evidence: await store.getReleaseEvidence(projectId, revision),
+    });
+  });
+
+  app.post('/api/projects/:projectId/release/request', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ confirmation: z.literal('REQUEST_RELEASE') }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Requesting a release requires confirmation REQUEST_RELEASE.' }, 400);
+    const resolved = await resolveReleaseContext(projectId);
+    if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
+    if (!resolved.workspace.usable) return context.json({ error: resolved.workspace.reason, workspace: resolved.workspace }, 409);
+    try {
+      const project = await store.requestRelease(projectId, resolved.revision);
+      events.emit({ type: 'release.requested', projectId, projectName: project.name, occurredAt: new Date().toISOString() });
+      return context.json({ state: project.state });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to request a release.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/release/approve', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({
+      confirmation: z.literal('APPROVE_RELEASE'),
+      approvedBy: z.string().trim().min(1).max(120),
+      summary: z.string().trim().min(1).max(2000),
+    }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Approving a release requires confirmation APPROVE_RELEASE, approvedBy and summary.' }, 400);
+    const resolved = await resolveReleaseContext(projectId);
+    if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
+    const { project, revision, run, workspace } = resolved;
+    if (!workspace.usable) return context.json({ error: workspace.reason, workspace }, 409);
+
+    const composer = new ReleaseComposer({ workspacePath: run.workspacePath, projectName: projectSlug(project.name) });
+    let releaseRunId: string;
+    try {
+      const approved = await store.approveRelease(projectId, revision, {
+        approvedBy: parsed.data.approvedBy,
+        summary: parsed.data.summary,
+        steps: composer.plan(),
+      });
+      releaseRunId = approved.id;
+      events.emit({ type: 'release.approved', projectId, projectName: project.name, occurredAt: approved.createdAt });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to approve a release.' }, 409);
+    }
+
+    const outcome = await runRelease(projectId, project.name, revision, run.workspacePath, releaseRunId);
+    return context.json(outcome, outcome.statusCode);
+  });
+
+  app.post('/api/projects/:projectId/release/retry', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ confirmation: z.literal('RETRY_RELEASE') }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Retrying a release requires confirmation RETRY_RELEASE.' }, 400);
+    const resolved = await resolveReleaseContext(projectId);
+    if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
+    const { project, revision, run, workspace } = resolved;
+    if (!workspace.usable) return context.json({ error: workspace.reason, workspace }, 409);
+    const existing = store.getLatestReleaseRun(projectId, revision);
+    if (!existing) return context.json({ error: 'No release run is available to retry.' }, 404);
+    if (existing.status !== 'failed') return context.json({ error: 'Only a failed release can be retried.' }, 409);
+    if (existing.attempts >= 3) return context.json({ error: 'Release retry limit reached; approve a new release instead.' }, 409);
+
+    // The approval already happened; the retry resumes the approved release rather than opening a
+    // second gate. RETRY returns the run to RELEASING because that is where it failed.
+    await store.advanceDelivery(projectId, [{ type: 'RETRY' }]);
+    await store.updateReleaseRun(existing.id, 'running', existing.steps.map(step => (step.status === 'failed' ? { ...step, status: 'pending' as const, detail: undefined } : step)), existing.attempts + 1);
+    const outcome = await runRelease(projectId, project.name, revision, run.workspacePath, existing.id);
+    return context.json(outcome, outcome.statusCode);
   });
 
   app.post('/api/projects', async context => {
