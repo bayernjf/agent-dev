@@ -212,6 +212,8 @@ quality
 
 Agent 产物提交守卫另有两条：一是暂存区出现 `.env` 时拒绝提交并把该次运行判 `failed`（提交密钥不可事后修复）；二是暂存区出现**指向 workspace 外部的符号链接**时同样拒绝提交——Agent 为加速测试可能把依赖目录（如 `node_modules`）以绝对路径 symlink 挂进 workspace，目录模式的 `.gitignore`（`node_modules/`）不匹配符号链接，死链会被提交进产品仓库。两处修复：`commitAgentChanges` 用 `lstat`/`readlink`/`resolve` 识别逃出 workspace 的 symlink 并拦截，生成器模板 `.gitignore` 改用 `node_modules`（同时匹配目录、文件和 symlink）。项目 2 的真实 Codex 运行暴露并验证了这条守卫。
 
+生成产品的 CI 模板另有第三条修复：脚手架设计为「首次 `npm install` 才生成 `package-lock.json`、由用户提交」，但 `quality.yml` 用的 `actions/setup-node@v5` 默认开启依赖缓存、在仓库根搜不到 lock 文件就硬报 `Dependencies lock file is not found` 使首个 PR 必然失败。模板现给 `setup-node` 显式 `cache: ''`，让 `npm install` 自己生成 lock 文件。项目 2 的 PR #1 由 `FAILURE` 修复为 `SUCCESS` 验证了这条修复。
+
 完成定义：
 
 - 每个完成的验收标准都有 Evidence；
