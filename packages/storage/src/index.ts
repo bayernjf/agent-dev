@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, readlink, access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/sql-js';
 import initSqlJs, { type Database } from 'sql.js';
@@ -830,6 +830,23 @@ export class AgentDevStore {
     if (secrets.length) {
       await execFileAsync('git', ['reset', '-q'], { cwd: task.workspacePath });
       return `Agent changes were not committed: ${secrets.join(', ')} would enter the product repository. Add it to .gitignore in the workspace, then retry the run.`;
+    }
+    // Agents may speed up a test run by linking an existing node_modules from outside the
+    // workspace. A committed absolute link is a dead path for every other clone, and removing it
+    // later cannot rewrite the history it already entered.
+    const stagedPaths = staged.stdout.split('\n').map(line => line.slice(3).trim()).filter(Boolean);
+    const externalLinks: string[] = [];
+    for (const path of stagedPaths) {
+      const stats = await lstat(join(task.workspacePath, path)).catch(() => null);
+      if (!stats?.isSymbolicLink()) continue;
+      const target = await readlink(join(task.workspacePath, path));
+      const resolved = resolve(task.workspacePath, target);
+      const offset = relative(task.workspacePath, resolved);
+      if (offset.startsWith('..') || isAbsolute(offset)) externalLinks.push(path);
+    }
+    if (externalLinks.length) {
+      await execFileAsync('git', ['reset', '-q'], { cwd: task.workspacePath });
+      return `Agent changes were not committed: ${externalLinks.join(', ')} ${externalLinks.length === 1 ? 'is a symbolic link' : 'are symbolic links'} outside the workspace and would enter the product repository as dead paths. Remove the link${externalLinks.length === 1 ? '' : 's'} in the workspace, then retry the run.`;
     }
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `feat: ${task.title}`], { cwd: task.workspacePath });
     return null;

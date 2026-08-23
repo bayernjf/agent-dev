@@ -1,10 +1,19 @@
 # Agent-Dev 项目交接
 
 > 更新时间：2026-08-23
-> 当前阶段：第一个真实项目已走完 Blueprint → Preview → Production 全周期并交付上线（`Receipt Test`，1/3）；Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；凭证管理 Phase 2 已实现
+> 当前阶段：第一个真实项目已走完 Blueprint → Preview → Production 全周期并交付上线（`Receipt Test`，1/3）；项目 2 `Workspace Verify Fresh` 已推进到 PR + Preview（生产发布待用户批准）；Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；凭证管理 Phase 2 已实现
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **项目 2（`Workspace Verify Fresh`）已推进到 PR + Preview，生产发布停在人工批准前**（本节写于 2026-08-23，是项目 2 的第一次真实走查）。从 Blueprint revision 到 Preview 的每一步都在真实 Provider 上执行：
+  - **归属修订**：旧 Blueprint 里四个归属字段全是 `test` 占位。发新 revision 3，把 `githubOwner`/`vercelTeam` 换成 `bayernjf`、`cloudflareAccount` 换成 `Jiangfengkxi@outlook.com's Account`、`supabaseOrganization` 换成 `jiangfengkx@163.com's Org`（前三个用 `gh api user`/`vercel whoami`/`wrangler whoami` 现场核实，与 `Receipt Test` 一致）。基线、Feature Task、交付验收三处闸门都按新规则具名 `feng` 通过——这是 Studio 新闸门输入框之外，通过 API 第一次验证「每个闸门都要求具名」。
+  - **真实 Provider 接入**：`providers/apply` 创建私有仓库 `bayernjf/workspace-verify-fresh`；Vercel/Cloudflare 同名 Preview 项目已存在（上一轮 `workspace-verify-fresh-*` 按用户要求保留），noop 记录归属；Supabase 走 Manual noop。
+  - **Feature Task + Codex 执行**：功能是「API 新增 `GET /api/version` 返回版本号，页面渲染 `API v1.0.0`」。Codex 改了 3 个文件 23 行（`apps/api/src/index.ts`、`apps/web/src/main.tsx`、`apps/api/src/health.test.ts`），本地 Quality Gate `passed`，人工验收批准后平台开 PR #1、状态 `PR_OPEN`。
+  - **本轮修掉第 7 个真实缺陷（Codex 创建外部 symlink 绕过产物提交拦截）**：Codex 为了跑测试，把 `/private/tmp/scaffold-check3/node_modules` 以**绝对路径符号链接**挂进 workspace。生成器模板的 `.gitignore` 写的是 `node_modules/`（目录模式），而目录模式不匹配符号链接，于是平台把这个死链提交进了产品仓库——推上 GitHub 后任何 clone 都得到指向 `/private/tmp` 的无效链接。修复分两处：`commitAgentChanges` 新增「workspace 外部符号链接」拦截（`lstat` 识别 symlink，`readlink`+`resolve` 判断是否逃出 workspace，命中则 `git reset` 并把该次运行判 `failed`，与 `.env` 拦截同一套哲学）；生成器模板 `.gitignore` 从 `node_modules/` 改为 `node_modules`（同时匹配目录、文件和符号链接）。新增回归测试，`npm test` 110/110 全绿。当前 workspace 已同步 `.gitignore` 并把死链移出索引（提交 `1179738`），`.agent-dev/apply/.../revision-3` 干净。
+  - **Codex 版本不兼容（环境问题，非产品缺陷）**：本机 PATH 上有三个 codex——`/opt/homebrew/bin`（0.142.3，handoff 验证过的版本）、fnm node20 全局（0.147.0）、`/usr/local/bin`（0.139.0）。原 Daemon 进程因 PATH 顺序解析到 0.147.0，该版本与 `~/.codex/config.toml` 的 `ark-code-latest` 模型不兼容：输出刷 `ERROR codex_core::util: ReasoningSummaryDelta without active item` 直到 15 分钟超时被 SIGKILL。重启 Daemon（homebrew 0.142.3 优先）后 retry 一次通过，功能提交 `24a5972`。**建议卸载或降级 npm global 的 codex 0.147.0**，否则任何依赖 PATH 顺序的工具都可能再踩。同时 Daemon 的 PATH 需同时含 node22（运行时）、homebrew（codex 0.142.3）和 fnm node20 全局 bin（`vercel`/`wrangler`），否则 Vercel 认证会报 `Vercel is not authenticated`。
+  - **Preview 部署卡在联合 Smoke，是 Cloudflare 证书延迟，不是代码缺陷**：`preview/deploy` 6/7 步已成功（Vercel API 部署 → 健康验证 → 精确 CORS → URL 注入 → 前端构建 → Cloudflare Pages 部署），仅最后联合 Smoke 需要 HTTPS 访问刚建的 preview 域名，被未就绪的证书挡住。诊断结论：全局两层 `*.pages.dev` 证书正常（生产 `receipt-test-web.pages.dev` → 200），但**项目级三层 `*.project.pages.dev` 证书走代理时返回 TLS `handshake failure`（alert 40）**——连 4 小时前 7/7 通过的 `pr-1.receipt-test-web-pr-1.pages.dev` 现在也 TLS 握手失败，说明是网络环境在此期间变化，而非部署代码问题。每次重试 deploy 都会重新部署产生新哈希域名、重新等证书，故不建议盲目重试；等网络恢复后再跑一次即可。生产发布用的 `workspace-verify-fresh-web.pages.dev` 是两层全局证书域名，与当前可达的生产域名同类，预计不受此影响。
+  - **项目 2 待办**：生产发布（`release/request` 后由用户本人 `release/approve`）——这将是「生产从生产分支 checkout 发布 + 要求被验收提交是该分支祖先」这条修复路径（`962932a`）的第一次真实云端验证；以及 Preview 联合 Smoke 的补跑。
 
 - **第一个真实项目已完整交付上线（`Receipt Test`，第 8 节第 7 项的 1/3）**。从 Blueprint 到生产全部走真实 Provider，状态机终点 `DELIVERED`，功能是「显示 API 连接状态的收据页面」。
   - **真实资源与证据**：仓库 `bayernjf/receipt-test`（PR #1 `feature/agent-dev/revision-5 → dev`，GitHub Actions `quality` 通过后合并，合并提交 `21d0e75`，`dev` 携带被验收的 `553a8e0`）；生产 API `https://receipt-test-api.vercel.app`，生产页面 `https://receipt-test-web.pages.dev`；批准人 `feng`。已在平台报告之外独立复验：API 返回 `200 application/json`，带正确 Origin 时回精确 `access-control-allow-origin`、带 `https://evil.example.com` 时**一个 CORS 头都不返回**；线上 JS bundle 里能找到本次功能的中文串（`管理个人收据`、`连接状态`、`已连接`、`连接失败`），证明上线的是功能而非脚手架。
@@ -220,11 +229,12 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 5. ✅ ~~用一次必然产生 Git diff 的真实功能任务验证 Runtime 写入和 Quality Gate~~：已于 2026-08-11 完成；Human Acceptance 仍需由用户明确确认；
 6. ✅ ~~将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联~~：已于 2026-08-10 完成；本地批准进入 `LOCAL_ACCEPTED`，不代表生产交付；
 7. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。**进度 1/3**：`Receipt Test` 已于 2026-08-23 走完全周期并交付上线（`DELIVERED`，证据与本轮修掉的 6 个缺陷见「最近进度」首条）。剩余动作：
-   - **项目 2**：用 `Workspace Verify Fresh`。它的 Blueprint 里归属账号是 `test` 占位值，需要先发一个新 revision 换成真实归属，否则 Provider apply 会建到错误的账号下；它的 Preview 资源按用户要求保留，不要清理。
+   - **项目 2**：`Workspace Verify Fresh` 已推进到 PR + Preview（详见「最近进度」项目 2 条目）。归属已换真实值（revision 3），仓库 `bayernjf/workspace-verify-fresh` 已建，PR #1 已开，功能（`/api/version`）已实现并通过本地 Quality Gate 与人工验收。剩余：等 Cloudflare 三层证书恢复后补跑 Preview 联合 Smoke；生产发布（`release/request` 后由用户本人批准）——这是「从生产分支发布 + 要求被验收提交是该分支祖先」路径的第一次真实云端验证。它的 Preview 资源按用户要求保留，不要清理。
    - **项目 3**：尚未创建，需要新建一个 Blueprint。
-   - 每个旧项目开始前仍要先走一次 workspace 恢复（CI actions 版本升级让所有既存 workspace 变成 `staleConfig`）。
+   - 每个旧项目开始前仍要先走一次 workspace 恢复（CI actions 版本升级让所有既存 workspace 变成 `staleConfig`）；项目 2 是全新 revision 3，直接 Apply 即得干净 workspace，未走 recover。
    - 生产发布必须由用户本人批准，不能由 Agent 代按；Daemon 必须带代理变量与 `NODE_USE_ENV_PROXY=1` 启动，否则云端验证会假失败。
-   - 项目 1 暴露的两处缺口已在项目 2 之前修完（生产改为从生产分支发布；每个闸门都要求具名）。项目 2 因此同时是这两处修复的真实云端验证：发布前应看到 `Releasing <repo> branch main ...`，且发布必须在 PR 合并进生产分支之后才可能通过。
+   - 项目 1 暴露的两处缺口已在项目 2 之前修完（生产改为从生产分支发布；每个闸门都要求具名）。项目 2 已通过 API 验证「每个闸门都要求具名」（基线/Feature Task/交付验收三处 `feng` 通过）；「从生产分支发布」的生产阶段验证仍在待办（见上）。
+   - **新增环境注意**：Daemon 的 PATH 需同时含 node22 运行时、homebrew（codex 0.142.3，避免解析到有兼容 bug 的 0.147.0）和 fnm node20 全局 bin（`vercel`/`wrangler`），否则会出现 codex 超时或 Vercel 未认证。
 
 ## 9. 用户决策
 
