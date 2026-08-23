@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 
 export type DaemonEvent = {
-  type: 'project.created' | 'blueprint.revised' | 'baseline.approved' | 'apply.completed' | 'apply.failed' | 'providers.applied' | 'preview.deployed' | 'preview.failed' | 'preview.cleaned' | 'preview.cleanup_failed';
+  type: 'project.created' | 'blueprint.revised' | 'baseline.approved' | 'apply.completed' | 'apply.failed' | 'apply.recovered' | 'providers.applied' | 'preview.deployed' | 'preview.failed' | 'preview.cleaned' | 'preview.cleanup_failed' | 'release.requested' | 'release.approved' | 'release.completed' | 'release.failed';
   projectId: string;
   projectName: string;
   occurredAt: string;

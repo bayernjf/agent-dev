@@ -49,7 +49,21 @@ export const applyRuns = sqliteTable('apply_runs', {
   blueprintRevision: integer('blueprint_revision').notNull(),
   status: text('status').notNull(),
   attempts: integer('attempts').notNull().default(0),
+  recoveryIndex: integer('recovery_index').notNull().default(0),
   workspacePath: text('workspace_path').notNull(),
+  stepsJson: text('steps_json').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const releaseRuns = sqliteTable('release_runs', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  blueprintRevision: integer('blueprint_revision').notNull(),
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  approvedBy: text('approved_by').notNull(),
+  approvalSummary: text('approval_summary').notNull(),
   stepsJson: text('steps_json').notNull(),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),

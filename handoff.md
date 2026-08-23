@@ -6,6 +6,12 @@
 
 ## 最近进度
 
+- **生产交付路径与失败 workspace 恢复已实现（本地已验证，真实云端未跑）**。此前 Daemon 只覆盖到 Preview，`handoff.md` 第 8 节第 7 项因此被阻塞；现在两条前置路径都在：
+  - **生产发布**：新增 `ReleaseComposer`（`packages/deployment-composer/src/release.ts`），按架构第 10 节顺序编排 7 步：`release-quality → deploy-api-production → verify-api-production → build-web-production → deploy-web-production → verify-production-smoke → write-release-evidence`。它**故意不关闭 Vercel Deployment Protection**——那对一次性 Preview 站得住，对生产是错的，因此写成了一条负向断言测试防止将来被悄悄改回来。生产项目名不带分支后缀（一个产品只有一对生产项目），生产 Web origin 由 Cloudflare Pages 项目 apex 推导（Blueprint 里没有生产域名字段），这让 API 的 `ALLOWED_ORIGIN` 与被验证的 URL 在构造上必然相等。
+  - **两道人工闸门**：新增 `release_runs` 表（migration 0005）与 `POST .../release/request`、`.../release/approve`、`.../release/retry`。`approve` 必须带 `approvedBy` 与 `summary`，空值被拒（错误信息要求说明"谁批准的"）；没有批准就调用 `approveRelease` 会被状态机拒在 `AWAITING_APPROVAL`，且不写任何日志行。Evidence 记录的是**观测值**（HTTP 状态、content-type、实测 CORS 响应头、页面字节数），不是 `passed` 这类判定常量——有一条测试断言序列化后的 observations 不含 `"passed"`。
+  - **失败/过期 workspace 恢复**：`POST .../apply/recover` 不在原地修复，而是新建 `revision-N-recovery-M` 的干净 workspace，把旧的留在磁盘上并先报告它的 Git 状态（分支、HEAD、`status --short`、`diff --stat`）。workspace 可用时该接口返回 409，避免退化成常规重新 Apply。`apply_runs` 新增 `recovery_index` 让同一 revision 的多次运行有确定顺序（`created_at` 在同毫秒插入时做不到）。
+  - **同时修掉四个真实缺陷**：Provider 项目名未 slug 化；`FAILED.RETRY` 固定回到 `VERIFYING`（失败的发布会被送错状态，现按失败处回到 `RELEASING`）；生成产品的 CI 钉在已废弃的 actions 版本；Preview Evidence 的判定字段是硬编码常量。**注意**：第三项让所有已存在的 workspace 立即变成 `staleConfig`——这正好是恢复路径的第一个真实用例，Daemon 测试就是这么验的。
+  - **未验证边界**：真实云端生产发布一次都没跑过（生产发布始终需要用户本人批准，我不会代按）；`advanceDelivery` 的两次写入仍不在同一事务里（既有问题，本轮不扩大也不修复）。
 - **CI 首次真实运行暴露一个环境依赖测试**：`quality` 在 PR #3 上失败，原因是 `apps/daemon/test/app.test.ts` 断言 runtime catalog 含 `id: 'codex'` 的内置 Agent，而 catalog 的设计是只返回 PATH 上真实存在的内置 Agent，runner 上没装 Codex CLI 因此返回空数组。这个测试只在装了 Codex 的机器上能通过，是测试依赖本机环境而非产品缺陷；已改为断言路由真正拥有的契约（200、数组、每项 detected 且有 launchCommand、内置项 source 正确）。修复方式经过 CI 条件复现验证：用剥掉 codex 的最小 PATH 跑，先确认 `which codex` 返回 1，再确认全部 74 个测试通过，排除同类环境依赖测试潜伏。同时把 `actions/checkout` 与 `setup-node` 升到 v5（v4 target 已废弃的 Node 20，被强制跑在 Node 24 上并告警）。PR #3 → `dev`、PR #4 → `main` 均已合并，`main` 上 `quality` 为绿。随后本节文档变更经 PR #5 → `dev`、PR #6 → `main` 合并，`main` 当前为 `23d4e6c`，`quality` 仍为绿。
 - **Studio 启用产品 logo**：此前 Studio 完全没有 favicon，侧边栏用的是 lucide 通用 `Boxes` 图标，与 landing 站没有任何视觉一致性。logo 从 landing 站 `public/favicon.svg` 原样复制（保持两边字节一致），挂为 favicon 并替换侧边栏品牌位。注意：**未做浏览器肉眼验证**（本机无可用预览浏览器），仅验证了 dev server 下两个资源均 200、构建产物包含它们且 `index.html` 引用正确。
 - **市场分析补入实证注记**（`docs/market-analysis.md` 6.1）：壁垒清单此前全部是判断，真实云端首跑为其中"真实 Gate 和证据链"一项提供了数据支撑，同时说明为何结论不是移除模板生成器——模板不构成壁垒但承载新手模式，该修的是它的冻结形态。
@@ -52,7 +58,7 @@
 - Studio 已接入上述两个证据阶段：仅在对应状态显示表单，提交后自动刷新项目状态、证据包和 Final Delivery Report。
 - Studio 重新打开项目时会通过 `GET .../delivery/pr-evidence` 与 `GET .../delivery/preview-evidence` 恢复已记录证据，避免状态与展示脱节。
 - 最近验证：`npm test`、`npm run typecheck`、`npm run build` 均已通过；`npm test` 最近一次为 13 个测试文件、61 个用例全通过。Vitest 文件级测试已串行执行，因为 Agent Catalog 会探测本机 CLI，并发探测会造成同步子进程超时假失败。本轮还覆盖 GitHub token 注入、Provider cache invalidation、Cloudflare CLI URL evidence、未验证 Agent 执行阻断和 Adapter 状态展示；真实云端尝试的完整边界见上一条。
-- 当前工作分支：`feature/20260802`，开始本轮修复时与 `origin/feature/20260802` 一致；提交前应重新确认状态。
+- 当前工作分支：`feature/20260802`，位于 `6e183bc`，与 `origin/feature/20260802` 和 `origin/dev` 一致；`origin/main` 为 `41faf33`。分支状态随时会变，提交前应重新 `git fetch` 确认，不要沿用本行记录。
 
 ## 1. 项目摘要
 
@@ -82,8 +88,10 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | package.json / 代码骨架 | npm workspaces、Studio、Daemon、Blueprint、Policy、Provider Core、Provider CLI、Storage、Workflow 已实现 |
 | 真实 Provider Adapter | GitHub/Vercel/Cloudflare 真实 CLI 接入已验证；Supabase Manual 降级已验证；RealProviderRegistry 统一编排，支持 CLI 可用性自动检测和 Manual 降级；Promise.allSettled 部分失败处理 |
 | 凭证管理方案 | Phase 1 + Phase 2 已实现（详见 [凭证管理方案](docs/credential-management.md)）。凭证/元数据写入 Agent-Dev `.agent-dev` 目录，项目资源清单写入 workspace `.agent-dev`，自动生成 `.env`；Studio 凭证面板（引导模式 + 验证 + Supabase 手动配置 + 自定义 Key）已完成 |
-| Dual Preview 部署编排 | `packages/deployment-composer` 已实现：7 步幂等编排（含 Vercel SSO Protection 关闭）、精确 CORS origin、临时项目清理、Daemon Preview API 和 Studio 部署区块；证据会区分 Wrangler 实测 URL 与推导兜底 URL；仍需在具备 Provider CLI 的机器上重新跑 Composer 全链路 |
+| Dual Preview 部署编排 | `packages/deployment-composer` 已实现：7 步幂等编排（含 Vercel SSO Protection 关闭）、精确 CORS origin、临时项目清理、Daemon Preview API 和 Studio 部署区块；证据会区分 Wrangler 实测 URL 与推导兜底 URL；真实云端 7/7 步已于 2026-08-14 跑通并独立复验，剩余未验证项是 PR 关闭后的清理链路 |
 | 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、固定 Web SaaS 模板、隔离工作区 Git baseline、Feature Task 与人工 Approval、Codex Runtime dry-run/Execute/Retry、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、Local Apply Simulator、XState 状态推进（含 `LOCAL_ACCEPTED`）、PR/Preview 证据推进 API、Fake Provider Adapter、真实 Provider Adapter（GitHub/Vercel/Cloudflare）及 Studio 展示、凭证管理 UI（含验证和引导）、Dual Preview 部署编排；Agent Catalog 已支持 Key-Value 内置目录、Studio 选择、Custom Agent 弹窗和 `.agent-dev/agents.conf` 持久化、刷新检测和只读 Capability Probe 展示；内置未安装项隐藏、custom 未安装项置灰；多 Agent 真实执行 Adapter、Supabase 真实自动接入尚未实现 |
+| 生产交付路径 | 已实现：`ReleaseComposer` 7 步编排 + `release_runs` 日志 + Daemon `release/plan|request|approve|retry` + Studio 发布区块。两道人工闸门（请求、具名批准）由状态机与 Schema 强制，Evidence 记录观测值而非判定常量。**真实云端发布尚未执行过**，生产批准始终由用户本人给出 |
+| 失败 workspace 恢复 | 已实现：`POST .../apply/recover` 新建干净 workspace、保留旧的并报告其 Git 状态；`apply_runs.recovery_index` 保证顺序确定。已用被人为改坏的 workspace 在 Daemon 测试中验证；尚未在一个真实被 Codex 破坏的 workspace 上跑过 |
 | 测试、构建和部署 | 本地单元测试与 Studio build 已通过；真实云端部署已通过 GitHub 仓库创建 + Vercel 部署 + Cloudflare Pages 部署验证 |
 
 不要把文档中的设计描述为已实现能力。
@@ -119,7 +127,7 @@ Cloudflare 和 Vercel 必须同时存在，分别承担页面与 API 托管，�
 
 ### 文件边界
 
-所有 Agent-Dev 产物只写入当前 `agent-dev`。同级的 `bayjf`、`word-picker`、`word-base`、`soft-desk`、`pr-helper`、`tab-manager` 仅可只读参考，除非用户明确授权具体修改。
+所有 Agent-Dev 产物只写入当前 `agent-dev`。同级的 `bayjf`、`word-picker`、`word-base`、`soft-desk`、`pr-helper`、`tab-manager`、`agent-dev-landing` 仅可只读参考，除非用户明确授权具体修改。
 
 ## 4. 关键架构决定
 
@@ -177,11 +185,11 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 4. **Secret Boundary**：✅ 已通过（Provider CLI/OAuth、系统 Keychain、GitHub Secrets 最小复制路径，macOS）；
 5. **Workflow Resume**：✅ 已通过（SQLite 持久化后从暂停 Gate 或失败 Step 恢复）。
 
-Codex Runtime 已确认本机 `codex-cli 0.142.3` 提供非交互执行、JSONL 事件、最终输出 Schema、sandbox、超时终止和 resume 命令入口。2026-08-07 的只读探测已通过（exit 0，完整 `thread.started` → `turn.completed` 事件链），2026-08-11 已用一次真实功能任务验证写入与 Quality Gate。注意：早期 2026-08-06 的尝试曾因受限环境禁止 Codex 写入 `~/.codex/state_5.sqlite` 而在模型调用前停止，该记录已被后续验证取代；仍不要通过 Agent-Dev 绕过该状态目录边界。剩余未验证项为失败 workspace 恢复、真实 Codex 会话 resume 和可控取消。详见 [Codex Runtime Spike](docs/spikes/codex-runtime.md)。
+Codex Runtime 已确认本机 `codex-cli 0.142.3` 提供非交互执行、JSONL 事件、最终输出 Schema、sandbox、超时终止和 resume 命令入口。2026-08-07 的只读探测已通过（exit 0，完整 `thread.started` → `turn.completed` 事件链），2026-08-11 已用一次真实功能任务验证写入与 Quality Gate。注意：早期 2026-08-06 的尝试曾因受限环境禁止 Codex 写入 `~/.codex/state_5.sqlite` 而在模型调用前停止，该记录已被后续验证取代；仍不要通过 Agent-Dev 绕过该状态目录边界。失败 workspace 恢复已实现为 `POST .../apply/recover`（新建干净 workspace，旧的保留待查），并在 Daemon 测试中用被改坏的 workspace 验证过；尚未在一个真实被 Codex 破坏的 workspace 上跑过。剩余未验证项为真实 Codex 会话 resume 和可控取消。详见 [Codex Runtime Spike](docs/spikes/codex-runtime.md)。
 
 Workflow Resume 与 macOS Secret Boundary 已通过真实本地 Probe。Dual Preview 已通过真实云端验证：Vercel API 部署、Cloudflare Pages 部署、跨域通信和 API URL 注入均取得真实 Evidence。Supabase Auth 已确认采用 Manual 降级路径（路径 C），由用户手动完成项目创建和凭证管理，RealProviderRegistry 已实现自动降级为 ManualProviderAdapter。完整状态见 [Phase 0 技术 Spike](docs/spikes/README.md)。
 
-Dual Preview 的部署编排已实现为 `packages/deployment-composer`（精确 CORS origin、临时项目清理、Vercel SSO Protection 关闭和签名验证的 PR 关闭清理已包含）。下一动作是在可访问 Vercel Deployment Domain 的网络用真实云端跑通 Composer 与清理链路。Supabase 遵循用户决策保持 Manual 降级（不做自动化，仅引导用户手动操作）；Supabase Auth Redirect URL 更新仍为手动步骤。
+Dual Preview 的部署编排已实现为 `packages/deployment-composer`（精确 CORS origin、临时项目清理、Vercel SSO Protection 关闭和签名验证的 PR 关闭清理已包含）。下一动作是真实验证 PR 关闭后的清理链路（Composer 主链路已于 2026-08-14 在真实云端 7/7 通过，清理仍只有本地签名与事件测试覆盖）。Supabase 遵循用户决策保持 Manual 降级（不做自动化，仅引导用户手动操作）；Supabase Auth Redirect URL 更新仍为手动步骤。
 
 OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`，此后仍未能访问。当前使用的 CLI 参数集来自本机 `codex-cli 0.142.3` 的实测（见 Codex Runtime Spike），不得基于未核实记忆扩展或修改；升级 CLI 版本后需重新实测。
 
@@ -193,7 +201,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 4. ✅ ~~为 Catalog 增加只读 Capability Probe~~：Daemon API 已提供探测结果，Studio 选择 Agent 后显示非交互、workspace-write 和 Adapter 状态；仍需在各 Agent 实际安装环境逐个验证 Adapter；
 5. ✅ ~~用一次必然产生 Git diff 的真实功能任务验证 Runtime 写入和 Quality Gate~~：已于 2026-08-11 完成；Human Acceptance 仍需由用户明确确认；
 6. ✅ ~~将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联~~：已于 2026-08-10 完成；本地批准进入 `LOCAL_ACCEPTED`，不代表生产交付；
-7. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。
+7. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。**两个前置阻塞已解除**：生产交付路径（`ReleaseComposer` + `release_runs` + `release/*` 路由 + Studio 发布区块）与失败 workspace 恢复（`POST .../apply/recover`）均已实现并有本地测试覆盖。开始前需注意：CI actions 版本升级已让所有既存 workspace 变成 `staleConfig`，因此每个旧项目都要先走一次恢复；生产发布这一步必须由用户本人批准，不能由 Agent 代按。
 
 ## 9. 用户决策
 

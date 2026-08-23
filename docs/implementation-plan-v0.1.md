@@ -208,6 +208,8 @@ quality
 - 交付报告；
 - Drift 检测入口。
 
+已实现部分：生产 Gate 为两道人工闸门（`release/request` 与带具名批准的 `release/approve`），发布日志在 `release_runs` 表，编排见 `ReleaseComposer`。生产 Evidence 记录观测值（HTTP 状态、content-type、实测 CORS 响应头、页面字节数）而非 `passed` 这类判定常量。失败/过期 workspace 的恢复入口为 `POST .../apply/recover`：新建干净 workspace，旧的保留在磁盘并先报告其 Git 状态。整条生产链路尚未对真实 Provider 执行过。
+
 完成定义：
 
 - 每个完成的验收标准都有 Evidence；
@@ -267,8 +269,8 @@ OpenAI 官方 Codex 文档核对在 2026-08-02 返回 `403`；实现阶段不能
 - 每个产品至少交付一个真实功能；
 - Cloudflare Pages 页面与 Vercel API 联合 Preview 可用；
 - Supabase Auth、CORS 和环境变量通过验证；
-- 至少一次真实失败从失败步骤恢复；
-- production 始终保留人工批准；
+- 至少一次真实失败从失败步骤恢复（恢复入口已实现：失败/过期 workspace 走 `apply/recover`，失败的发布走 `release/retry` 回到 `RELEASING`；仍需一次真实失败来满足本条）；
+- production 始终保留人工批准（已由状态机与 Schema 强制：未批准的发布不写日志行、不触发任何部署）；
 - 所有完成结论有 Evidence；
 - 不提交、记录或暴露生产 Secret；
 - 用户停止使用 Agent-Dev 后，项目仍可独立构建和部署。

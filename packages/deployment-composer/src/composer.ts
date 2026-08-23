@@ -1,9 +1,10 @@
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandRunner, CliResult } from '@agent-dev/provider-cli';
 import { defaultRunner, providerCredentialEnv } from '@agent-dev/provider-cli';
+import { fetchWithRetry } from './http.js';
 import { previewProjectNames } from './names.js';
-import type { PreviewStep, PreviewStepId, PreviewComposerOptions, PreviewDeploymentResult, PreviewEvidence } from './steps.js';
+import type { PreviewStep, PreviewStepId, PreviewComposerOptions, PreviewDeploymentResult, PreviewEvidence, PreviewObservations } from './steps.js';
 
 const STEP_DEFINITIONS: { id: PreviewStepId; title: string }[] = [
   { id: 'deploy-vercel-preview', title: 'Deploy Vercel API Preview with exact CORS origin' },
@@ -32,6 +33,7 @@ export class DeploymentComposer {
   private cloudflareProjectName: string | undefined;
   private vercelProjectMayExist = false;
   private cloudflareProjectMayExist = false;
+  private observations: Partial<PreviewObservations> = {};
 
   constructor(options: PreviewComposerOptions, runner?: CommandRunner) {
     this.workspacePath = options.workspacePath;
@@ -210,9 +212,9 @@ export class DeploymentComposer {
   // The body goes through a file because the request needs literal JSON `null`, which `--field` coerces to "".
   private async disableVercelDeploymentProtectionViaCli(env: Record<string, string>): Promise<void> {
     const bodyDir = join(this.workspacePath, '.agent-dev');
-    mkdirSync(bodyDir, { recursive: true });
+    await mkdir(bodyDir, { recursive: true });
     const bodyPath = join(bodyDir, 'vercel-deployment-protection.json');
-    writeFileSync(bodyPath, `${JSON.stringify({ ssoProtection: null, passwordProtection: null })}\n`, 'utf8');
+    await writeFile(bodyPath, `${JSON.stringify({ ssoProtection: null, passwordProtection: null })}\n`, 'utf8');
 
     const result = await this.runner('vercel', [
       'api',
@@ -249,14 +251,17 @@ export class DeploymentComposer {
       throw new Error(`CORS mismatch: expected ${this.corsOrigin}, got ${corsHeader ?? 'none'}`);
     }
 
-    step.detail = `API healthy, exact CORS verified for ${this.corsOrigin}`;
+    this.observations.apiHealth = { url: healthUrl, httpStatus: response.status, contentType };
+    this.observations.exactCors = { expectedOrigin: this.corsOrigin, observedHeader: corsHeader };
+
+    step.detail = `API healthy (HTTP ${response.status}), exact CORS verified for ${this.corsOrigin}`;
   }
 
   private async injectApiUrl(step: PreviewStep): Promise<void> {
     if (!this.apiBaseUrl) throw new Error('API base URL is not set.');
     const envContent = `VITE_API_BASE_URL=${this.apiBaseUrl}\n`;
     const envPath = join(this.frontendDirectory, '.env.preview');
-    writeFileSync(envPath, envContent, 'utf8');
+    await writeFile(envPath, envContent, 'utf8');
     step.detail = `Wrote VITE_API_BASE_URL to ${envPath}`;
   }
 
@@ -335,11 +340,27 @@ export class DeploymentComposer {
       throw new Error(`Joint CORS check failed: expected ${this.corsOrigin}, got ${corsHeader ?? 'none'}`);
     }
 
-    step.detail = 'Joint smoke passed: page contains API URL, CORS is exact.';
+    this.observations.pageContainsApiUrl = {
+      url: this.pagesUrl,
+      httpStatus: pageResponse.status,
+      sourceBytes: Buffer.byteLength(pageSource, 'utf8'),
+      matchedApiBaseUrl: this.apiBaseUrl,
+    };
+    this.observations.jointSmoke = {
+      apiHealthUrl: `${this.apiBaseUrl}/api/health`,
+      apiHttpStatus: apiResponse.status,
+      observedCorsHeader: corsHeader,
+    };
+
+    step.detail = `Joint smoke passed: page HTTP ${pageResponse.status} contains the API URL, API HTTP ${apiResponse.status} with exact CORS.`;
   }
 
   private async writeEvidence(step: PreviewStep): Promise<void> {
     if (!this.apiBaseUrl || !this.pagesUrl) throw new Error('Deployment URLs not set.');
+    const { apiHealth, exactCors, pageContainsApiUrl, jointSmoke } = this.observations;
+    if (!apiHealth || !exactCors || !pageContainsApiUrl || !jointSmoke) {
+      throw new Error('Preview evidence cannot be written before every verification step has produced an observation.');
+    }
 
     const evidence: PreviewEvidence = {
       projectName: this.projectName,
@@ -348,17 +369,14 @@ export class DeploymentComposer {
       pagesUrl: this.pagesUrl,
       pagesUrlSource: this.pagesUrlSource ?? 'derived-fallback',
       corsOrigin: this.corsOrigin,
-      apiHealth: 'passed',
-      exactCors: 'passed',
-      pageContainsApiUrl: 'passed',
-      jointSmoke: 'passed',
+      observations: { apiHealth, exactCors, pageContainsApiUrl, jointSmoke },
       completedAt: new Date().toISOString(),
     };
 
     const outputDir = join(this.workspacePath, '.agent-dev', 'previews');
-    mkdirSync(outputDir, { recursive: true });
+    await mkdir(outputDir, { recursive: true });
     const evidencePath = join(outputDir, `${this.projectName}-${this.previewBranch}.json`);
-    writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+    await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
     step.detail = `Evidence written to ${evidencePath}`;
   }
 
@@ -384,22 +402,4 @@ export class DeploymentComposer {
     const match = output.match(/https:\/\/[^\s"']+\.pages\.dev/);
     return match?.[0];
   }
-}
-
-async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 12): Promise<Response> {
-  let lastError: Error | undefined;
-  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
-    try {
-      const response = await fetch(url, {
-        ...options,
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (response.ok) return response;
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-    }
-    await new Promise(resolve => setTimeout(resolve, 10_000));
-  }
-  throw new Error(`Verification failed for ${new URL(url).hostname}: ${lastError?.message ?? 'unknown'}`);
 }

@@ -37,6 +37,7 @@ export type DeliveryEvent =
   | { type: 'VERIFY_COMPLETE' }
   | { type: 'PR_CREATED' }
   | { type: 'PREVIEW_AVAILABLE' }
+  | { type: 'REQUEST_RELEASE' }
   | { type: 'APPROVE_RELEASE' }
   | { type: 'RELEASE_COMPLETE' }
   | { type: 'PAUSE' }
@@ -44,6 +45,9 @@ export type DeliveryEvent =
   | { type: 'FAIL' }
   | { type: 'RETRY' };
 
+// A run has to come back to the step that was interrupted. Recording the origin on the way
+// into FAILED or PAUSED is what lets RETRY and RESUME target it instead of a fixed guess.
+// Snapshots persisted before resumeTarget existed carry no origin, so both keep a fallback.
 export const deliveryMachine = createMachine({
   types: {} as {
     context: DeliveryContext;
@@ -57,23 +61,76 @@ export const deliveryMachine = createMachine({
     DRAFT: { on: { REQUEST_INPUT: 'NEEDS_INPUT' } },
     NEEDS_INPUT: { on: { PLAN_COMPLETE: 'PLAN_READY' } },
     PLAN_READY: { on: { APPROVE_PROVISIONING: 'PROVISIONING' } },
-    PROVISIONING: { on: { BASELINE_CREATED: 'BASELINE_READY', PAUSE: 'PAUSED', FAIL: 'FAILED' } },
+    PROVISIONING: {
+      on: {
+        BASELINE_CREATED: 'BASELINE_READY',
+        PAUSE: { target: 'PAUSED', actions: assign({ resumeTarget: () => 'PROVISIONING' as const }) },
+        FAIL: { target: 'FAILED', actions: assign({ resumeTarget: () => 'PROVISIONING' as const }) },
+      },
+    },
     BASELINE_READY: { on: { START_IMPLEMENTATION: 'IMPLEMENTING' } },
-    IMPLEMENTING: { on: { IMPLEMENTATION_COMPLETE: 'VERIFYING', PAUSE: 'PAUSED', FAIL: 'FAILED' } },
-    VERIFYING: { on: { VERIFY_COMPLETE: 'LOCAL_ACCEPTED', PAUSE: 'PAUSED', FAIL: 'FAILED' } },
-    LOCAL_ACCEPTED: { on: { PR_CREATED: 'PR_OPEN', PAUSE: 'PAUSED' } },
-    PR_OPEN: { on: { PREVIEW_AVAILABLE: 'PREVIEW_READY', FAIL: 'FAILED' } },
-    PREVIEW_READY: { on: { APPROVE_RELEASE: 'AWAITING_APPROVAL' } },
-    AWAITING_APPROVAL: { on: { APPROVE_RELEASE: 'RELEASING', PAUSE: 'PAUSED' } },
-    RELEASING: { on: { RELEASE_COMPLETE: 'DELIVERED', FAIL: 'FAILED' } },
+    IMPLEMENTING: {
+      on: {
+        IMPLEMENTATION_COMPLETE: 'VERIFYING',
+        PAUSE: { target: 'PAUSED', actions: assign({ resumeTarget: () => 'IMPLEMENTING' as const }) },
+        FAIL: { target: 'FAILED', actions: assign({ resumeTarget: () => 'IMPLEMENTING' as const }) },
+      },
+    },
+    VERIFYING: {
+      on: {
+        VERIFY_COMPLETE: 'LOCAL_ACCEPTED',
+        PAUSE: { target: 'PAUSED', actions: assign({ resumeTarget: () => 'VERIFYING' as const }) },
+        FAIL: { target: 'FAILED', actions: assign({ resumeTarget: () => 'VERIFYING' as const }) },
+      },
+    },
+    LOCAL_ACCEPTED: {
+      on: {
+        PR_CREATED: 'PR_OPEN',
+        PAUSE: { target: 'PAUSED', actions: assign({ resumeTarget: () => 'LOCAL_ACCEPTED' as const }) },
+      },
+    },
+    PR_OPEN: {
+      on: {
+        PREVIEW_AVAILABLE: 'PREVIEW_READY',
+        FAIL: { target: 'FAILED', actions: assign({ resumeTarget: () => 'PR_OPEN' as const }) },
+      },
+    },
+    // Asking for a release and approving one are two distinct human acts, so they are two
+    // distinct events. Sharing one name made both gates look like a single approval.
+    PREVIEW_READY: { on: { REQUEST_RELEASE: 'AWAITING_APPROVAL' } },
+    AWAITING_APPROVAL: {
+      on: {
+        APPROVE_RELEASE: 'RELEASING',
+        PAUSE: { target: 'PAUSED', actions: assign({ resumeTarget: () => 'AWAITING_APPROVAL' as const }) },
+      },
+    },
+    RELEASING: {
+      on: {
+        RELEASE_COMPLETE: 'DELIVERED',
+        FAIL: { target: 'FAILED', actions: assign({ resumeTarget: () => 'RELEASING' as const }) },
+      },
+    },
     DELIVERED: { type: 'final' },
-    PAUSED: { on: { RESUME: [{ target: 'PROVISIONING' }] } },
+    PAUSED: {
+      on: {
+        RESUME: [
+          { target: 'IMPLEMENTING', guard: ({ context }) => context.resumeTarget === 'IMPLEMENTING' },
+          { target: 'VERIFYING', guard: ({ context }) => context.resumeTarget === 'VERIFYING' },
+          { target: 'LOCAL_ACCEPTED', guard: ({ context }) => context.resumeTarget === 'LOCAL_ACCEPTED' },
+          { target: 'AWAITING_APPROVAL', guard: ({ context }) => context.resumeTarget === 'AWAITING_APPROVAL' },
+          { target: 'PROVISIONING' },
+        ],
+      },
+    },
     FAILED: {
       on: {
-        RETRY: {
-          target: 'VERIFYING',
-          actions: assign({ retryCount: ({ context }) => context.retryCount + 1 }),
-        },
+        RETRY: [
+          { target: 'PROVISIONING', guard: ({ context }) => context.resumeTarget === 'PROVISIONING', actions: assign({ retryCount: ({ context }) => context.retryCount + 1 }) },
+          { target: 'IMPLEMENTING', guard: ({ context }) => context.resumeTarget === 'IMPLEMENTING', actions: assign({ retryCount: ({ context }) => context.retryCount + 1 }) },
+          { target: 'PR_OPEN', guard: ({ context }) => context.resumeTarget === 'PR_OPEN', actions: assign({ retryCount: ({ context }) => context.retryCount + 1 }) },
+          { target: 'RELEASING', guard: ({ context }) => context.resumeTarget === 'RELEASING', actions: assign({ retryCount: ({ context }) => context.retryCount + 1 }) },
+          { target: 'VERIFYING', actions: assign({ retryCount: ({ context }) => context.retryCount + 1 }) },
+        ],
       },
     },
   },

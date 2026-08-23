@@ -143,3 +143,22 @@ button, input, textarea { font: inherit; } button { cursor: pointer; }
 .preview-urls a { color: #286b43; font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
 .preview-urls a:hover { text-decoration: underline; }
 .preview-urls code { color: #35453a; background: #e9f0ea; padding: 2px 5px; border-radius: 3px; font-size: 10px; }
+.workspace-recovery { margin-top: 12px; padding: 10px; border: 1px solid #e6ddc9; border-radius: 4px; background: #fdfaf3; }
+.workspace-recovery p { margin: 0 0 8px; color: #6b5a33; font-size: 11px; overflow-wrap: anywhere; }
+.workspace-recovery .secondary-button { width: auto; }
+.production-release { margin-top: 14px; padding: 13px 14px; border: 1px solid #d4ddd5; border-radius: 5px; background: #fff; }
+.production-release.delivered { border-color: #b9d6c1; background: #f8fcf8; }
+.production-release code { color: #35453a; background: #e9f0ea; padding: 2px 5px; border-radius: 3px; font-size: 10px; }
+.release-steps { display: grid; gap: 8px; margin: 13px 0 0; padding: 0; list-style: none; }
+.release-steps li { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: #4d5d52; font-size: 12px; }
+.release-steps li em { color: #68746d; font-size: 10px; font-style: normal; text-transform: capitalize; }
+.release-steps li small { flex-basis: 100%; margin-left: 19px; color: #68746d; font-size: 11px; }
+.production-release > .primary-button, .production-release > .secondary-button { width: auto; margin-top: 12px; padding: 0 16px; }
+.release-approval { display: grid; gap: 8px; margin-top: 12px; }
+.release-approval label { color: #4d5d52; font-size: 12px; font-weight: 700; }
+.release-approval input, .release-approval textarea { width: 100%; box-sizing: border-box; border: 1px solid #d4ddd5; border-radius: 4px; padding: 9px 10px; color: #35453a; background: #fff; font: inherit; font-size: 12px; }
+.release-approval textarea { min-height: 70px; resize: vertical; }
+.release-approval .primary-button { width: auto; justify-self: start; padding: 0 16px; }
+.release-evidence { margin-top: 12px; }
+.release-evidence p { margin: 0; color: #4d5d52; font-size: 11px; }
+.evidence-observations { margin: 10px 0 0; padding: 10px; border: 1px solid #e2e7e2; border-radius: 4px; background: #f8faf7; color: #35453a; font-size: 10px; overflow-x: auto; }
