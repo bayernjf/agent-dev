@@ -86,6 +86,8 @@ Agent Runtime  -> 用户电脑中的 Codex
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。
 - 本地验收批准后，可通过显式 PR/Preview Evidence API 逐步推进到 `PR_OPEN` 和 `PREVIEW_READY`；接口会校验前置状态并把证据写入隔离 workspace，不能跳过生产审批。
 - Studio 会根据当前状态显示对应的 PR 或 Dual Preview 证据表单，避免用户手工调用接口或跳过交付阶段。
+- 平台自己推送并开 PR（`POST .../delivery/pull-request`），推送前校验 `origin` 与资源清单一致、HEAD 包含被验收的提交。
+- 生产发布为两道人工闸门（请求 + 具名批准），从记录仓库的生产分支 checkout 后发布，并要求该分支已带上被验收的提交；没有记录仓库或未验收时发布被阻塞并给出原因。基线、Feature Task、交付验收与生产批准都必须具名，没有默认身份。
 - 已记录的 PR/Preview 证据可通过只读 API 和 Studio 历史区恢复查看。
 - 固定模板生成合法 npm slug 包名；首次物化使用 `npm install` 建立 `package-lock.json`，提交锁文件后再由项目切换到 `npm ci`；
 - 模板基线带有根 TypeScript/Vite 配置，可执行 `npm run quality` 和 `npm run build` 作为生成工程的质量入口；
@@ -94,7 +96,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 身份发现只读取本机 CLI 已有登录状态；资源基线计划只显示阻塞项和待批准的创建意图。审批当前只是一条本地审计记录；Apply Simulator 只写入本仓库忽略的本地工作区，绝不写入 GitHub、Supabase、Vercel 或 Cloudflare。
 
-已实现本地生成物物化、Provider 计划与真实 CLI Adapter、凭证连接、模板代码生成、受控 Codex 执行、Dual Preview 编排和交付报告；真实云端 Preview、生产发布、PR/Actions 全链路仍需在具备对应 CLI 和账号授权的环境中取得 Evidence。
+已实现本地生成物物化、Provider 计划与真实 CLI Adapter、凭证连接、模板代码生成、受控 Codex 执行、Dual Preview 编排和交付报告。真实云端全链路已于 2026-08-23 跑通一次：`Receipt Test` 从 Blueprint 走到 `DELIVERED`，PR 经 GitHub Actions 质量门禁后合并，生产 API 与页面均对外可访问并在平台报告之外独立复验。这一轮暴露的两处架构缺口随后修掉：生产改为从记录仓库的生产分支 checkout 后发布（并要求该分支已带上被验收的提交），每个人工闸门都必须具名。两处修复目前只有测试覆盖，真实云端验证放在第二个项目。
 
 已经取得本地 Evidence：
 

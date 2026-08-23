@@ -11,6 +11,9 @@ const API_URL = 'https://receipt-desk-api.vercel.app';
 // What `vercel deploy --prod` reports: the immutable deployment URL, which Deployment Protection
 // guards. The public production address is the alias.
 const DEPLOYMENT_URL = 'https://receipt-desk-api-h88ixdrws-team.vercel.app';
+const REPOSITORY = 'bayernjf/receipt-desk';
+const ACCEPTED_COMMIT = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const RELEASED_COMMIT = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 function successRunner(overrides: Record<string, CliResult> = {}): CommandRunner {
   return async (command, args) => {
@@ -18,6 +21,9 @@ function successRunner(overrides: Record<string, CliResult> = {}): CommandRunner
     for (const [pattern, result] of Object.entries(overrides)) {
       if (key.includes(pattern)) return result;
     }
+    if (key.includes('git rev-parse HEAD')) return { stdout: `${RELEASED_COMMIT}\n`, stderr: '', exitCode: 0, success: true };
+    if (key.startsWith('git ') || key.includes('gh repo clone')) return { stdout: '', stderr: '', exitCode: 0, success: true };
+    if (key.includes('npm install')) return { stdout: 'installed', stderr: '', exitCode: 0, success: true };
     if (key.includes('vercel whoami')) return { stdout: 'test-user', stderr: '', exitCode: 0, success: true };
     if (key.includes('vercel project add')) return { stdout: 'Created', stderr: '', exitCode: 0, success: true };
     if (key.includes('vercel deploy')) return { stdout: JSON.stringify({ url: DEPLOYMENT_URL }), stderr: '', exitCode: 0, success: true };
@@ -39,13 +45,21 @@ function stubProductionFetch() {
   return pageSource;
 }
 
+function source(checkoutPath: string) {
+  return { repository: REPOSITORY, branch: 'main', acceptedCommit: ACCEPTED_COMMIT, checkoutPath };
+}
+
 describe('ReleaseComposer', () => {
   let tempDir: string;
+  let checkoutDir: string;
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'agent-dev-release-'));
-    await mkdir(join(tempDir, 'apps/api'), { recursive: true });
-    await mkdir(join(tempDir, 'apps/web'), { recursive: true });
+    checkoutDir = join(tempDir, 'release-checkout');
+    // The runner is stubbed, so nothing clones: stand in for what the checkout step would produce.
+    await mkdir(join(checkoutDir, '.git'), { recursive: true });
+    await mkdir(join(checkoutDir, 'apps/api'), { recursive: true });
+    await mkdir(join(checkoutDir, 'apps/web'), { recursive: true });
     vi.stubEnv('VERCEL_TOKEN', 'test-token');
   });
 
@@ -56,8 +70,10 @@ describe('ReleaseComposer', () => {
   });
 
   it('plans the ordering the architecture requires, quality gate first', () => {
-    const composer = new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT }, successRunner());
+    const composer = new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(checkoutDir) }, successRunner());
     expect(composer.plan().map(step => step.id)).toEqual([
+      'checkout-production-source',
+      'install-release-dependencies',
       'verify-release-quality',
       'deploy-api-production',
       'verify-api-production',
@@ -80,7 +96,7 @@ describe('ReleaseComposer', () => {
       return base(command, args, options);
     };
 
-    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT }, runner).execute();
+    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(checkoutDir) }, runner).execute();
     expect(result.status).toBe('completed');
     expect(calls.some(call => call.includes('vercel project add receipt-desk-api '))).toBe(true);
     expect(calls.some(call => call.includes('wrangler pages project create receipt-desk-web'))).toBe(true);
@@ -103,33 +119,94 @@ describe('ReleaseComposer', () => {
       return base(command, args, options);
     };
 
-    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT }, runner).execute();
+    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(checkoutDir) }, runner).execute();
     expect(result.status).toBe('completed');
     expect(calls.some(call => call.includes(`vercel inspect ${DEPLOYMENT_URL}`))).toBe(true);
     // Deployment Protection answers the deployment URL with an SSO redirect, so verifying it reports
     // a healthy API as broken and the frontend would be built against an address users cannot reach.
     expect(result.apiBaseUrl).toBe(API_URL);
     expect(result.observations?.apiHealth.url).toBe(`${API_URL}/api/health`);
-    expect(await readFile(join(tempDir, 'apps/web/.env.production'), 'utf8')).toBe(`VITE_API_BASE_URL=${API_URL}\n`);
+    expect(await readFile(join(checkoutDir, 'apps/web/.env.production'), 'utf8')).toBe(`VITE_API_BASE_URL=${API_URL}\n`);
   });
 
   it('fails the release when the production deployment has no alias to serve', async () => {
     stubProductionFetch();
     const runner = successRunner({ 'vercel inspect': { stdout: JSON.stringify({ url: DEPLOYMENT_URL, aliases: [] }), stderr: '', exitCode: 0, success: true } });
-    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT }, runner).execute();
+    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(checkoutDir) }, runner).execute();
     expect(result.status).toBe('failed');
     const failed = result.steps.find(step => step.status === 'failed');
     expect(failed?.id).toBe('deploy-api-production');
     expect(failed?.detail).toContain('no alias');
   });
 
+  it('fails the release when the accepted commit has not landed on the production branch', async () => {
+    stubProductionFetch();
+    const calls: string[] = [];
+    const base = successRunner({ 'merge-base --is-ancestor': { stdout: '', stderr: '', exitCode: 1, success: false } });
+    const runner: CommandRunner = async (command, args, options) => {
+      calls.push(`${command} ${args.join(' ')}`);
+      return base(command, args, options);
+    };
+
+    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(checkoutDir) }, runner).execute();
+    expect(result.status).toBe('failed');
+    const failed = result.steps.find(step => step.status === 'failed');
+    expect(failed?.id).toBe('checkout-production-source');
+    expect(failed?.detail).toContain(ACCEPTED_COMMIT);
+    expect(failed?.detail).toContain('Merge the delivery pull request');
+    // Nothing may reach production when production would not carry the accepted delivery.
+    expect(calls.some(call => call.includes('vercel deploy'))).toBe(false);
+    expect(calls.some(call => call.includes('npm run quality'))).toBe(false);
+  });
+
+  it('builds and deploys the production branch checkout, not the local workspace', async () => {
+    stubProductionFetch();
+    const calls: { command: string; cwd?: string }[] = [];
+    const base = successRunner();
+    const runner: CommandRunner = async (command, args, options) => {
+      calls.push({ command: `${command} ${args.join(' ')}`, cwd: options?.cwd });
+      return base(command, args, options);
+    };
+
+    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(checkoutDir) }, runner).execute();
+    expect(result.status).toBe('completed');
+    // Reset on every attempt, so a retry cannot ship what a previous attempt left on disk.
+    expect(calls.some(call => call.command === 'git fetch origin main' && call.cwd === checkoutDir)).toBe(true);
+    expect(calls.some(call => call.command === 'git reset --hard FETCH_HEAD' && call.cwd === checkoutDir)).toBe(true);
+    // The gate, the API deployment and the frontend build all have to read the released commit.
+    expect(calls.find(call => call.command === 'npm run quality')?.cwd).toBe(checkoutDir);
+    expect(calls.some(call => call.command.includes(`vercel deploy ${join(checkoutDir, 'apps/api')}`))).toBe(true);
+    expect(calls.find(call => call.command === 'npm run build')?.cwd).toBe(join(checkoutDir, 'apps/web'));
+    expect(calls.some(call => call.command.includes(`pages deploy ${join(checkoutDir, 'apps/web/dist')}`))).toBe(true);
+    expect(calls.every(call => call.cwd !== tempDir)).toBe(true);
+  });
+
+  it('clones the recorded repository only when the checkout does not exist yet', async () => {
+    stubProductionFetch();
+    const fresh = join(tempDir, 'not-cloned-yet');
+    const calls: string[] = [];
+    const base = successRunner();
+    const runner: CommandRunner = async (command, args, options) => {
+      calls.push(`${command} ${args.join(' ')}`);
+      return base(command, args, options);
+    };
+
+    await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(fresh) }, runner).execute();
+    expect(calls.some(call => call === `gh repo clone ${REPOSITORY} ${fresh} -- --branch main`)).toBe(true);
+
+    calls.length = 0;
+    await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(checkoutDir) }, runner).execute();
+    expect(calls.some(call => call.includes('gh repo clone'))).toBe(false);
+  });
+
   it('records observed values as release evidence rather than verdict constants', async () => {
     const pageSource = stubProductionFetch();
-    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT }, successRunner()).execute();
+    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(checkoutDir) }, successRunner()).execute();
     expect(result.status).toBe('completed');
 
     const evidence = JSON.parse(await readFile(join(tempDir, '.agent-dev/releases/receipt-desk-production.json'), 'utf8'));
     expect(evidence.observations).toEqual({
+      source: { repository: REPOSITORY, branch: 'main', commit: RELEASED_COMMIT, acceptedCommit: ACCEPTED_COMMIT },
       releaseQuality: { command: 'npm run quality', exitCode: 0 },
       apiHealth: { url: `${API_URL}/api/health`, httpStatus: 200, contentType: 'application/json; charset=utf-8', observedCorsHeader: CORS_ORIGIN },
       webPage: { url: CORS_ORIGIN, httpStatus: 200, sourceBytes: Buffer.byteLength(pageSource, 'utf8'), matchedApiBaseUrl: API_URL },
@@ -148,11 +225,12 @@ describe('ReleaseComposer', () => {
       return base(command, args, options);
     };
 
-    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT }, runner).execute();
+    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(checkoutDir) }, runner).execute();
     expect(result.status).toBe('failed');
-    expect(result.steps[0]).toMatchObject({ id: 'verify-release-quality', status: 'failed' });
-    expect(result.steps[0].detail).toContain('tsc failed');
-    expect(result.steps.slice(1).every(step => step.status === 'pending')).toBe(true);
+    const gate = result.steps.find(step => step.id === 'verify-release-quality');
+    expect(gate).toMatchObject({ status: 'failed' });
+    expect(gate?.detail).toContain('tsc failed');
+    expect(result.steps.slice(result.steps.indexOf(gate!) + 1).every(step => step.status === 'pending')).toBe(true);
     expect(calls.some(call => call.includes('vercel deploy'))).toBe(false);
     expect(result.observations).toBeUndefined();
     await expect(readFile(join(tempDir, '.agent-dev/releases/receipt-desk-production.json'), 'utf8')).rejects.toThrow();
@@ -164,7 +242,7 @@ describe('ReleaseComposer', () => {
       headers: { 'content-type': 'application/json', 'access-control-allow-origin': 'https://receipt-desk-web-feature-x.pages.dev' },
     })));
 
-    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT }, successRunner()).execute();
+    const result = await new ReleaseComposer({ workspacePath: tempDir, projectName: PROJECT, source: source(checkoutDir) }, successRunner()).execute();
     expect(result.status).toBe('failed');
     const failed = result.steps.find(step => step.status === 'failed');
     expect(failed?.id).toBe('verify-api-production');
