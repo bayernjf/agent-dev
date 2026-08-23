@@ -9,7 +9,7 @@ import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
-import { RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
+import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
 import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin } from '@agent-dev/deployment-composer';
 import type { CleanupResult, PreviewDeploymentResult, ReleaseResult } from '@agent-dev/deployment-composer';
 import { DaemonEventBus } from './events.js';
@@ -524,6 +524,25 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       return context.json({ evidence, project: store.getProject(project.id) });
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to record PR evidence.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/delivery/pull-request', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const parsed = z.object({ confirmation: z.literal('OPEN_PULL_REQUEST') }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Opening a pull request requires confirmation OPEN_PULL_REQUEST.' }, 400);
+    const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
+    if (!run || run.status !== 'completed') return context.json({ error: 'A completed Local Apply run is required before opening a pull request.' }, 409);
+    const repository = loadProjectResources(run.workspacePath)?.providers.github?.repository;
+    if (typeof repository !== 'string' || !repository) return context.json({ error: 'Apply the real GitHub provider before opening a pull request: no repository is recorded for this workspace.' }, 409);
+    try {
+      const adapter = new GitHubAdapter(project.blueprint.spec.sourceControl.owner, projectSlug(project.name), run.workspacePath);
+      const evidence = await store.publishPullRequest(project.id, project.blueprint.metadata.revision, request => adapter.publishPullRequest({ ...request, expectedRepository: repository }));
+      events.emit({ type: 'delivery.pr_opened', projectId: project.id, projectName: project.name, occurredAt: evidence.recordedAt });
+      return context.json({ evidence, project: store.getProject(project.id) });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to open a pull request.' }, 409);
     }
   });
 

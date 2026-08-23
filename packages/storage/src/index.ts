@@ -206,6 +206,8 @@ export type GitEvidence = {
   diffStat: string;
 };
 
+export type PullRequestPublisher = (request: { branch: string; base: string; title: string; body: string }) => Promise<{ url: string; head: string }>;
+
 export type PrEvidence = {
   url: string;
   checks: string[];
@@ -922,6 +924,42 @@ export class AgentDevStore {
     // PR, Preview, and production release remain provider-evidenced steps.
     await this.advanceDelivery(projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }, { type: 'VERIFY_COMPLETE' }]);
     return record;
+  }
+
+  // The platform pushes the accepted commit and opens the pull request itself. Recording a URL a
+  // human typed cannot show that the pull request carries the commit that was accepted.
+  async publishPullRequest(projectId: string, blueprintRevision: number, publisher: PullRequestPublisher): Promise<PrEvidence> {
+    const project = this.getProject(projectId);
+    if (!project || project.blueprint.metadata.revision !== blueprintRevision) throw new Error('A pull request must target the current Blueprint revision.');
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task) throw new Error('A Feature Task is required before opening a pull request.');
+    const acceptance = await this.getAcceptance(projectId, blueprintRevision);
+    if (!acceptance || acceptance.status !== 'approved') throw new Error('Approve the delivery before opening a pull request.');
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before opening a pull request.');
+    const git = await this.getGitEvidence(projectId, blueprintRevision);
+    // A dirty tree means work exists that the pull request would not contain.
+    if (git.status) throw new Error(`Commit or discard the workspace changes before opening a pull request: ${git.status.split('\n').join(', ')}.`);
+    const carriesAccepted = await execFileAsync('git', ['merge-base', '--is-ancestor', acceptance.gitEvidence.head, git.head], { cwd: run.workspacePath }).then(() => true).catch(() => false);
+    // Not equality: the platform commits its own reports after acceptance, so HEAD moves on.
+    if (!carriesAccepted) throw new Error(`The accepted commit ${acceptance.gitEvidence.head} is not part of ${git.branch}, so the pull request would not carry the accepted delivery.`);
+
+    const quality = await this.getQualityGateResult(projectId, blueprintRevision);
+    const published = await publisher({
+      branch: git.branch,
+      base: project.blueprint.spec.sourceControl.integrationBranch,
+      title: task.title,
+      body: `${acceptance.summary}\n\nAccepted commit: ${acceptance.gitEvidence.head}\nQuality gate: ${quality?.status ?? 'missing'} (${quality?.command ?? 'not run'})\n\nEvidence lives in ACCEPTANCE_REPORT.md, QUALITY_REPORT.md and RUNTIME_RUN_REPORT.md on this branch.`,
+    });
+    return this.recordPrEvidence(projectId, blueprintRevision, {
+      url: published.url,
+      checks: [
+        `Local quality gate: ${quality?.status ?? 'missing'} (${quality?.command ?? 'not run'}, exit ${quality?.exitCode ?? 'none'})`,
+        `Human acceptance: approved by ${acceptance.approvedBy ?? 'unknown'}`,
+        `Pushed commit: ${published.head}`,
+        'GitHub Actions: pending at pull request creation',
+      ],
+    });
   }
 
   async recordPrEvidence(projectId: string, blueprintRevision: number, evidence: Omit<PrEvidence, 'recordedAt'>): Promise<PrEvidence> {
