@@ -139,26 +139,37 @@ export const runCodexProcess: CodexProcessRunner = (command, arguments_, options
   const child: ChildProcess = spawn(command, arguments_, { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   let timedOut = false;
+  let exited = false;
   const timeout = setTimeout(() => {
     timedOut = true;
     child.kill('SIGTERM');
+    // `child.killed` only records that a signal was delivered, so it is already true here and can
+    // never report whether the process actually died. An agent that keeps working through SIGTERM
+    // has to be escalated against observed exit, otherwise the timeout bounds nothing.
     setTimeout(() => {
-      if (!child.killed) child.kill('SIGKILL');
+      if (!exited) child.kill('SIGKILL');
     }, 5_000).unref();
   }, options.timeoutMs);
   child.stdout?.on('data', chunk => { output = boundedAppend(output, String(chunk)); });
   child.stderr?.on('data', chunk => { output = boundedAppend(output, String(chunk)); });
   child.once('error', error => {
+    exited = true;
     clearTimeout(timeout);
     resolve({ exitCode: null, signal: null, timedOut, output: boundedAppend(output, error.message), startedAt, completedAt: new Date().toISOString() });
   });
   child.once('close', (exitCode, signal) => {
+    exited = true;
     clearTimeout(timeout);
     resolve({ exitCode, signal, timedOut, output, startedAt, completedAt: new Date().toISOString() });
   });
 });
 
-export async function executeCodexPlan(plan: CodexExecutionPlan, runner: CodexProcessRunner = runCodexProcess, timeoutMs = 180_000) {
+// A real feature task spends most of its wall clock inside model turns, not inside the shell. The
+// first live run on this machine was still reading files at 5m22s, so a three-minute bound cut off
+// work that was progressing normally and reported it as a failure.
+const DEFAULT_EXECUTION_TIMEOUT_MS = 900_000;
+
+export async function executeCodexPlan(plan: CodexExecutionPlan, runner: CodexProcessRunner = runCodexProcess, timeoutMs = DEFAULT_EXECUTION_TIMEOUT_MS) {
   if (!plan.executionAllowed || plan.mode !== 'execute' || plan.noExternalChanges) {
     throw new Error('Agent execution requires an explicitly approved execute plan.');
   }
