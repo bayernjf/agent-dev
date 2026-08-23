@@ -208,7 +208,7 @@ quality
 - 交付报告；
 - Drift 检测入口。
 
-已实现部分：生产 Gate 为两道人工闸门（`release/request` 与带具名批准的 `release/approve`），发布日志在 `release_runs` 表，编排见 `ReleaseComposer`。生产 Evidence 记录观测值（HTTP 状态、content-type、实测 CORS 响应头、页面字节数）而非 `passed` 这类判定常量。失败/过期 workspace 的恢复入口为 `POST .../apply/recover`：新建干净 workspace，旧的保留在磁盘并先报告其 Git 状态。整条生产链路尚未对真实 Provider 执行过。
+已实现部分：生产 Gate 为两道人工闸门（`release/request` 与带具名批准的 `release/approve`），发布日志在 `release_runs` 表，编排见 `ReleaseComposer`。生产 Evidence 记录观测值（HTTP 状态、content-type、实测 CORS 响应头、页面字节数）而非 `passed` 这类判定常量，并记录发布来源 `repository/branch/commit/acceptedCommit`。发布不在实现功能的 workspace 里执行：`ReleaseComposer` 先 checkout 记录仓库的生产分支、校验被人工验收的提交是该分支 HEAD 的祖先，再在该 checkout 上装依赖、跑质量门禁、构建和部署；没有记录仓库或未验收时 `release/plan` 给出原因、`release/request` 返回 409。基线、Feature Task、交付验收与生产批准四处闸门都必须具名，没有默认身份。失败/过期 workspace 的恢复入口为 `POST .../apply/recover`：新建干净 workspace，旧的保留在磁盘并先报告其 Git 状态。整条生产链路已于 2026-08-23 对真实 Provider 执行过一次（`Receipt Test` → `DELIVERED`），但当时走的是修复前的「从 workspace 发布」路径；从生产分支发布这条路径尚未在真实云端跑过。
 
 完成定义：
 

@@ -202,6 +202,7 @@ https://api.example.com                       -> Vercel
 - feature PR 使用临时联合 Preview；
 - `dev` 使用稳定的页面/API 环境进行集成验收；
 - `main` 对应 production，并要求人工批准；
+- production 从生产分支的一份独立 checkout 发布，且该分支必须已带上被人工验收的提交；不允许从实现功能的本地 workspace 直接发布，否则线上版本无法从生产分支复现；
 - production 发布 API 在前、页面在后；
 - 页面发布完成后运行完整生产冒烟测试。
 
