@@ -63,6 +63,27 @@ describe('GitHubAdapter', () => {
     expect(calls).toContain('gh repo edit bayernjf/test-project --default-branch main');
   });
 
+  it('backfills the declared branches on a repository that already exists', async () => {
+    const calls: string[] = [];
+    const runner: CommandRunner = async (command, args) => {
+      const key = `${command} ${args.join(' ')}`;
+      calls.push(key);
+      if (key.includes('gh api user')) return { stdout: 'bayernjf', stderr: '', exitCode: 0, success: true };
+      if (key.includes('gh repo view')) return { stdout: JSON.stringify({ name: 'test-project', owner: { login: 'bayernjf' }, isPrivate: true }), stderr: '', exitCode: 0, success: true };
+      if (key.includes('git rev-list')) return { stdout: 'a1b2c3d\n', stderr: '', exitCode: 0, success: true };
+      return { stdout: 'ok', stderr: '', exitCode: 0, success: true };
+    };
+    const adapter = new GitHubAdapter('bayernjf', 'test-project', '/tmp/workspace', runner, { integrationBranch: 'dev', productionBranch: 'main' });
+    const plan = await adapter.plan(resources);
+    expect(plan.resources[0].action).toBe('noop');
+    await adapter.apply(plan, approval);
+
+    // A repository provisioned before the platform declared these branches would otherwise never
+    // gain them, and its first pull request would have no base.
+    expect(calls).not.toContain('gh repo create bayernjf/test-project --private --source /tmp/workspace --push');
+    expect(calls).toContain('gh api repos/bayernjf/test-project/git/refs -f ref=refs/heads/dev -f sha=a1b2c3d');
+  });
+
   it('pushes the branch and opens a pull request', async () => {
     const calls: string[] = [];
     const runner: CommandRunner = async (command, args) => {
