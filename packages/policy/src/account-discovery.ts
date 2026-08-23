@@ -23,23 +23,43 @@ type DiscoveryDefinition = {
   title: string;
   command?: string;
   arguments?: string[];
+  // Each CLI states the account in its own shape, so each one gets its own reader. A shared
+  // "first useful line" heuristic reported a version banner or a wrapper hint as the account name.
+  identify?: (stdout: string) => string | null;
 };
 
+function lines(value: string) {
+  return value.split('\n').map(line => line.trim()).filter(Boolean);
+}
+
+function githubAccount(stdout: string) {
+  return /\baccount (\S+)/.exec(stdout)?.[1] ?? null;
+}
+
+function vercelAccount(stdout: string) {
+  // `vercel whoami` prints only the account on stdout; the banner goes to stderr.
+  return lines(stdout)[0] ?? null;
+}
+
+function cloudflareAccount(stdout: string) {
+  const row = lines(stdout).find(line => line.startsWith('│') && !line.includes('Account Name'));
+  const name = row?.split('│').map(cell => cell.trim()).filter(Boolean)[0];
+  if (name) return name;
+  return /associated with the email ([^\s.]+)/.exec(stdout)?.[1] ?? null;
+}
+
 const definitions: DiscoveryDefinition[] = [
-  { id: 'github', title: 'GitHub', command: 'gh', arguments: ['auth', 'status', '--active'] },
-  { id: 'vercel', title: 'Vercel', command: 'vercel', arguments: ['whoami'] },
-  { id: 'cloudflare', title: 'Cloudflare', command: 'wrangler', arguments: ['whoami'] },
+  { id: 'github', title: 'GitHub', command: 'gh', arguments: ['auth', 'status', '--active'], identify: githubAccount },
+  { id: 'vercel', title: 'Vercel', command: 'vercel', arguments: ['whoami'], identify: vercelAccount },
+  { id: 'cloudflare', title: 'Cloudflare', command: 'wrangler', arguments: ['whoami'], identify: cloudflareAccount },
   { id: 'supabase', title: 'Supabase' },
 ];
 
-function firstUsefulLine(value: string) {
-  return value.split('\n').map(line => line.trim()).find(line => line && !line.startsWith('✓')) ?? null;
-}
-
 function describe(definition: DiscoveryDefinition, result: CommandResult): AccountDiscovery {
+  const { identify: _identify, ...shape } = definition;
   if (result.error?.includes('ENOENT')) {
     return {
-      ...definition,
+      ...shape,
       status: 'missing',
       identity: null,
       detail: `${definition.command} is not installed on this computer.`,
@@ -48,16 +68,16 @@ function describe(definition: DiscoveryDefinition, result: CommandResult): Accou
   }
   if (result.exitCode === 0) {
     return {
-      ...definition,
+      ...shape,
       status: 'authenticated',
-      identity: firstUsefulLine(result.output),
+      identity: definition.identify?.(result.stdout ?? result.output) ?? null,
       detail: 'Local CLI authentication was confirmed. No account resources were listed or modified.',
       nextAction: 'Choose the target account or organization in the Blueprint, then save a new revision.',
     };
   }
   if (result.exitCode === 1 || result.exitCode === null) {
     return {
-      ...definition,
+      ...shape,
       status: 'unauthorized',
       identity: null,
       detail: 'The local CLI is available but has no usable active session.',
@@ -65,7 +85,7 @@ function describe(definition: DiscoveryDefinition, result: CommandResult): Accou
     };
   }
   return {
-    ...definition,
+    ...shape,
     status: 'error',
     identity: null,
     detail: 'The local CLI could not complete a safe identity check.',

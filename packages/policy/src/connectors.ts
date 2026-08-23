@@ -6,6 +6,11 @@ export type ConnectorStatus = 'available' | 'missing' | 'error';
 export type CommandResult = {
   exitCode: number | null;
   output: string;
+  // Merged output cannot be parsed for an account identity: CLIs print version banners, update
+  // notices and wrapper hints on stderr, so whichever line arrives first is usually not the answer.
+  // Runners that can separate the streams should report them here.
+  stdout?: string;
+  stderr?: string;
   error?: string;
 };
 
@@ -39,14 +44,18 @@ const definitions: Array<Pick<ConnectorPreflight, 'id' | 'title' | 'command'>> =
 export const runLocalCommand: CommandRunner = (command, arguments_) => new Promise(resolve => {
   const child = spawn(command, arguments_, { stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
-  child.stdout.on('data', chunk => { output += String(chunk); });
-  child.stderr.on('data', chunk => { output += String(chunk); });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', chunk => { output += String(chunk); stdout += String(chunk); });
+  child.stderr.on('data', chunk => { output += String(chunk); stderr += String(chunk); });
   child.on('error', error => resolve({ exitCode: null, output: '', error: error.message }));
-  child.on('close', exitCode => resolve({ exitCode, output: output.trim() }));
+  child.on('close', exitCode => resolve({ exitCode, output: output.trim(), stdout, stderr }));
 });
 
-function firstLine(value: string) {
-  return value.split('\n').map(line => line.trim()).find(Boolean) ?? null;
+function firstLine(result: CommandResult) {
+  // stdout when the runner separated the streams: a wrapper hint or update notice on stderr can
+  // otherwise arrive first and be reported as the version.
+  return (result.stdout ?? result.output).split('\n').map(line => line.trim()).find(Boolean) ?? null;
 }
 
 function describeResult(definition: (typeof definitions)[number], result: CommandResult): ConnectorPreflight {
@@ -63,7 +72,7 @@ function describeResult(definition: (typeof definitions)[number], result: Comman
     return {
       ...definition,
       status: 'available',
-      version: firstLine(result.output),
+      version: firstLine(result),
       detail: 'Local command detected. Account authorization has not been checked.',
       nextAction: `When ready, authorize ${definition.title} for account discovery.`,
     };
@@ -71,7 +80,7 @@ function describeResult(definition: (typeof definitions)[number], result: Comman
   return {
     ...definition,
     status: 'error',
-    version: firstLine(result.output),
+    version: firstLine(result),
     detail: `Unable to verify ${definition.command} locally without further action.`,
     nextAction: `Repair or reinstall ${definition.command}, then rerun the local preflight.`,
   };
