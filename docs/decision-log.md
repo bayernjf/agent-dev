@@ -75,10 +75,11 @@
 - 生产发布的人工闸门：请求与具名批准由状态机和 Schema 强制，未批准的发布不会写下任何日志行（有测试覆盖）；
 - **真实云端的生产发布与一次完整周期**：2026-08-23 `Receipt Test` 从 Blueprint 走到 `DELIVERED`，全程真实 Provider。PR #1（`feature/agent-dev/revision-5 → dev`）经 GitHub Actions `quality` 通过后合并，生产 API `https://receipt-test-api.vercel.app`、页面 `https://receipt-test-web.pages.dev`，批准人 `feng`。已在平台报告之外独立复验：API 返回 `200 application/json`，对合法 Origin 回精确 CORS 头、对 `https://evil.example.com` 一个 CORS 头都不返回；线上 JS bundle 含本次功能的中文串，证明上线的是功能而非脚手架。这一轮暴露并修掉 6 个"单元测试全绿但真实链路必然失败"的缺陷（最严重的两个：Agent 写的代码从未被提交，所以人工验收的功能根本不会上线；`git add -A` 会把带真实凭据的 `.env` 提交进产品仓库），细节见 [交接报告](../handoff.md) 最近进度首条。
 
+- **生产改为从生产分支发布**：2026-08-23 修复。`ReleaseComposer` 现在 clone/fetch/reset 记录仓库的生产分支，校验人工验收的 commit 是该分支 HEAD 的祖先，再在该 checkout 上跑质量门禁、构建与部署，Evidence 记下 `repository/branch/commit/acceptedCommit`，因此线上版本可从生产分支复现；未记录仓库或未验收会以"发布被阻塞"的原因返回，而不是静默发布 workspace。目前有测试覆盖，尚未在真实云端跑过一遍；
+- **每个人工闸门都要求具名**：2026-08-23 修复。基线、Feature Task 与交付验收不再回落到 `local-user`，approver 由 API 强制、由 Studio 在各闸门收集，与生产批准口径一致。
+
 仍待验证 / 已知缺口：
 
-- **生产是从本地 Apply workspace 发布的，不是从 `main`**：`ReleaseComposer` 从不 checkout 生产分支，也不检查 PR 是否已合并。这与 [技术架构](technical-architecture-v0.1.md) 第 10 节「`feature/* -> dev -> main`，`main` 即生产」矛盾，也违背宪法的"可验证/可恢复"——生产上跑的代码可能从未落到 `main`，无法从生产分支复现线上版本。项目 1 按用户决定先合 PR 进 `dev` 再发布来规避，缺口待修；
-- **Studio 的交付验收把 `approvedBy` 写死为 `local-user`**，而生产批准要求具名并已落到 `PRODUCTION_EVIDENCE.md`。同一条链路上两处身份口径不一致，验收侧的"谁批准的"实际上没有答案；
 - Codex 取消能力与真实会话 resume；
 - PR 关闭后的临时项目清理在真实云端的链路（部署链路已验证，清理链路仍只有本地测试覆盖）；
 - Supabase Auth Redirect URL 同步仍为手动步骤，未自动化；
@@ -123,6 +124,6 @@
 4. ✅ 确定 Provider 授权和 Supabase 环境隔离方案；
 5. ✅ 创建工程骨架（`apps/` 三个应用 + `packages/` 八个包）；
 6. ✅ 跑通第一个真实端到端 Delivery Run：2026-08-23 `Receipt Test` 从 Blueprint 到生产上线全部走真实 Provider（Preview 段已于 2026-08-14 通过，生产段于 2026-08-23 通过）；
-7. 完成剩余两个真实项目的完整周期验证（1/3，见 [交接报告](../handoff.md) 第 8 节第 7 项）；
-8. 决定是否在项目 2 之前修掉两处已确认缺口：生产从本地 workspace 发布而非 `main`、验收侧 `approvedBy` 写死为 `local-user`；
+7. ✅ 修掉项目 1 暴露的两处架构缺口：生产改为从生产分支发布、每个人工闸门都要求具名（2026-08-23）；
+8. 完成剩余两个真实项目的完整周期验证（1/3，见 [交接报告](../handoff.md) 第 8 节第 7 项）；
 9. 确认 Analytics 默认、Ruleset 自动化与 Blueprint 开源时机三项待决事项。
