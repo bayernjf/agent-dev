@@ -44,7 +44,7 @@ const BUILT_IN_CAPABILITIES: Record<string, AgentCapability[]> = {
   aider: ['workspace-write', 'version-detection', 'non-interactive'],
   opencode: ['workspace-write', 'version-detection', 'non-interactive'],
   openclaw: ['workspace-write', 'version-detection', 'non-interactive'],
-  codebuddy: ['read-only', 'version-detection'],
+  codebuddy: ['workspace-write', 'version-detection', 'non-interactive'],
   pi: ['read-only', 'version-detection'],
   hermes: ['read-only', 'version-detection'],
 };
@@ -53,8 +53,10 @@ const NON_INTERACTIVE_FLAGS: Record<string, string[]> = {
   codex: ['exec', '--json'],
   'claude-code': ['-p', '--print'],
   aider: ['--message', '--yes'],
-  opencode: ['-p', '--print'],
+  // OpenCode 2.0 dropped `-p --print`; non-interactive execution goes through the `api` subcommand.
+  opencode: ['api'],
   openclaw: ['exec', '--json'],
+  codebuddy: ['-p', '--print'],
 };
 
 type DetectionResult = { detected: boolean; version: string | null; detail: string };
