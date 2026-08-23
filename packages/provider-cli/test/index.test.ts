@@ -42,6 +42,27 @@ describe('GitHubAdapter', () => {
     expect(plan.noExternalChanges).toBe(true);
   });
 
+  it('creates the declared integration and production branches so a pull request has a base', async () => {
+    const calls: string[] = [];
+    const runner: CommandRunner = async (command, args) => {
+      const key = `${command} ${args.join(' ')}`;
+      calls.push(key);
+      if (key.includes('gh api user')) return { stdout: 'bayernjf', stderr: '', exitCode: 0, success: true };
+      if (key.includes('git rev-list')) return { stdout: 'a1b2c3d\n', stderr: '', exitCode: 0, success: true };
+      if (key.includes('gh repo create') || key.includes('gh api repos/') || key.includes('gh repo edit')) return { stdout: 'ok', stderr: '', exitCode: 0, success: true };
+      if (key.includes('gh repo view')) return { stdout: '', stderr: 'not found', exitCode: 1, success: false };
+      return { stdout: '', stderr: '', exitCode: 1, success: false };
+    };
+    const adapter = new GitHubAdapter('bayernjf', 'test-project', '/tmp/workspace', runner, { integrationBranch: 'dev', productionBranch: 'main' });
+    await adapter.apply(await adapter.plan(resources), approval);
+
+    // The feature branch is the only ref `repo create --push` publishes, and both bases have to
+    // start at the baseline commit rather than at the feature under review.
+    expect(calls).toContain('gh api repos/bayernjf/test-project/git/refs -f ref=refs/heads/dev -f sha=a1b2c3d');
+    expect(calls).toContain('gh api repos/bayernjf/test-project/git/refs -f ref=refs/heads/main -f sha=a1b2c3d');
+    expect(calls).toContain('gh repo edit bayernjf/test-project --default-branch main');
+  });
+
   it('creates repo on apply', async () => {
     let createCalled = false;
     const runner: CommandRunner = async (command, args) => {

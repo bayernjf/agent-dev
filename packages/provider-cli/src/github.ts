@@ -19,6 +19,7 @@ export class GitHubAdapter implements ProviderAdapter {
     private projectName: string,
     private workspacePath: string,
     private runner: CommandRunner = defaultRunner,
+    private branches: { integrationBranch?: string; productionBranch?: string } = {},
   ) {}
 
   private runGh(args: string[], options: Parameters<CommandRunner>[2] = {}) {
@@ -85,8 +86,29 @@ export class GitHubAdapter implements ProviderAdapter {
       const repoName = owner ? `${owner}/${this.projectName}` : this.projectName;
       const result = await this.runGh(['repo', 'create', repoName, '--private', '--source', this.workspacePath, '--push'], { cwd: this.workspacePath });
       if (!result.success) throw new Error(`GitHub repository creation failed: ${result.stderr || result.stdout}`);
+      await this.createDeclaredBranches(repoName);
     }
     return { providerId: this.providerId, idempotencyKey: plan.idempotencyKey, applied: true, state: await this.discover() };
+  }
+
+  // `repo create --push` publishes the feature branch alone, so the repository has no base for the
+  // documented `feature/* -> dev -> main` flow and the first pull request cannot be opened at all.
+  // Both branches start at the baseline commit: the feature under review must not already be on them.
+  private async createDeclaredBranches(repoName: string) {
+    const declared = [this.branches.productionBranch, this.branches.integrationBranch].filter((branch): branch is string => Boolean(branch));
+    if (!declared.length) return;
+    const baseline = await this.runner('git', ['rev-list', '--max-parents=0', 'HEAD'], { cwd: this.workspacePath });
+    const sha = baseline.stdout.trim().split('\n')[0];
+    if (!baseline.success || !sha) throw new Error(`Unable to resolve the baseline commit for ${repoName}: ${baseline.stderr || baseline.stdout}`);
+    for (const branch of declared) {
+      const created = await this.runGh(['api', `repos/${repoName}/git/refs`, '-f', `ref=refs/heads/${branch}`, '-f', `sha=${sha}`], { cwd: this.workspacePath });
+      if (!created.success && !`${created.stderr}${created.stdout}`.includes('Reference already exists')) {
+        throw new Error(`Unable to create branch ${branch} in ${repoName}: ${created.stderr || created.stdout}`);
+      }
+    }
+    if (!this.branches.productionBranch) return;
+    const renamed = await this.runGh(['repo', 'edit', repoName, '--default-branch', this.branches.productionBranch], { cwd: this.workspacePath });
+    if (!renamed.success) throw new Error(`Unable to set ${this.branches.productionBranch} as the default branch of ${repoName}: ${renamed.stderr || renamed.stdout}`);
   }
 
   async verify(expected: ProviderResourceSpec[]): Promise<ProviderVerification> {
