@@ -30,7 +30,7 @@ const reviseBlueprintSchema = z.object({
 const approveBaselineSchema = z.object({
   blueprintRevision: z.number().int().positive(),
   confirmation: z.literal('APPROVE_BASELINE'),
-  approvedBy: z.string().trim().min(1).max(120).default('local-user'),
+  approvedBy: z.string().trim().min(1).max(120),
 });
 
 const applyBaselineSchema = z.object({
@@ -66,7 +66,7 @@ const featureTaskSchema = z.object({
 const featureTaskApprovalSchema = z.object({
   blueprintRevision: z.number().int().positive(),
   confirmation: z.literal('APPROVE_FEATURE_TASK'),
-  approvedBy: z.string().trim().min(1).max(120).default('local-user'),
+  approvedBy: z.string().trim().min(1).max(120),
 });
 
 const acceptanceSchema = z.object({
@@ -76,7 +76,7 @@ const acceptanceSchema = z.object({
 
 const acceptanceApprovalSchema = z.object({
   confirmation: z.literal('APPROVE_DELIVERY'),
-  approvedBy: z.string().trim().min(1).max(120).default('local-user'),
+  approvedBy: z.string().trim().min(1).max(120),
 });
 
 const prEvidenceSchema = z.object({
@@ -235,7 +235,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.post('/api/projects/:projectId/baseline-plan/approve', async context => {
     const projectId = context.req.param('projectId');
     const parsed = approveBaselineSchema.safeParse(await context.req.json().catch(() => null));
-    if (!parsed.success) return context.json({ error: 'Approval requires the current revision and confirmation APPROVE_BASELINE.' }, 400);
+    if (!parsed.success) return context.json({ error: 'Approval requires the current revision, confirmation APPROVE_BASELINE and the name of who approves it.' }, 400);
     const project = store.getProject(projectId);
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     try {
@@ -507,7 +507,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     const parsed = acceptanceApprovalSchema.safeParse(await context.req.json().catch(() => null));
-    if (!parsed.success) return context.json({ error: 'Delivery approval requires confirmation APPROVE_DELIVERY.' }, 400);
+    if (!parsed.success) return context.json({ error: 'Delivery approval requires confirmation APPROVE_DELIVERY and the name of who accepts the delivery.' }, 400);
     try {
       const acceptance = await store.approveAcceptance(project.id, project.blueprint.metadata.revision, parsed.data.approvedBy);
       return context.json({ acceptance });
@@ -591,7 +591,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.post('/api/projects/:projectId/feature-task/approve', async context => {
     const projectId = context.req.param('projectId');
     const parsed = featureTaskApprovalSchema.safeParse(await context.req.json().catch(() => null));
-    if (!parsed.success) return context.json({ error: 'Feature task approval requires confirmation APPROVE_FEATURE_TASK.' }, 400);
+    if (!parsed.success) return context.json({ error: 'Feature task approval requires confirmation APPROVE_FEATURE_TASK and the name of who approves it.' }, 400);
     const project = store.getProject(projectId);
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     if (project.blueprint.metadata.revision !== parsed.data.blueprintRevision) return context.json({ error: 'The feature task approval must target the current Blueprint revision.' }, 409);
