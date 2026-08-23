@@ -797,22 +797,36 @@ export class AgentDevStore {
       updatedAt: result.completedAt,
       history: run.history.map(item => item.attempt === attemptNumber ? { ...item, status: result.exitCode === 0 && !result.timedOut ? 'completed' : 'failed', result, completedAt: result.completedAt } : item),
     };
-    if (completed.status === 'completed') await this.commitAgentChanges(task);
-    await this.writeRuntimeRun(completed, `runtime: ${completed.status}`);
-    if (completed.status === 'completed') {
+    const blocked = completed.status === 'completed' ? await this.commitAgentChanges(task) : null;
+    const output = blocked ? `${result.output}\n\n${blocked}` : result.output;
+    const finished: RuntimeRun = blocked
+      ? { ...completed, status: 'failed', result: { ...result, output }, history: completed.history.map(item => item.attempt === attemptNumber ? { ...item, status: 'failed', result: { ...result, output } } : item) }
+      : completed;
+    await this.writeRuntimeRun(finished, `runtime: ${finished.status}`);
+    if (finished.status === 'completed') {
       await this.advanceDelivery(task.projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }]);
     }
-    return completed;
+    return finished;
   }
 
   // Every other commit in the pipeline stages only the report file it just wrote, and the agent
   // never commits its own work. Without this step the branch that gets pushed and reviewed holds
   // the scaffold alone, so the feature a human accepted would silently not ship.
-  private async commitAgentChanges(task: FeatureTask) {
+  // Returns a message when the commit must not happen, so the run is reported as failed instead.
+  private async commitAgentChanges(task: FeatureTask): Promise<string | null> {
     await execFileAsync('git', ['add', '-A'], { cwd: task.workspacePath });
     const staged = await execFileAsync('git', ['status', '--porcelain'], { cwd: task.workspacePath });
-    if (!staged.stdout.trim()) return;
+    if (!staged.stdout.trim()) return null;
+    // Workspaces generated before the scaffold shipped a .gitignore have no ignore rules at all, so
+    // staging everything would put the generated .env — real provider credentials — into the product
+    // repository. Committing a secret is not recoverable by a later fix.
+    const secrets = staged.stdout.split('\n').map(line => line.slice(3).trim()).filter(path => /(^|\/)\.env($|\.)/.test(path) && !path.endsWith('.env.example'));
+    if (secrets.length) {
+      await execFileAsync('git', ['reset', '-q'], { cwd: task.workspacePath });
+      return `Agent changes were not committed: ${secrets.join(', ')} would enter the product repository. Add it to .gitignore in the workspace, then retry the run.`;
+    }
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `feat: ${task.title}`], { cwd: task.workspacePath });
+    return null;
   }
 
   async getRuntimeRun(projectId: string, blueprintRevision: number): Promise<RuntimeRun | null> {
