@@ -154,6 +154,8 @@ button, input, textarea { font: inherit; } button { cursor: pointer; }
 .release-steps li { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: #4d5d52; font-size: 12px; }
 .release-steps li em { color: #68746d; font-size: 10px; font-style: normal; text-transform: capitalize; }
 .release-steps li small { flex-basis: 100%; margin-left: 19px; color: #68746d; font-size: 11px; }
+.release-source { margin: 12px 0 0; color: #4d5d52; font-size: 11px; overflow-wrap: anywhere; }
+.release-source.blocked { padding: 9px 10px; border: 1px solid #e6ddc9; border-radius: 4px; background: #fdfaf3; color: #6b5a33; }
 .production-release > .primary-button, .production-release > .secondary-button { width: auto; margin-top: 12px; padding: 0 16px; }
 .release-approval { display: grid; gap: 8px; margin-top: 12px; }
 .release-approval label { color: #4d5d52; font-size: 12px; font-weight: 700; }

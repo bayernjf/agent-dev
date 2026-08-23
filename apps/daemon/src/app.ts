@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { join } from 'node:path';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
@@ -10,7 +11,8 @@ import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
 import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
-import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin } from '@agent-dev/deployment-composer';
+import type { ReleaseSource } from '@agent-dev/deployment-composer';
+import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin, releaseIdempotencyKey, releaseStepPlan } from '@agent-dev/deployment-composer';
 import type { CleanupResult, PreviewDeploymentResult, ReleaseResult } from '@agent-dev/deployment-composer';
 import { DaemonEventBus } from './events.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
@@ -102,7 +104,7 @@ export type DaemonDependencies = {
   runAccountDiscovery?: () => Promise<AccountDiscoveryReport>;
   resolveGitHubWebhookSecret?: () => string | undefined;
   cleanupPreview?: (options: { vercelProject?: string; cloudflareProject?: string; workspacePath: string }) => Promise<CleanupResult>;
-  deployRelease?: (options: { workspacePath: string; projectName: string }) => Promise<ReleaseResult>;
+  deployRelease?: (options: { workspacePath: string; projectName: string; source: ReleaseSource }) => Promise<ReleaseResult>;
 };
 
 const githubPullRequestWebhookSchema = z.object({
@@ -781,7 +783,23 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const run = store.getLatestApplyRun(projectId, revision);
     if (!run || run.status !== 'completed') return { error: 'Complete the baseline Apply before releasing to production.' as const, statusCode: 409 as const };
     const workspace = await verifyWorkspaceArtifacts(run.workspacePath, project.blueprint);
-    return { project, revision, run, workspace };
+    const branch = project.blueprint.spec.sourceControl.productionBranch;
+    const repository = loadProjectResources(run.workspacePath)?.providers.github?.repository;
+    const acceptance = await store.getAcceptance(projectId, revision);
+    // Production is released from the production branch of the recorded repository and has to carry
+    // the commit a human accepted, so both facts are prerequisites rather than inputs.
+    const sourceReason = typeof repository !== 'string' || !repository
+      ? 'No repository is recorded for this workspace, so there is no production branch to release from. Apply the real GitHub provider first.'
+      : !acceptance || acceptance.status !== 'approved'
+        ? 'Approve the delivery before releasing to production: without an accepted commit there is nothing to verify production against.'
+        : undefined;
+    const source: ReleaseSource | null = sourceReason ? null : {
+      repository: repository as string,
+      branch,
+      acceptedCommit: acceptance!.gitEvidence.head,
+      checkoutPath: join(store.dataDirectory, 'releases', projectId, branch),
+    };
+    return { project, revision, run, workspace, source, sourceReason };
   };
 
   const runRelease = async (
@@ -790,8 +808,9 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     revision: number,
     workspacePath: string,
     releaseRunId: string,
+    source: ReleaseSource,
   ) => {
-    const result = await executeRelease({ workspacePath, projectName: projectSlug(projectName) });
+    const result = await executeRelease({ workspacePath, projectName: projectSlug(projectName), source });
     if (result.status !== 'completed' || !result.apiBaseUrl || !result.webUrl || !result.observations) {
       const failed = await store.failRelease(releaseRunId, result.steps);
       events.emit({ type: 'release.failed', projectId, projectName, occurredAt: failed.updatedAt });
@@ -815,12 +834,13 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const projectId = context.req.param('projectId');
     const resolved = await resolveReleaseContext(projectId);
     if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
-    const { project, revision, run, workspace } = resolved;
-    const composer = new ReleaseComposer({ workspacePath: run.workspacePath, projectName: projectSlug(project.name) });
+    const { project, revision, run, workspace, source, sourceReason } = resolved;
     return context.json({
-      steps: composer.plan(),
-      idempotencyKey: composer.idempotencyKey,
-      corsOrigin: composer.corsOrigin,
+      steps: releaseStepPlan(),
+      source,
+      sourceReason,
+      idempotencyKey: releaseIdempotencyKey(projectSlug(project.name)),
+      corsOrigin: productionWebOrigin(projectSlug(project.name)),
       productionApproval: project.blueprint.spec.policy.productionApproval,
       state: project.state,
       workspace,
@@ -847,6 +867,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const resolved = await resolveReleaseContext(projectId);
     if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
     if (!resolved.workspace.usable) return context.json({ error: resolved.workspace.reason, workspace: resolved.workspace }, 409);
+    if (!resolved.source) return context.json({ error: resolved.sourceReason }, 409);
     try {
       const project = await store.requestRelease(projectId, resolved.revision);
       events.emit({ type: 'release.requested', projectId, projectName: project.name, occurredAt: new Date().toISOString() });
@@ -866,10 +887,11 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!parsed.success) return context.json({ error: 'Approving a release requires confirmation APPROVE_RELEASE, approvedBy and summary.' }, 400);
     const resolved = await resolveReleaseContext(projectId);
     if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
-    const { project, revision, run, workspace } = resolved;
+    const { project, revision, run, workspace, source, sourceReason } = resolved;
     if (!workspace.usable) return context.json({ error: workspace.reason, workspace }, 409);
+    if (!source) return context.json({ error: sourceReason }, 409);
 
-    const composer = new ReleaseComposer({ workspacePath: run.workspacePath, projectName: projectSlug(project.name) });
+    const composer = new ReleaseComposer({ workspacePath: run.workspacePath, projectName: projectSlug(project.name), source });
     let releaseRunId: string;
     try {
       const approved = await store.approveRelease(projectId, revision, {
@@ -883,7 +905,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       return context.json({ error: error instanceof Error ? error.message : 'Unable to approve a release.' }, 409);
     }
 
-    const outcome = await runRelease(projectId, project.name, revision, run.workspacePath, releaseRunId);
+    const outcome = await runRelease(projectId, project.name, revision, run.workspacePath, releaseRunId, source);
     return context.json(outcome, outcome.statusCode);
   });
 
@@ -893,8 +915,9 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!parsed.success) return context.json({ error: 'Retrying a release requires confirmation RETRY_RELEASE.' }, 400);
     const resolved = await resolveReleaseContext(projectId);
     if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
-    const { project, revision, run, workspace } = resolved;
+    const { project, revision, run, workspace, source, sourceReason } = resolved;
     if (!workspace.usable) return context.json({ error: workspace.reason, workspace }, 409);
+    if (!source) return context.json({ error: sourceReason }, 409);
     const existing = store.getLatestReleaseRun(projectId, revision);
     if (!existing) return context.json({ error: 'No release run is available to retry.' }, 404);
     if (existing.status !== 'failed') return context.json({ error: 'Only a failed release can be retried.' }, 409);
@@ -904,7 +927,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     // second gate. RETRY returns the run to RELEASING because that is where it failed.
     await store.advanceDelivery(projectId, [{ type: 'RETRY' }]);
     await store.updateReleaseRun(existing.id, 'running', existing.steps.map(step => (step.status === 'failed' ? { ...step, status: 'pending' as const, detail: undefined } : step)), existing.attempts + 1);
-    const outcome = await runRelease(projectId, project.name, revision, run.workspacePath, existing.id);
+    const outcome = await runRelease(projectId, project.name, revision, run.workspacePath, existing.id, source);
     return context.json(outcome, outcome.statusCode);
   });
 

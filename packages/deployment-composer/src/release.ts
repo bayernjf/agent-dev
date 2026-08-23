@@ -1,11 +1,13 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { CommandRunner } from '@agent-dev/provider-cli';
 import { defaultRunner, providerCredentialEnv } from '@agent-dev/provider-cli';
 import { fetchWithRetry } from './http.js';
 import { productionProjectNames, productionWebOrigin } from './names.js';
 
 export type ReleaseStepId =
+  | 'checkout-production-source'
+  | 'install-release-dependencies'
   | 'verify-release-quality'
   | 'deploy-api-production'
   | 'verify-api-production'
@@ -26,6 +28,7 @@ export type ReleaseStep = {
 // As with the preview evidence, every field is something a step observed. A verdict string here
 // would only restate the code path that wrote it.
 export type ReleaseObservations = {
+  source: { repository: string; branch: string; commit: string; acceptedCommit: string };
   releaseQuality: { command: string; exitCode: number };
   apiHealth: { url: string; httpStatus: number; contentType: string; observedCorsHeader: string };
   webPage: { url: string; httpStatus: number; sourceBytes: number; matchedApiBaseUrl: string };
@@ -50,16 +53,32 @@ export type ReleaseResult = {
   observations?: ReleaseObservations;
 };
 
+// Production is released from the production branch of the recorded repository, not from the local
+// workspace the feature was implemented in. Deploying the workspace would let code reach production
+// without ever landing on the production branch, so the released version could not be reproduced
+// from it.
+export type ReleaseSource = {
+  repository: string;
+  branch: string;
+  acceptedCommit: string;
+  checkoutPath: string;
+};
+
 export type ReleaseComposerOptions = {
   workspacePath: string;
   projectName: string;
+  source: ReleaseSource;
+  /** Relative to the release checkout, not to the workspace. */
   apiDirectory?: string;
   frontendDirectory?: string;
+  /** Relative to the frontend directory. */
   frontendDistDirectory?: string;
   qualityCommand?: string[];
 };
 
 const STEP_DEFINITIONS: { id: ReleaseStepId; title: string }[] = [
+  { id: 'checkout-production-source', title: 'Check out the production branch of the recorded repository' },
+  { id: 'install-release-dependencies', title: 'Install dependencies in the release checkout' },
   { id: 'verify-release-quality', title: 'Verify release quality gate' },
   { id: 'deploy-api-production', title: 'Deploy production API with the exact production origin' },
   { id: 'verify-api-production', title: 'Verify production API health and CORS' },
@@ -69,12 +88,21 @@ const STEP_DEFINITIONS: { id: ReleaseStepId; title: string }[] = [
   { id: 'write-release-evidence', title: 'Write production release evidence' },
 ];
 
+export function releaseStepPlan(): ReleaseStep[] {
+  return STEP_DEFINITIONS.map(def => ({ ...def, status: 'pending' as const }));
+}
+
+export function releaseIdempotencyKey(projectName: string): string {
+  return `release:${projectName}:production`;
+}
+
 // The production counterpart of DeploymentComposer. It deliberately does NOT disable Vercel
 // Deployment Protection: that is defensible for a disposable preview and wrong for production,
 // where whatever protection the account configured has to survive a release.
 export class ReleaseComposer {
   private readonly workspacePath: string;
   private readonly projectName: string;
+  private readonly source: ReleaseSource;
   private readonly apiDirectory: string;
   private readonly frontendDirectory: string;
   private readonly frontendDistDirectory: string;
@@ -91,23 +119,36 @@ export class ReleaseComposer {
   constructor(options: ReleaseComposerOptions, runner?: CommandRunner) {
     this.workspacePath = options.workspacePath;
     this.projectName = options.projectName;
-    this.apiDirectory = options.apiDirectory ?? join(this.workspacePath, 'apps/api');
-    this.frontendDirectory = options.frontendDirectory ?? join(this.workspacePath, 'apps/web');
-    this.frontendDistDirectory = options.frontendDistDirectory ?? join(this.frontendDirectory, 'dist');
+    this.source = options.source;
+    this.apiDirectory = options.apiDirectory ?? 'apps/api';
+    this.frontendDirectory = options.frontendDirectory ?? 'apps/web';
+    this.frontendDistDirectory = options.frontendDistDirectory ?? 'dist';
     this.qualityCommand = options.qualityCommand ?? ['run', 'quality'];
     this.runner = runner ?? defaultRunner;
-    this.steps = STEP_DEFINITIONS.map(def => ({ ...def, status: 'pending' as const }));
+    this.steps = releaseStepPlan();
     const names = productionProjectNames(this.projectName);
     this.vercelProjectName = names.vercelProject;
     this.cloudflareProjectName = names.cloudflareProject;
   }
 
   get idempotencyKey(): string {
-    return `release:${this.projectName}:production`;
+    return releaseIdempotencyKey(this.projectName);
   }
 
   get corsOrigin(): string {
     return productionWebOrigin(this.projectName);
+  }
+
+  private get apiPath(): string {
+    return join(this.source.checkoutPath, this.apiDirectory);
+  }
+
+  private get frontendPath(): string {
+    return join(this.source.checkoutPath, this.frontendDirectory);
+  }
+
+  private get frontendDistPath(): string {
+    return join(this.frontendPath, this.frontendDistDirectory);
   }
 
   plan(): ReleaseStep[] {
@@ -145,6 +186,8 @@ export class ReleaseComposer {
 
   private async executeStep(step: ReleaseStep): Promise<void> {
     switch (step.id) {
+      case 'checkout-production-source': return this.checkoutProductionSource(step);
+      case 'install-release-dependencies': return this.installReleaseDependencies(step);
       case 'verify-release-quality': return this.verifyReleaseQuality(step);
       case 'deploy-api-production': return this.deployApiProduction(step);
       case 'verify-api-production': return this.verifyApiProduction(step);
@@ -155,9 +198,65 @@ export class ReleaseComposer {
     }
   }
 
+  private async checkoutProductionSource(step: ReleaseStep): Promise<void> {
+    const { repository, branch, acceptedCommit, checkoutPath } = this.source;
+    const env = providerCredentialEnv();
+    const cloned = await stat(join(checkoutPath, '.git')).then(() => true).catch(() => false);
+    if (!cloned) {
+      await mkdir(dirname(checkoutPath), { recursive: true });
+      const result = await this.runner('gh', ['repo', 'clone', repository, checkoutPath, '--', '--branch', branch], {
+        cwd: dirname(checkoutPath), timeout: 300_000, env,
+      });
+      if (!result.success) {
+        throw new Error(`Unable to clone ${repository} branch ${branch} for the release: ${result.stderr || result.stdout}`);
+      }
+    }
+
+    // Fetch and reset on every attempt: a retry that reused whatever the previous attempt left on
+    // disk could ship a commit the production branch no longer points at.
+    const fetched = await this.runner('git', ['fetch', 'origin', branch], { cwd: checkoutPath, timeout: 300_000, env });
+    if (!fetched.success) {
+      throw new Error(`Unable to fetch ${branch} from ${repository}: ${fetched.stderr || fetched.stdout}`);
+    }
+    const reset = await this.runner('git', ['reset', '--hard', 'FETCH_HEAD'], { cwd: checkoutPath, timeout: 60_000, env });
+    if (!reset.success) {
+      throw new Error(`Unable to check out ${branch} of ${repository}: ${reset.stderr || reset.stdout}`);
+    }
+    // Not -x: node_modules is untracked and reinstalling it on every retry buys nothing.
+    await this.runner('git', ['clean', '-fd'], { cwd: checkoutPath, timeout: 60_000, env });
+
+    const head = await this.runner('git', ['rev-parse', 'HEAD'], { cwd: checkoutPath, timeout: 30_000, env });
+    if (!head.success) {
+      throw new Error(`Unable to read the released commit from ${checkoutPath}: ${head.stderr || head.stdout}`);
+    }
+    const commit = head.stdout.trim();
+
+    // The human approved a specific delivery. If that commit has not landed on the production
+    // branch, this release would ship something nobody accepted.
+    const carriesAccepted = await this.runner('git', ['merge-base', '--is-ancestor', acceptedCommit, commit], {
+      cwd: checkoutPath, timeout: 30_000, env,
+    });
+    if (!carriesAccepted.success) {
+      throw new Error(`The accepted commit ${acceptedCommit} is not part of ${repository} branch ${branch}, so production would not carry the accepted delivery. Merge the delivery pull request into ${branch} first.`);
+    }
+
+    this.observations.source = { repository, branch, commit, acceptedCommit };
+    step.detail = `Releasing ${repository} branch ${branch} at ${commit}`;
+  }
+
+  private async installReleaseDependencies(step: ReleaseStep): Promise<void> {
+    const result = await this.runner('npm', ['install'], {
+      cwd: this.source.checkoutPath, timeout: 600_000,
+    });
+    if (!result.success) {
+      throw new Error(`Dependency installation in the release checkout failed: ${result.stderr || result.stdout}`);
+    }
+    step.detail = `Dependencies installed in ${this.source.checkoutPath}`;
+  }
+
   private async verifyReleaseQuality(step: ReleaseStep): Promise<void> {
     const result = await this.runner('npm', this.qualityCommand, {
-      cwd: this.workspacePath,
+      cwd: this.source.checkoutPath,
       timeout: 600_000,
     });
     if (!result.success) {
@@ -172,18 +271,18 @@ export class ReleaseComposer {
     await this.ensureVercelAuth(env);
 
     const projectResult = await this.runner('vercel', ['project', 'add', this.vercelProjectName, '--no-color'], {
-      cwd: this.workspacePath, timeout: 30_000, env,
+      cwd: this.source.checkoutPath, timeout: 30_000, env,
     });
     if (!projectResult.success && !projectResult.stderr.includes('already exists')) {
       throw new Error(`Vercel production project creation failed: ${projectResult.stderr || projectResult.stdout}`);
     }
 
     const deployResult = await this.runner('vercel', [
-      'deploy', this.apiDirectory,
+      'deploy', this.apiPath,
       '--prod', '--yes', '--non-interactive', '--no-color', '--format=json',
       '--project', this.vercelProjectName,
       '--env', `ALLOWED_ORIGIN=${this.corsOrigin}`,
-    ], { cwd: this.workspacePath, timeout: 300_000, env });
+    ], { cwd: this.source.checkoutPath, timeout: 300_000, env });
 
     if (!deployResult.success) {
       throw new Error(`Vercel production deployment failed: ${deployResult.stderr || deployResult.stdout}`);
@@ -199,7 +298,7 @@ export class ReleaseComposer {
   // frontend would be built against it and ship a production site that cannot reach its own API.
   private async resolveProductionAlias(deploymentUrl: string, env: Record<string, string>): Promise<string> {
     const inspected = await this.runner('vercel', ['inspect', deploymentUrl, '--format=json', '--no-color'], {
-      cwd: this.workspacePath, timeout: 60_000, env,
+      cwd: this.source.checkoutPath, timeout: 60_000, env,
     });
     if (!inspected.success) {
       throw new Error(`Unable to inspect the production deployment ${deploymentUrl}: ${inspected.stderr || inspected.stdout}`);
@@ -216,7 +315,7 @@ export class ReleaseComposer {
 
   private async ensureVercelAuth(env: Record<string, string>): Promise<void> {
     if (env.VERCEL_TOKEN || process.env.VERCEL_TOKEN) return;
-    const whoami = await this.runner('vercel', ['whoami', '--no-color'], { cwd: this.workspacePath, timeout: 30_000, env });
+    const whoami = await this.runner('vercel', ['whoami', '--no-color'], { cwd: this.source.checkoutPath, timeout: 30_000, env });
     if (!whoami.success) {
       throw new Error('Vercel is not authenticated; set VERCEL_TOKEN or run `vercel login` before releasing to production.');
     }
@@ -242,9 +341,9 @@ export class ReleaseComposer {
 
   private async buildWebProduction(step: ReleaseStep): Promise<void> {
     if (!this.apiBaseUrl) throw new Error('Production API base URL is not set.');
-    await writeFile(join(this.frontendDirectory, '.env.production'), `VITE_API_BASE_URL=${this.apiBaseUrl}\n`, 'utf8');
+    await writeFile(join(this.frontendPath, '.env.production'), `VITE_API_BASE_URL=${this.apiBaseUrl}\n`, 'utf8');
     const result = await this.runner('npm', ['run', 'build'], {
-      cwd: this.frontendDirectory,
+      cwd: this.frontendPath,
       timeout: 300_000,
       env: { ...process.env, VITE_API_BASE_URL: this.apiBaseUrl } as Record<string, string>,
     });
@@ -257,7 +356,7 @@ export class ReleaseComposer {
   private async deployWebProduction(step: ReleaseStep): Promise<void> {
     const env = providerCredentialEnv();
     const createResult = await this.runner('npx', ['wrangler', 'pages', 'project', 'create', this.cloudflareProjectName, '--production-branch', 'main'], {
-      cwd: this.workspacePath, timeout: 60_000, env,
+      cwd: this.source.checkoutPath, timeout: 60_000, env,
     });
     const alreadyExists = `${createResult.stderr}${createResult.stdout}`.includes('already exists');
     if (!createResult.success && !alreadyExists) {
@@ -265,11 +364,11 @@ export class ReleaseComposer {
     }
 
     const deployResult = await this.runner('npx', [
-      'wrangler', 'pages', 'deploy', this.frontendDistDirectory,
+      'wrangler', 'pages', 'deploy', this.frontendDistPath,
       '--project-name', this.cloudflareProjectName,
       '--branch', 'main',
       '--commit-message', `agent-dev release: ${this.projectName}`,
-    ], { cwd: this.workspacePath, timeout: 300_000, env });
+    ], { cwd: this.source.checkoutPath, timeout: 300_000, env });
     if (!deployResult.success) {
       throw new Error(`Cloudflare Pages production deployment failed: ${deployResult.stderr || deployResult.stdout}`);
     }
@@ -306,8 +405,8 @@ export class ReleaseComposer {
 
   private async writeReleaseEvidence(step: ReleaseStep): Promise<void> {
     if (!this.apiBaseUrl || !this.webUrl) throw new Error('Production URLs are not set.');
-    const { releaseQuality, apiHealth, webPage, productionSmoke } = this.observations;
-    if (!releaseQuality || !apiHealth || !webPage || !productionSmoke) {
+    const { source, releaseQuality, apiHealth, webPage, productionSmoke } = this.observations;
+    if (!source || !releaseQuality || !apiHealth || !webPage || !productionSmoke) {
       throw new Error('Release evidence cannot be written before every verification step has produced an observation.');
     }
 
@@ -316,7 +415,7 @@ export class ReleaseComposer {
       apiBaseUrl: this.apiBaseUrl,
       webUrl: this.webUrl,
       corsOrigin: this.corsOrigin,
-      observations: { releaseQuality, apiHealth, webPage, productionSmoke },
+      observations: { source, releaseQuality, apiHealth, webPage, productionSmoke },
       completedAt: new Date().toISOString(),
     };
 
