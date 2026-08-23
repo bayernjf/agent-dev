@@ -18,7 +18,8 @@
   - **本轮暴露的两处架构缺口已于 2026-08-23 修掉**（在项目 2 之前，`962932a`、`0dbd15c`）：
     1. **生产是从本地 workspace 发布的，不是从生产分支**（`962932a`）。`ReleaseComposer` 从不 checkout `main`，也不检查被验收的提交是否已合并，与架构第 10 节「生产从 `main` 出」矛盾——生产上跑的代码可能从未落到 `main`，无法从生产分支复现线上版本。现在发布前先 clone/fetch/reset 记录仓库的生产分支（每次尝试都 reset，避免重试发出上一次残留的位），校验被人工验收的提交是该分支 HEAD 的祖先（不是则拒绝并提示先合 PR），再在这个 checkout 上装依赖、跑质量门禁、构建和部署；Evidence 记下 `repository/branch/commit/acceptedCommit`。没有记录仓库或没有验收时，`release/plan` 直接给出原因、`release/request` 返回 409，Studio 把原因显示出来并禁用按钮，而不是静默发布 workspace。
     2. **人工闸门的身份口径不一致**（`0dbd15c`）。基线、Feature Task、交付验收三处的 `approvedBy` 会回落到字面量 `local-user`（revision 5 的验收报告就带这个占位名），而生产批准要求具名（`feng`）。现在四处统一：API 强制要求 approver，Studio 在每个闸门收集姓名并记在浏览器本地，输入为空时不发请求。
-    - 两处都有测试覆盖（`npm test` 109 项全绿），但**尚未在真实云端跑过一遍**——真实验证要靠项目 2。Studio 的三个新输入框只做了类型与构建校验，尚未在浏览器里渲染过：现存项目都已越过这三个闸门，等项目 2 的新 revision 重新打开基线闸门时再看。
+    - 两处都有测试覆盖（`npm test` 109 项全绿），但**尚未在真实云端跑过一遍**——真实验证要靠项目 2。Studio 的三个新输入框只做了类型与构建校验，尚未在浏览器里渲染过：现存项目都已越过这三个闸门，等项目 2 的新 revision 重新打开基线闸门时再看。已在浏览器里确认的只有发布区块的阻塞文案（现存项目没有记录仓库，显示"没有记录仓库…先 apply 真实 GitHub Provider"并禁用按钮）。
+    - **规则本身也补进了文档**（`96fd261`）：架构第 9 节「dev 与 production」原先只说 `main` 即生产、没说发布来源，实现才得以偏离，现在明确写下「生产从生产分支的独立 checkout 发布，且该分支必须已带上被验收的提交」；`docs/implementation-plan-v0.1.md` 与 `README.md` 的生产链路状态同步为"真实云端跑通一次，但走的是修复前的路径"。
   - **遗留真实资源（未清理）**：Preview 侧 Vercel `receipt-test-api-pr-1`、Cloudflare Pages `receipt-test-web-pr-1`（清理入口 `POST .../preview/cleanup`，确认串 `CLEANUP_PREVIEW`）；生产侧 `receipt-test-api`、`receipt-test-web` 是交付物，不应清理。另有前一轮的 `workspace-verify-fresh-*` 两个 Preview 项目仍在账号里。
   - **环境前提（会被误判成产品缺陷）**：本机所有 `*.vercel.app` 对不走系统代理的进程都是 DNS 污染（连不存在的域名都能解析出地址），必须用系统代理，且 Node 的 `fetch` 需要 `NODE_USE_ENV_PROXY=1` 才读代理变量。Daemon 必须带 `https_proxy`/`http_proxy`/`no_proxy=localhost,127.0.0.1`/`NODE_USE_ENV_PROXY=1` 启动，否则 `verify-api-health`、`verify-joint-smoke` 会报 `fetch failed`。另外新建的 Cloudflare Pages 域名有几秒才生效，第一次联合 Smoke 失败、重跑即过（已确认是域名生效延迟，未误记为缺陷）。
 
@@ -74,7 +75,7 @@
 - Studio 已接入上述两个证据阶段：仅在对应状态显示表单，提交后自动刷新项目状态、证据包和 Final Delivery Report。
 - Studio 重新打开项目时会通过 `GET .../delivery/pr-evidence` 与 `GET .../delivery/preview-evidence` 恢复已记录证据，避免状态与展示脱节。
 - 最近验证：`npm test`、`npm run typecheck`、`npm run build` 均已通过；`npm test` 最近一次为 13 个测试文件、61 个用例全通过。Vitest 文件级测试已串行执行，因为 Agent Catalog 会探测本机 CLI，并发探测会造成同步子进程超时假失败。本轮还覆盖 GitHub token 注入、Provider cache invalidation、Cloudflare CLI URL evidence、未验证 Agent 执行阻断和 Adapter 状态展示；真实云端尝试的完整边界见上一条。
-- 当前工作分支：`feature/20260802`。2026-08-23 记录：本地 HEAD 为 `0dbd15c`，`origin/feature/20260802` 为 `c097d89`（本地领先 2 个提交，未推送），`origin/dev` 为 `c109792`，`origin/main` 为 `c696b74`。分支状态随时会变，提交前应重新 `git fetch` 确认，不要沿用本行记录。
+- 当前工作分支：`feature/20260802`。2026-08-23 记录：本地 HEAD 为 `96fd261`，`origin/feature/20260802` 为 `c097d89`（本地领先 4 个提交，未推送），`origin/dev` 为 `c109792`，`origin/main` 为 `c696b74`。分支状态随时会变，提交前应重新 `git fetch` 确认，不要沿用本行记录。
 
 ## 1. 项目摘要
 
