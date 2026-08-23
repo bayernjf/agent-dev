@@ -14,16 +14,13 @@ type CloudflarePagesProject = {
 
 export class CloudflareAdapter implements ProviderAdapter {
   readonly providerId = 'cloudflare';
-  private readonly distPath: string;
 
   constructor(
     private owner: string,
     private projectName: string,
     private workspacePath: string,
     private runner: CommandRunner = defaultRunner,
-  ) {
-    this.distPath = `${workspacePath}/apps/web/dist`;
-  }
+  ) {}
 
   private async inspectProject(): Promise<CloudflarePagesProject | null> {
     const result = await this.runner('npx', ['wrangler', 'pages', 'project', 'list', '--json'], {
@@ -86,10 +83,11 @@ export class CloudflareAdapter implements ProviderAdapter {
     if (approval.status !== 'approved') throw new Error('Provider Apply requires an approved plan.');
     for (const resource of plan.resources) {
       if (resource.action === 'noop') continue;
+      // Provider onboarding only creates the project. Deploying the built frontend happens later in
+      // the Preview/Release orchestration, where `apps/web/dist` actually exists; deploying here
+      // fails with ENOENT because the frontend has not been built at apply time.
       const createResult = await this.runner('npx', ['wrangler', 'pages', 'project', 'create', this.projectName, '--production-branch', 'main'], { cwd: this.workspacePath, timeout: 60_000, env: providerCredentialEnv() });
       if (!createResult.success) throw new Error(`Cloudflare Pages project creation failed: ${createResult.stderr || createResult.stdout}`);
-      const deployResult = await this.runner('npx', ['wrangler', 'pages', 'deploy', this.distPath, '--project-name', this.projectName], { cwd: this.workspacePath, timeout: 180_000, env: providerCredentialEnv() });
-      if (!deployResult.success) throw new Error(`Cloudflare Pages deployment failed: ${deployResult.stderr || deployResult.stdout}`);
     }
     return { providerId: this.providerId, idempotencyKey: plan.idempotencyKey, applied: true, state: await this.discover() };
   }

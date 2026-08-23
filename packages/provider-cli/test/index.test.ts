@@ -232,6 +232,24 @@ describe('CloudflareAdapter', () => {
     const state = await new CloudflareAdapter('bayernjf', 'test-project', '/tmp/workspace', runner).discover();
     expect(state.resources[0]).toMatchObject({ externalId: 'cf_123', url: 'https://test-project.pages.dev', metadata: { accountId: 'account_123', productionBranch: 'main' } });
   });
+
+  it('creates the project during onboarding without deploying the frontend', async () => {
+    // The frontend `dist` does not exist at provider-apply time, so a deploy here would fail with
+    // ENOENT. Deployment belongs to the Preview/Release orchestration.
+    const calls: string[] = [];
+    const runner: CommandRunner = async (command, args) => {
+      calls.push(`${command} ${args.join(' ')}`);
+      if (args.includes('list')) return { stdout: 'other', stderr: '', exitCode: 0, success: true };
+      if (args.includes('create')) return { stdout: 'Created', stderr: '', exitCode: 0, success: true };
+      if (args.includes('deploy')) return { stdout: 'Deployed', stderr: '', exitCode: 0, success: true };
+      return { stdout: '', stderr: 'not found', exitCode: 1, success: false };
+    };
+    const adapter = new CloudflareAdapter('bayernjf', 'test-project', '/tmp/workspace', runner);
+    const result = await adapter.apply({ providerId: 'cloudflare', idempotencyKey: 'cloudflare:cloudflare-pages:create', noExternalChanges: true, resources: [{ spec: { id: 'cloudflare-pages', kind: 'pages-project', owner: 'bayernjf' }, action: 'create', reason: 'does not exist' }] }, approval);
+    expect(result.applied).toBe(true);
+    expect(calls.some(call => call.includes('pages project create'))).toBe(true);
+    expect(calls.some(call => call.includes('pages deploy'))).toBe(false);
+  });
 });
 
 describe('ManualProviderAdapter', () => {

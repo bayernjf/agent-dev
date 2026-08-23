@@ -12,6 +12,7 @@ test-results/
 # Local runtime state
 .agent-dev/
 .codegraph/
+.claude/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
