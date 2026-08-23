@@ -246,8 +246,12 @@ export class AgentDevStore {
     this.orm = createOrm(sqlite);
   }
 
-  static async open(databasePath: string) {
-    const SQL = await initSqlJs({
+  /** Where the platform keeps its own state and the workspaces it creates. */
+  get dataDirectory(): string {
+    return dirname(this.databasePath);
+  }
+
+  static async open(databasePath: string) {    const SQL = await initSqlJs({
       locateFile: () => require.resolve('sql.js/dist/sql-wasm.wasm'),
     });
     let data: Uint8Array | undefined;

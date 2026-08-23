@@ -1,7 +1,7 @@
 export { DeploymentComposer } from './composer.js';
 export { cleanupPreviewProjects, type CleanupResult } from './cleanup.js';
 export { previewProjectNames, productionProjectNames, productionWebOrigin, type PreviewProjectNames } from './names.js';
-export { ReleaseComposer } from './release.js';
+export { ReleaseComposer, releaseStepPlan, releaseIdempotencyKey } from './release.js';
 export type {
   ReleaseStepId,
   ReleaseStep,
@@ -9,6 +9,7 @@ export type {
   ReleaseEvidence,
   ReleaseResult,
   ReleaseComposerOptions,
+  ReleaseSource,
 } from './release.js';
 export type {
   PreviewStepId,
