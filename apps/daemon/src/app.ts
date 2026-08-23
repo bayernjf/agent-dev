@@ -137,7 +137,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       if (!project) return null;
       const run = store.getLatestApplyRun(projectId, project.blueprint.metadata.revision);
       if (!run || run.status !== 'completed') return null;
-      return { workspacePath: run.workspacePath, projectName: projectSlug(project.name), projectId, blueprintRevision: project.blueprint.metadata.revision };
+      return { workspacePath: run.workspacePath, projectName: projectSlug(project.name), projectId, blueprintRevision: project.blueprint.metadata.revision, integrationBranch: project.blueprint.spec.sourceControl.integrationBranch, productionBranch: project.blueprint.spec.sourceControl.productionBranch };
     },
   });
   const executePreviewCleanup = dependencies.cleanupPreview ?? (options => cleanupPreviewProjects(defaultRunner, options));
