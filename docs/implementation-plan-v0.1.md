@@ -208,7 +208,9 @@ quality
 - 交付报告；
 - Drift 检测入口。
 
-已实现部分：生产 Gate 为两道人工闸门（`release/request` 与带具名批准的 `release/approve`），发布日志在 `release_runs` 表，编排见 `ReleaseComposer`。生产 Evidence 记录观测值（HTTP 状态、content-type、实测 CORS 响应头、页面字节数）而非 `passed` 这类判定常量，并记录发布来源 `repository/branch/commit/acceptedCommit`。发布不在实现功能的 workspace 里执行：`ReleaseComposer` 先 checkout 记录仓库的生产分支、校验被人工验收的提交是该分支 HEAD 的祖先，再在该 checkout 上装依赖、跑质量门禁、构建和部署；没有记录仓库或未验收时 `release/plan` 给出原因、`release/request` 返回 409。基线、Feature Task、交付验收与生产批准四处闸门都必须具名，没有默认身份。失败/过期 workspace 的恢复入口为 `POST .../apply/recover`：新建干净 workspace，旧的保留在磁盘并先报告其 Git 状态。整条生产链路已于 2026-08-23 对真实 Provider 执行过一次（`Receipt Test` → `DELIVERED`），但当时走的是修复前的「从 workspace 发布」路径；从生产分支发布这条路径尚未在真实云端跑过。
+已实现部分：生产 Gate 为两道人工闸门（`release/request` 与带具名批准的 `release/approve`），发布日志在 `release_runs` 表，编排见 `ReleaseComposer`。生产 Evidence 记录观测值（HTTP 状态、content-type、实测 CORS 响应头、页面字节数）而非 `passed` 这类判定常量，并记录发布来源 `repository/branch/commit/acceptedCommit`。发布不在实现功能的 workspace 里执行：`ReleaseComposer` 先 checkout 记录仓库的生产分支、校验被人工验收的提交是该分支 HEAD 的祖先，再在该 checkout 上装依赖、跑质量门禁、构建和部署；没有记录仓库或未验收时 `release/plan` 给出原因、`release/request` 返回 409。基线、Feature Task、交付验收与生产批准四处闸门都必须具名，没有默认身份。失败/过期 workspace 的恢复入口为 `POST .../apply/recover`：新建干净 workspace，旧的保留在磁盘并先报告其 Git 状态。整条生产链路已于 2026-08-23 对真实 Provider 执行过一次（`Receipt Test` → `DELIVERED`），但当时走的是修复前的「从 workspace 发布」路径；从生产分支发布这条路径尚未在真实云端跑过（项目 2 `Workspace Verify Fresh` 已推进到 PR + Preview，生产发布是该路径的第一次真实云端验证，停在人工批准前）。
+
+Agent 产物提交守卫另有两条：一是暂存区出现 `.env` 时拒绝提交并把该次运行判 `failed`（提交密钥不可事后修复）；二是暂存区出现**指向 workspace 外部的符号链接**时同样拒绝提交——Agent 为加速测试可能把依赖目录（如 `node_modules`）以绝对路径 symlink 挂进 workspace，目录模式的 `.gitignore`（`node_modules/`）不匹配符号链接，死链会被提交进产品仓库。两处修复：`commitAgentChanges` 用 `lstat`/`readlink`/`resolve` 识别逃出 workspace 的 symlink 并拦截，生成器模板 `.gitignore` 改用 `node_modules`（同时匹配目录、文件和 symlink）。项目 2 的真实 Codex 运行暴露并验证了这条守卫。
 
 完成定义：
 
