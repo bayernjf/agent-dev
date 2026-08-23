@@ -245,7 +245,9 @@ export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifac
     { id: 'template-cloudflare', title: 'Cloudflare Pages configuration', path: 'wrangler.toml', content: `# ${templateHeader}\nname = "${blueprint.metadata.name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}-web"\ncompatibility_date = "2026-01-01"\npages_build_output_dir = "apps/web/dist"\n` },
     // Agent-Dev commits the agent's work with `git add -A`, and the provider CLIs drop their own
     // state into the workspace, so anything not listed here ends up in the product's first PR.
-    { id: 'template-gitignore', title: 'Product git ignore rules', path: '.gitignore', content: 'node_modules/\ndist/\n.env\n.env.*\n!.env.example\n.agent-dev/\n.vercel/\n.wrangler/\n' },
+    // `node_modules` without a trailing slash: an agent may shortcut a test run with a symlink to
+    // an existing dependency directory, and the directory-only pattern would let the link stage.
+    { id: 'template-gitignore', title: 'Product git ignore rules', path: '.gitignore', content: 'node_modules\ndist/\n.env\n.env.*\n!.env.example\n.agent-dev/\n.vercel/\n.wrangler/\n' },
     { id: 'template-quality-workflow', title: 'GitHub quality workflow', path: '.github/workflows/quality.yml', content: `name: quality\non:\n  pull_request:\n  push:\n    branches: [dev, main]\njobs:\n  quality:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-node@v5\n        with:\n          node-version: 22\n      - run: npm install\n      - run: npm run quality\n` },
   );
   return artifacts;

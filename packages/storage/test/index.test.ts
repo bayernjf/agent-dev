@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -210,6 +210,39 @@ describe('AgentDevStore', () => {
       expect(run.result?.output).toContain('.env');
       const tracked = await execFileAsync('git', ['ls-tree', '-r', '--name-only', 'HEAD'], { cwd: applied.workspacePath });
       expect(tracked.stdout).not.toContain('.env');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('fails the run instead of committing a symbolic link outside the workspace', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const created = await store.createProject({
+        name: 'Symlink Guard',
+        blueprint: createBlueprint('symlink-guard', { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' }),
+      });
+      await store.approveBaseline(created.id, 1, 'test-user');
+      const applied = await store.executeApplyRun((await store.createApplyRun(created.id, 1)).id);
+      await store.createFeatureTask({ projectId: created.id, blueprintRevision: 1, title: 'Add receipt list', objective: 'Show the user a list of saved receipts.', acceptanceCriteria: ['The list renders saved receipts.'] });
+      await store.approveFeatureTask(created.id, 1, 'test-user');
+      await store.prepareRuntimeRun(created.id, 1);
+
+      // An agent shortcut: link a directory that already exists somewhere else. The name is
+      // deliberately NOT node_modules — the template .gitignore now ignores `node_modules`
+      // (with or without a trailing slash), so a symlink under that name never even stages. The
+      // guard has to catch a link under any other, non-ignored name.
+      const outside = await mkdtemp(join(tmpdir(), 'agent-dev-outside-'));
+      await mkdir(join(outside, 'vendor'), { recursive: true });
+      await symlink(join(outside, 'vendor'), join(applied.workspacePath, 'vendor'));
+      const run = await store.executeRuntimeRun(created.id, 1, async () => ({ exitCode: 0, signal: null, timedOut: false, output: 'wrote the feature', startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }));
+
+      expect(run.status).toBe('failed');
+      expect(run.result?.output).toContain('vendor');
+      const tracked = await execFileAsync('git', ['ls-tree', '-r', '--name-only', 'HEAD'], { cwd: applied.workspacePath });
+      expect(tracked.stdout).not.toContain('vendor');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true });
