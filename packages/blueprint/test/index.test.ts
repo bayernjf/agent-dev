@@ -59,6 +59,10 @@ describe('ProductBlueprint', () => {
       expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('npm install') }),
       expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('actions/checkout@v5') }),
       expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('actions/setup-node@v5') }),
+      // setup-node defaults to dependency caching and hard-fails before `npm install` when no
+      // lock file exists yet; the scaffold generates the lock file on first install, so CI must
+      // disable the cache probe to let the first PR pass.
+      expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining("cache: ''") }),
     ]));
   });
 

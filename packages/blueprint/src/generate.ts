@@ -248,7 +248,11 @@ export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifac
     // `node_modules` without a trailing slash: an agent may shortcut a test run with a symlink to
     // an existing dependency directory, and the directory-only pattern would let the link stage.
     { id: 'template-gitignore', title: 'Product git ignore rules', path: '.gitignore', content: 'node_modules\ndist/\n.env\n.env.*\n!.env.example\n.agent-dev/\n.vercel/\n.wrangler/\n' },
-    { id: 'template-quality-workflow', title: 'GitHub quality workflow', path: '.github/workflows/quality.yml', content: `name: quality\non:\n  pull_request:\n  push:\n    branches: [dev, main]\njobs:\n  quality:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-node@v5\n        with:\n          node-version: 22\n      - run: npm install\n      - run: npm run quality\n` },
+    // `cache: ''` on setup-node is required: the action defaults to dependency caching and fails
+    // the whole job with "Dependencies lock file is not found" when the repository has no lock
+    // file yet. The scaffold intentionally generates the lock file on first `npm install`, so the
+    // first pull request must run without a lock file present.
+    { id: 'template-quality-workflow', title: 'GitHub quality workflow', path: '.github/workflows/quality.yml', content: `name: quality\non:\n  pull_request:\n  push:\n    branches: [dev, main]\njobs:\n  quality:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-node@v5\n        with:\n          node-version: 22\n          cache: ''\n      - run: npm install\n      - run: npm run quality\n` },
   );
   return artifacts;
 }
