@@ -208,6 +208,7 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 10. [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)
 11. [通用开发 SOP](ai-agent-development-sop.md)
 12. [Agent Runtime Catalog](docs/agent-runtime-catalog.md)
+13. [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目暴露的 17 个缺陷、架构规则、免费模型选型、环境前提与遗留资源
 
 市场判断和长期范围见 [市场分析](docs/market-analysis.md) 与 [路线图](docs/roadmap.md)。现有项目事实依据见 [项目组合复盘](portfolio-development-review.md)。
 
