@@ -1,12 +1,19 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-23
-> 当前阶段：第一个真实项目已走完 Blueprint → Preview → Production 全周期并交付上线（`Receipt Test`，1/3）；项目 2 `Workspace Verify Fresh` 已推进到 PR + Preview（生产发布待用户批准）；Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；凭证管理 Phase 2 已实现
+> 更新时间：2026-08-24
+> 当前阶段：三个真实项目——`Receipt Test`（1/3）与 `Workspace Verify Fresh`（2/3）均已完整交付上线；项目 3 `Link Vault`（3/3）实现已由 OpenCode 完成、Quality Gate 通过、验收记录就绪，停在交付批准门前；Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；凭证管理 Phase 2 已实现
 > 工作目录：仓库根目录
 
 ## 最近进度
 
-- **项目 2（`Workspace Verify Fresh`）已推进到 PR + Preview，生产发布停在人工批准前**（本节写于 2026-08-23，是项目 2 的第一次真实走查）。从 Blueprint revision 到 Preview 的每一步都在真实 Provider 上执行：
+- **项目 3（`Link Vault`）实现已完成，停在交付验收批准前**（本节写于 2026-08-24）。功能是「API 保存并返回链接 + 页面表单与列表」：
+  - **Runtime 切到 OpenCode 2.0 驱动**：Codex 因火山方舟套餐额度耗尽持续 429（`exceeded retry limit, last status: 429`），改为 OpenCode 2.0 会话式执行。OpenCode 2.0 去掉了 v1 的 `-p --print`，非交互执行走 `api` 子命令 + `opencode2-driver.mjs`（会话创建 → 轮询 `message` 端点 → 按 `finish === 'stop'` 判定完成）。驱动在 `576b701` 提交（`fix(runtime): complete opencode runs on finish=stop and switch to nemotron-3-ultra-free`）。
+  - **免费模型选型（实测结论）**：目录里挂着的免费模型 ≠ 网关实际可用。`ling-3.0-flash-free`/`deepseek-v4-flash-free` 实测 401/400（网关不认模型名或凭证无权）；`big-pickle` 实测 429 限流；`hy3-free` 已废弃。最终锁定 `nemotron-3-ultra-free`（内置 `opencode` provider 的免费模型，1M 上下文 / 128K 输出，工具调用可用），设为 OpenCode 默认模型。默认模型定义见 `packages/agent-runtime/src/index.ts` 的 `opencode.buildCommand`。
+  - **运行结果**：attempt 4 `completed`（exit 0）。工作区提交链：`121deab`(feat: Add link saving with a title and URL) → `9ac2290`(runtime: completed) → `ab6fe73`(fix(web): resolve API base URL from api-base-url meta tag) → `640cee1`(chore: record quality gate passed) → `204f709`(acceptance: ready)。Quality Gate `passed`（lint/typecheck/5 单测/build/smoke），验收记录 `status=ready`、`criteriaConfirmed=true`。
+  - **当前卡点**：验收批准（`POST .../acceptance/approve`，确认串 `APPROVE_DELIVERY`，需具名批准人）——人工门，等用户确认。批准后走真实 GitHub Provider（开 PR → Preview → 生产发布），项目 2 的生产发布路径尚未在项目 3 复用前跑真实云端发布。
+  - **项目 3 待办**：用户批准验收 → `delivery/pull-request`（真实 GitHub 仓库 `bayernjf/link-vault`）→ PR CI → Preview → `release/request` + `release/approve`（人工）→ 生产上线。
+
+- **项目 2（`Workspace Verify Fresh`）已完整交付上线（2/3，2026-08-23 生产批准后完成）**。此前状态是 PR + Preview、生产停在人工批准前；用户批准后走 `release/request` + `release/approve`，生产从 `main` 独立 checkout 发布（修复路径 `962932a` 的第一次真实云端验证）。详情见下节（写于 2026-08-23）：
   - **归属修订**：旧 Blueprint 里四个归属字段全是 `test` 占位。发新 revision 3，把 `githubOwner`/`vercelTeam` 换成 `bayernjf`、`cloudflareAccount` 换成 `Jiangfengkxi@outlook.com's Account`、`supabaseOrganization` 换成 `jiangfengkx@163.com's Org`（前三个用 `gh api user`/`vercel whoami`/`wrangler whoami` 现场核实，与 `Receipt Test` 一致）。基线、Feature Task、交付验收三处闸门都按新规则具名 `feng` 通过——这是 Studio 新闸门输入框之外，通过 API 第一次验证「每个闸门都要求具名」。
   - **真实 Provider 接入**：`providers/apply` 创建私有仓库 `bayernjf/workspace-verify-fresh`；Vercel/Cloudflare 同名 Preview 项目已存在（上一轮 `workspace-verify-fresh-*` 按用户要求保留），noop 记录归属；Supabase 走 Manual noop。
   - **Feature Task + Codex 执行**：功能是「API 新增 `GET /api/version` 返回版本号，页面渲染 `API v1.0.0`」。Codex 改了 3 个文件 23 行（`apps/api/src/index.ts`、`apps/web/src/main.tsx`、`apps/api/src/health.test.ts`），本地 Quality Gate `passed`，人工验收批准后平台开 PR #1、状态 `PR_OPEN`。
