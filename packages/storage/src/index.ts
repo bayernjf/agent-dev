@@ -797,11 +797,22 @@ export class AgentDevStore {
       updatedAt: result.completedAt,
       history: run.history.map(item => item.attempt === attemptNumber ? { ...item, status: result.exitCode === 0 && !result.timedOut ? 'completed' : 'failed', result, completedAt: result.completedAt } : item),
     };
+    if (completed.status === 'completed') await this.commitAgentChanges(task);
     await this.writeRuntimeRun(completed, `runtime: ${completed.status}`);
     if (completed.status === 'completed') {
       await this.advanceDelivery(task.projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }]);
     }
     return completed;
+  }
+
+  // Every other commit in the pipeline stages only the report file it just wrote, and the agent
+  // never commits its own work. Without this step the branch that gets pushed and reviewed holds
+  // the scaffold alone, so the feature a human accepted would silently not ship.
+  private async commitAgentChanges(task: FeatureTask) {
+    await execFileAsync('git', ['add', '-A'], { cwd: task.workspacePath });
+    const staged = await execFileAsync('git', ['status', '--porcelain'], { cwd: task.workspacePath });
+    if (!staged.stdout.trim()) return;
+    await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `feat: ${task.title}`], { cwd: task.workspacePath });
   }
 
   async getRuntimeRun(projectId: string, blueprintRevision: number): Promise<RuntimeRun | null> {

@@ -1,9 +1,13 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { createBlueprint, createDefaultBlueprint } from '@agent-dev/blueprint';
 import { AgentDevStore } from '../src/index.js';
+
+const execFileAsync = promisify(execFile);
 
 describe('AgentDevStore', () => {
   it('persists a project, its initial blueprint revision, and a delivery run', async () => {
@@ -146,6 +150,37 @@ describe('AgentDevStore', () => {
       expect(acceptance).toMatchObject({ status: 'blocked', qualityStatus: 'failed', criteriaConfirmed: true });
       await expect(store.approveAcceptance(created.id, 1, 'test-user')).rejects.toThrow('Acceptance is blocked');
       await expect(readFile(join(completed.workspacePath, 'ACCEPTANCE_REPORT.md'), 'utf8')).resolves.toContain('Quality Gate status is failed.');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('commits the code the agent wrote so the pushed branch carries the feature', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const created = await store.createProject({
+        name: 'Agent Commit',
+        blueprint: createBlueprint('agent-commit', { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' }),
+      });
+      await store.approveBaseline(created.id, 1, 'test-user');
+      const applied = await store.executeApplyRun((await store.createApplyRun(created.id, 1)).id);
+      await store.createFeatureTask({ projectId: created.id, blueprintRevision: 1, title: 'Add receipt list', objective: 'Show the user a list of saved receipts.', acceptanceCriteria: ['The list renders saved receipts.'] });
+      await store.approveFeatureTask(created.id, 1, 'test-user');
+      await store.prepareRuntimeRun(created.id, 1);
+
+      await store.executeRuntimeRun(created.id, 1, async () => {
+        await writeFile(join(applied.workspacePath, 'apps', 'web', 'src', 'ReceiptList.tsx'), 'export const ReceiptList = () => null;\n', 'utf8');
+        return { exitCode: 0, signal: null, timedOut: false, output: 'wrote the feature', startedAt: new Date().toISOString(), completedAt: new Date().toISOString() };
+      });
+
+      // The pushed branch is built from committed history, so agent work left in the working tree
+      // would never reach review even though acceptance already passed.
+      const tracked = await execFileAsync('git', ['ls-tree', '-r', '--name-only', 'HEAD'], { cwd: applied.workspacePath });
+      expect(tracked.stdout).toContain('apps/web/src/ReceiptList.tsx');
+      const evidence = await store.getGitEvidence(created.id, 1);
+      expect(evidence.status).toBe('');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true });
