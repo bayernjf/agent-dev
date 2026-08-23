@@ -46,6 +46,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 ### 当前实施
 
 - [Phase 0 技术 Spike 状态](docs/spikes/README.md)：本机实测证据、阻塞项和进入工程阶段的 Gate。
+- [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目暴露的缺陷、架构规则、模型选型与环境前提。
 - [项目交接](handoff.md)：当前分支、硬约束、已完成工作和下一步。
 
 ## 当前状态
