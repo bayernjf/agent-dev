@@ -15,8 +15,11 @@
     4. **已存在的仓库永远补不到这两个分支**（`89b3585`）。上一条只在"新建仓库"分支里执行，而 `Receipt Test` 的仓库是修复前建的，重跑 `providers/apply` 也不会补。改为 apply 每次都确保声明的分支存在（容忍 `Reference already exists`）。这条就是被真实仓库逼出来的。
     5. **PR 只能靠人手抄 URL**（`a39be2b`）。新增 `POST /api/projects/:id/delivery/pull-request`（确认串 `OPEN_PULL_REQUEST`）：平台自己推送并开 PR，再回填证据。五道前置校验：Blueprint revision 一致、Feature Task 已批准、交付已验收、Apply 运行已完成、工作区干净；推送前校验 `origin` 必须等于资源清单里记录的仓库（否则会把产品发到没人记录的地方），并要求 HEAD **包含**被验收的提交（不是相等——验收之后平台还会提交自己的报告）。`POST .../delivery/pr-evidence` 保留为人工兜底。
     6. **生产发布用的是被保护的部署 URL**（`8afb9bd`）。`vercel deploy --prod` 回传的是不可变部署地址，它被 Deployment Protection 挡着（302 到 `vercel.com/sso-api`），于是健康检查把一个健康的 API 判成坏的；更严重的是下一步会把这个用户访问不到的地址写进 `VITE_API_BASE_URL`，**发出一个连不上自己 API 的生产前端**。改为 `vercel inspect --format=json` 取别名并使用最短的那个（长的带团队作用域，同样受保护）。这次失败恰好挡住了一次坏发布。
-  - **已确认但未修的架构缺口**：`ReleaseComposer` 是在本地 workspace 目录里直接发布生产的，从不 checkout `main`，也不检查 PR 是否合并。这与架构第 10 节「生产从 `main` 出」矛盾，后果是生产上跑的代码可能从未落到 `main`，无法从生产分支复现线上版本。本轮按用户决定先合 PR 进 `dev` 再发布，缺口记入 [决策记录](docs/decision-log.md) 待修。
-  - **另一处不一致**：Studio 的交付验收把 `approvedBy` 写死为 `local-user`（revision 5 的验收报告就带这个占位名），而生产批准要求具名并已落到 `PRODUCTION_EVIDENCE.md`（`feng`）。两处口径不一致，未修。
+  - **本轮暴露的两处架构缺口已于 2026-08-23 修掉**（在项目 2 之前，`962932a`、`0dbd15c`）：
+    1. **生产是从本地 workspace 发布的，不是从生产分支**（`962932a`）。`ReleaseComposer` 从不 checkout `main`，也不检查被验收的提交是否已合并，与架构第 10 节「生产从 `main` 出」矛盾——生产上跑的代码可能从未落到 `main`，无法从生产分支复现线上版本。现在发布前先 clone/fetch/reset 记录仓库的生产分支（每次尝试都 reset，避免重试发出上一次残留的位），校验被人工验收的提交是该分支 HEAD 的祖先（不是则拒绝并提示先合 PR），再在这个 checkout 上装依赖、跑质量门禁、构建和部署；Evidence 记下 `repository/branch/commit/acceptedCommit`。没有记录仓库或没有验收时，`release/plan` 直接给出原因、`release/request` 返回 409，Studio 把原因显示出来并禁用按钮，而不是静默发布 workspace。
+    2. **人工闸门的身份口径不一致**（`0dbd15c`）。基线、Feature Task、交付验收三处的 `approvedBy` 会回落到字面量 `local-user`（revision 5 的验收报告就带这个占位名），而生产批准要求具名（`feng`）。现在四处统一：API 强制要求 approver，Studio 在每个闸门收集姓名并记在浏览器本地，输入为空时不发请求。
+    - 两处都有测试覆盖（`npm test` 109 项全绿），但**尚未在真实云端跑过一遍**——真实验证要靠项目 2。Studio 的三个新输入框只做了类型与构建校验，尚未在浏览器里渲染过：现存项目都已越过这三个闸门，等项目 2 的新 revision 重新打开基线闸门时再看。已在浏览器里确认的只有发布区块的阻塞文案（现存项目没有记录仓库，显示"没有记录仓库…先 apply 真实 GitHub Provider"并禁用按钮）。
+    - **规则本身也补进了文档**（`96fd261`）：架构第 9 节「dev 与 production」原先只说 `main` 即生产、没说发布来源，实现才得以偏离，现在明确写下「生产从生产分支的独立 checkout 发布，且该分支必须已带上被验收的提交」；`docs/implementation-plan-v0.1.md` 与 `README.md` 的生产链路状态同步为"真实云端跑通一次，但走的是修复前的路径"。
   - **遗留真实资源（未清理）**：Preview 侧 Vercel `receipt-test-api-pr-1`、Cloudflare Pages `receipt-test-web-pr-1`（清理入口 `POST .../preview/cleanup`，确认串 `CLEANUP_PREVIEW`）；生产侧 `receipt-test-api`、`receipt-test-web` 是交付物，不应清理。另有前一轮的 `workspace-verify-fresh-*` 两个 Preview 项目仍在账号里。
   - **环境前提（会被误判成产品缺陷）**：本机所有 `*.vercel.app` 对不走系统代理的进程都是 DNS 污染（连不存在的域名都能解析出地址），必须用系统代理，且 Node 的 `fetch` 需要 `NODE_USE_ENV_PROXY=1` 才读代理变量。Daemon 必须带 `https_proxy`/`http_proxy`/`no_proxy=localhost,127.0.0.1`/`NODE_USE_ENV_PROXY=1` 启动，否则 `verify-api-health`、`verify-joint-smoke` 会报 `fetch failed`。另外新建的 Cloudflare Pages 域名有几秒才生效，第一次联合 Smoke 失败、重跑即过（已确认是域名生效延迟，未误记为缺陷）。
 
@@ -72,7 +75,7 @@
 - Studio 已接入上述两个证据阶段：仅在对应状态显示表单，提交后自动刷新项目状态、证据包和 Final Delivery Report。
 - Studio 重新打开项目时会通过 `GET .../delivery/pr-evidence` 与 `GET .../delivery/preview-evidence` 恢复已记录证据，避免状态与展示脱节。
 - 最近验证：`npm test`、`npm run typecheck`、`npm run build` 均已通过；`npm test` 最近一次为 13 个测试文件、61 个用例全通过。Vitest 文件级测试已串行执行，因为 Agent Catalog 会探测本机 CLI，并发探测会造成同步子进程超时假失败。本轮还覆盖 GitHub token 注入、Provider cache invalidation、Cloudflare CLI URL evidence、未验证 Agent 执行阻断和 Adapter 状态展示；真实云端尝试的完整边界见上一条。
-- 当前工作分支：`feature/20260802`。2026-08-23 记录：本地 HEAD 为 `8afb9bd`，`origin/feature/20260802` 为 `89b3585`（本地领先 1 个提交，未推送），`origin/dev` 为 `8101770`，`origin/main` 为 `7dd66ab`。分支状态随时会变，提交前应重新 `git fetch` 确认，不要沿用本行记录。
+- 当前工作分支：`feature/20260802`。2026-08-23 记录：本地 HEAD 为 `96fd261`，`origin/feature/20260802` 为 `c097d89`（本地领先 4 个提交，未推送），`origin/dev` 为 `c109792`，`origin/main` 为 `c696b74`。分支状态随时会变，提交前应重新 `git fetch` 确认，不要沿用本行记录。
 
 ## 1. 项目摘要
 
@@ -104,7 +107,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 凭证管理方案 | Phase 1 + Phase 2 已实现（详见 [凭证管理方案](docs/credential-management.md)）。凭证/元数据写入 Agent-Dev `.agent-dev` 目录，项目资源清单写入 workspace `.agent-dev`，自动生成 `.env`；Studio 凭证面板（引导模式 + 验证 + Supabase 手动配置 + 自定义 Key）已完成 |
 | Dual Preview 部署编排 | `packages/deployment-composer` 已实现：7 步幂等编排（含 Vercel SSO Protection 关闭）、精确 CORS origin、临时项目清理、Daemon Preview API 和 Studio 部署区块；证据会区分 Wrangler 实测 URL 与推导兜底 URL；真实云端 7/7 步已于 2026-08-14 跑通并独立复验，剩余未验证项是 PR 关闭后的清理链路 |
 | 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、固定 Web SaaS 模板、隔离工作区 Git baseline、Feature Task 与人工 Approval、Codex Runtime dry-run/Execute/Retry、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、Local Apply Simulator、XState 状态推进（含 `LOCAL_ACCEPTED`）、PR/Preview 证据推进 API、Fake Provider Adapter、真实 Provider Adapter（GitHub/Vercel/Cloudflare）及 Studio 展示、凭证管理 UI（含验证和引导）、Dual Preview 部署编排；Agent Catalog 已支持 Key-Value 内置目录、Studio 选择、Custom Agent 弹窗和 `.agent-dev/agents.conf` 持久化、刷新检测和只读 Capability Probe 展示；内置未安装项隐藏、custom 未安装项置灰；多 Agent 真实执行 Adapter、Supabase 真实自动接入尚未实现 |
-| 生产交付路径 | 已实现并**已在真实云端跑通一次**（2026-08-23，`Receipt Test` → `DELIVERED`，API `https://receipt-test-api.vercel.app`、页面 `https://receipt-test-web.pages.dev`，批准人 `feng`）：`ReleaseComposer` 7 步编排 + `release_runs` 日志 + Daemon `release/plan\|request\|approve\|retry` + Studio 发布区块。两道人工闸门（请求、具名批准）由状态机与 Schema 强制，Evidence 记录观测值而非判定常量，生产批准始终由用户本人给出。**已知缺口**：发布是在本地 Apply workspace 里执行的，从不 checkout `main`，与架构第 10 节「生产从 `main` 出」矛盾 |
+| 生产交付路径 | 已实现并**已在真实云端跑通一次**（2026-08-23，`Receipt Test` → `DELIVERED`，API `https://receipt-test-api.vercel.app`、页面 `https://receipt-test-web.pages.dev`，批准人 `feng`）：`ReleaseComposer` 9 步编排 + `release_runs` 日志 + Daemon `release/plan\|request\|approve\|retry` + Studio 发布区块。两道人工闸门（请求、具名批准）由状态机与 Schema 强制，Evidence 记录观测值而非判定常量，生产批准始终由用户本人给出。2026-08-23 起从记录仓库的生产分支 checkout 后发布，并要求该分支已带上被验收的提交（`962932a`），此前的"从本地 workspace 发布"缺口已修，但修复本身尚未在真实云端跑过 |
 | 失败 workspace 恢复 | 已实现：`POST .../apply/recover` 新建干净 workspace、保留旧的并报告其 Git 状态；`apply_runs.recovery_index` 保证顺序确定。已在真实被 Codex 破坏的 workspace 上用过——`Receipt Test` 的交付就跑在 `revision-5-recovery-1` 这个恢复出来的 workspace 上 |
 | 完整周期真实验证 | 1/3。`Receipt Test` 已完成 Blueprint → PR → Preview → Production 全周期；项目 2 计划用 `Workspace Verify Fresh`（其 Blueprint 里是 `test` 占位账号，需新 revision 换成真实归属）；项目 3 尚未创建 |
 | 测试、构建和部署 | 本地单元测试与 Studio build 已通过；真实云端部署已通过 GitHub 仓库创建 + Vercel 部署 + Cloudflare Pages 部署验证 |
@@ -221,7 +224,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
    - **项目 3**：尚未创建，需要新建一个 Blueprint。
    - 每个旧项目开始前仍要先走一次 workspace 恢复（CI actions 版本升级让所有既存 workspace 变成 `staleConfig`）。
    - 生产发布必须由用户本人批准，不能由 Agent 代按；Daemon 必须带代理变量与 `NODE_USE_ENV_PROXY=1` 启动，否则云端验证会假失败。
-   - 项目 1 暴露的两处已确认缺口应在项目 2 之前决定是否修：生产从本地 workspace 发布而非 `main`；Studio 交付验收的 `approvedBy` 写死为 `local-user`。
+   - 项目 1 暴露的两处缺口已在项目 2 之前修完（生产改为从生产分支发布；每个闸门都要求具名）。项目 2 因此同时是这两处修复的真实云端验证：发布前应看到 `Releasing <repo> branch main ...`，且发布必须在 PR 合并进生产分支之后才可能通过。
 
 ## 9. 用户决策
 

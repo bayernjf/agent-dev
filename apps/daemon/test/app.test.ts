@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,37 @@ import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-de
 import { createDaemonApp } from '../src/app.js';
 
 const directories: string[] = [];
+
+const RELEASE_REPOSITORY = 'acme/receipt-desk';
+const ACCEPTED_COMMIT = 'a'.repeat(40);
+
+const RELEASE_SOURCE = {
+  repository: RELEASE_REPOSITORY,
+  branch: 'main',
+  commit: 'b'.repeat(40),
+  acceptedCommit: ACCEPTED_COMMIT,
+};
+
+// A production release is only allowed once a repository is recorded and a human accepted a commit,
+// so a release test has to stand those two facts up rather than assume them.
+async function recordReleasePrerequisites(workspacePath: string, options: { repository?: string; acceptance?: boolean } = {}) {
+  const { repository = RELEASE_REPOSITORY, acceptance = true } = options;
+  if (repository) {
+    await mkdir(join(workspacePath, '.agent-dev'), { recursive: true });
+    await writeFile(join(workspacePath, '.agent-dev', 'project-resources.json'), JSON.stringify({
+      version: 1, projectName: 'Receipt Desk', projectId: 'project', blueprintRevision: 1,
+      updatedAt: '2026-08-23T00:00:00.000Z', providers: { github: { repository } },
+    }), 'utf8');
+  }
+  if (acceptance) {
+    await writeFile(join(workspacePath, 'acceptance.json'), JSON.stringify({
+      id: 'acceptance', projectId: 'project', blueprintRevision: 1, taskId: 'task',
+      status: 'approved', criteriaConfirmed: true, summary: 'Accepted.', qualityStatus: 'passed',
+      gitEvidence: { branch: 'feature/agent-dev/revision-1', head: ACCEPTED_COMMIT, status: '', diffStat: '' },
+      submittedAt: '2026-08-23T00:00:00.000Z', approvedBy: 'test-user', approvedAt: '2026-08-23T00:00:00.000Z',
+    }), 'utf8');
+  }
+}
 
 afterEach(async () => {
   await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
@@ -132,13 +163,22 @@ describe('daemon API', () => {
     });
     expect(beforeApproval.status).toBe(409);
 
-    const approved = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan/approve`, {
+    // An approval nobody is named on cannot be traced to a person, so there is no default identity.
+    const anonymous = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan/approve`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
     });
+    expect(anonymous.status).toBe(400);
+    await expect(anonymous.json()).resolves.toMatchObject({ error: expect.stringContaining('name of who approves it') });
+
+    const approved = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
+    });
     expect(approved.status).toBe(200);
-    await expect(approved.json()).resolves.toMatchObject({ approval: { status: 'approved', blueprintRevision: 1 }, plan: { noExternalChanges: true } });
+    await expect(approved.json()).resolves.toMatchObject({ approval: { status: 'approved', blueprintRevision: 1, approvedBy: 'test-user' }, plan: { noExternalChanges: true } });
 
     const plan = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/baseline-plan`);
     await expect(plan.json()).resolves.toMatchObject({ approval: { status: 'approved' } });
@@ -265,7 +305,7 @@ describe('daemon API', () => {
     });
     const { project } = await created.json() as { project: { id: string } };
     await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
     });
     await app.request(`http://localhost/api/projects/${project.id}/apply`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
@@ -316,7 +356,7 @@ describe('daemon API', () => {
     });
     const { project } = await created.json() as { project: { id: string } };
     await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
     });
     await app.request(`http://localhost/api/projects/${project.id}/apply`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
@@ -344,7 +384,7 @@ describe('daemon API', () => {
     });
     const { project } = await created.json() as { project: { id: string } };
     await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
     });
     const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
@@ -389,7 +429,7 @@ describe('daemon API', () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
     directories.push(directory);
     const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
-    const releaseCalls: { workspacePath: string; projectName: string }[] = [];
+    const releaseCalls: { workspacePath: string; projectName: string; source: unknown }[] = [];
     const { app } = createDaemonApp(store, undefined, {
       deployRelease: async options => {
         releaseCalls.push(options);
@@ -400,6 +440,7 @@ describe('daemon API', () => {
           webUrl: 'https://receipt-desk-web.pages.dev',
           corsOrigin: 'https://receipt-desk-web.pages.dev',
           observations: {
+            source: RELEASE_SOURCE,
             releaseQuality: { command: 'npm run quality', exitCode: 0 },
             apiHealth: { url: 'https://receipt-desk-api.vercel.app/api/health', httpStatus: 200, contentType: 'application/json', observedCorsHeader: 'https://receipt-desk-web.pages.dev' },
             webPage: { url: 'https://receipt-desk-web.pages.dev', httpStatus: 200, sourceBytes: 128, matchedApiBaseUrl: 'https://receipt-desk-api.vercel.app' },
@@ -418,11 +459,12 @@ describe('daemon API', () => {
     });
     const { project } = await created.json() as { project: { id: string } };
     await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
     });
-    await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+    const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
     });
+    const { run } = await applied.json() as { run: { workspacePath: string } };
 
     const plan = await app.request(`http://localhost/api/projects/${project.id}/release/plan`);
     expect(plan.status).toBe(200);
@@ -431,6 +473,10 @@ describe('daemon API', () => {
       corsOrigin: 'https://receipt-desk-web.pages.dev',
       productionApproval: 'required',
       releaseRun: null,
+      // Nothing has been applied to a real GitHub account, so there is no production branch to
+      // release from and the plan says so instead of pretending it could deploy.
+      source: null,
+      sourceReason: expect.stringContaining('No repository is recorded'),
     });
 
     // Approval cannot be reached without a request first, and neither can deploy anything on its own.
@@ -456,8 +502,26 @@ describe('daemon API', () => {
     const requested = await app.request(`http://localhost/api/projects/${project.id}/release/request`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
     });
-    expect(requested.status).toBe(200);
-    await expect(requested.json()).resolves.toMatchObject({ state: 'AWAITING_APPROVAL' });
+    // Reaching PREVIEW_READY is not enough: without a repository there is no production branch to
+    // release from, so the request is refused before a human is asked to approve anything.
+    expect(requested.status).toBe(409);
+    await expect(requested.json()).resolves.toMatchObject({ error: expect.stringContaining('No repository is recorded') });
+
+    // A recorded repository is not enough either: production must carry a commit a human accepted.
+    await recordReleasePrerequisites(run.workspacePath, { acceptance: false });
+    const withoutAcceptance = await app.request(`http://localhost/api/projects/${project.id}/release/request`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
+    });
+    expect(withoutAcceptance.status).toBe(409);
+    await expect(withoutAcceptance.json()).resolves.toMatchObject({ error: expect.stringContaining('Approve the delivery') });
+    expect(releaseCalls).toHaveLength(0);
+
+    await recordReleasePrerequisites(run.workspacePath);
+    const readyRequest = await app.request(`http://localhost/api/projects/${project.id}/release/request`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
+    });
+    expect(readyRequest.status).toBe(200);
+    await expect(readyRequest.json()).resolves.toMatchObject({ state: 'AWAITING_APPROVAL' });
     expect(releaseCalls).toHaveLength(0);
 
     const missingApprover = await app.request(`http://localhost/api/projects/${project.id}/release/approve`, {
@@ -471,7 +535,18 @@ describe('daemon API', () => {
       body: JSON.stringify({ confirmation: 'APPROVE_RELEASE', approvedBy: 'test-user', summary: 'Ship revision 1.' }),
     });
     expect(approved.status).toBe(200);
-    expect(releaseCalls).toEqual([{ workspacePath: expect.stringContaining('revision-1'), projectName: 'receipt-desk' }]);
+    // The release is handed the production branch of the recorded repository and the accepted commit,
+    // not just the local workspace the feature was implemented in.
+    expect(releaseCalls).toEqual([{
+      workspacePath: expect.stringContaining('revision-1'),
+      projectName: 'receipt-desk',
+      source: {
+        repository: RELEASE_REPOSITORY,
+        branch: 'main',
+        acceptedCommit: ACCEPTED_COMMIT,
+        checkoutPath: expect.stringContaining(join('releases', project.id, 'main')),
+      },
+    }]);
     await expect(approved.json()).resolves.toMatchObject({
       releaseRun: { status: 'completed', approvedBy: 'test-user' },
       evidence: { webUrl: 'https://receipt-desk-web.pages.dev', approvedBy: 'test-user' },
@@ -514,6 +589,7 @@ describe('daemon API', () => {
           webUrl: 'https://receipt-desk-web.pages.dev',
           corsOrigin: 'https://receipt-desk-web.pages.dev',
           observations: {
+            source: RELEASE_SOURCE,
             releaseQuality: { command: 'npm run quality', exitCode: 0 },
             apiHealth: { url: 'https://receipt-desk-api.vercel.app/api/health', httpStatus: 200, contentType: 'application/json', observedCorsHeader: 'https://receipt-desk-web.pages.dev' },
             webPage: { url: 'https://receipt-desk-web.pages.dev', httpStatus: 200, sourceBytes: 128, matchedApiBaseUrl: 'https://receipt-desk-api.vercel.app' },
@@ -532,11 +608,13 @@ describe('daemon API', () => {
     });
     const { project } = await created.json() as { project: { id: string } };
     await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE' }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
     });
-    await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+    const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
     });
+    const { run } = await applied.json() as { run: { workspacePath: string } };
+    await recordReleasePrerequisites(run.workspacePath);
     await store.advanceDelivery(project.id, [
       { type: 'START_IMPLEMENTATION' }, { type: 'IMPLEMENTATION_COMPLETE' },
       { type: 'VERIFY_COMPLETE' }, { type: 'PR_CREATED' }, { type: 'PREVIEW_AVAILABLE' },
