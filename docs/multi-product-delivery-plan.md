@@ -84,7 +84,11 @@ Product Type
 >
 > **实现进度（2026-08-24，补齐 Electron / 移动端 / api-tool）**：`desktop` 新增 `desktopShell: 'tauri' | 'electron'`（默认 tauri，Electron 面向需要 Node API 或已有 Electron 存量的团队）；Electron 分支产出 `electron/main.ts` + `electron/preload.ts` + Vite 渲染进程 + `electron-builder.yml`，渲染进程 `contextIsolation: true` / `nodeIntegration: false`，只能通过 preload 桥调用主进程。`mobile` 产出 Expo SDK 52 + expo-router 模板（`app/_layout.tsx` / `app/index.tsx` / `app.json` / `eas.json` / `babel.config.js`）。`api-tool` 产出 Hono on Vercel 的 API-first 单包（`/api/health` + `/api/echo`，`ALLOWED_ORIGIN` 显式白名单，无前端、不建 Cloudflare Pages）。
 >
-> 证据：三份生成物分别冷启动 `npm install` 后真跑自己的 `npm run quality` 全绿——api-tool `lint → typecheck → unit(2 tests) → build`、electron `typecheck(渲染+主进程两份 tsconfig) → build`、mobile `typecheck`（另用一行故意的类型错误确认它不是空跑）。**未做**：未启动 Electron 窗口、未跑 Expo 模拟器或 EAS Build、未在真实 CI 执行生成的工作流。真跑暴露缺陷 23（渲染进程入口不是模块，`declare global` 触发 `TS2669`），修复为把桥接类型移入 `src/desktop.d.ts`。签名/公证/商店提交改为每个需打包类型产出 `generated/DISTRIBUTION.md`。
+> 证据：三份生成物分别冷启动 `npm install` 后真跑自己的 `npm run quality` 全绿——api-tool `lint → typecheck → unit → build`、electron `typecheck(渲染+主进程两份 tsconfig) → build`、mobile `typecheck`（另用一行故意的类型错误确认它不是空跑）。**未做**：未启动 Electron 窗口、未跑 Expo 模拟器或 EAS Build、未在真实 CI 执行生成的工作流。真跑暴露缺陷 23（渲染进程入口不是模块，`declare global` 触发 `TS2669`），修复为把桥接类型移入 `src/desktop.d.ts`。签名/公证/商店提交改为每个需打包类型产出 `generated/DISTRIBUTION.md`。
+>
+> **实现进度（2026-08-25，api-tool 由空壳改为 MCP server）**：原模板只有 `/api/health` + `/api/echo`，是 web-saas 去掉前端的子集，既没有真实内容也没有形态区分度。改为 MCP server 后它才有独立交付链路：`src/server.ts` 用 `registerTool` + zod `inputSchema` 注册工具，`src/index.ts` 带 shebang 走 `StdioServerTransport`，`package.json` 声明 `bin`，消费方是 MCP 客户端的配置文件而不是 URL。SDK API 形状不靠记忆——联网检索被拒（403）后改为从 registry 装 `@modelcontextprotocol/sdk@1.30.0` 实测其类型定义确认（`registerTool` 为当前 API，旧的 `tool()` 已 deprecated）。
+>
+> 证据：生成物冷启动 `npm install` 后 `npm run quality`（`lint → typecheck → unit(3 tests) → build`）全绿，其中单测用 `InMemoryTransport.createLinkedPair()` 连真实 `Client` 覆盖工具发现、真实调用与坏参数拒绝；再用 `StdioClientTransport` **真 spawn 一次 `node dist/index.js`**，确认 shebang 保留、`inputSchema` 正确暴露给客户端（`text,topWords`）、真实调用返回 `words: 5 / sentences: 2 / frequent: three (2), two (2)`、空 `text` 被判 `isError`，且诊断信息走 stderr 未污染 stdout 的 JSON-RPC 通道。**未做**：未在 Claude Desktop / Cursor 真实客户端里注册运行，未 `npm publish`。
 
 ## 5. 选择规则
 
@@ -103,7 +107,7 @@ Product Type
 - `browser-extension`：MV3 + Vite/crxjs 脚手架，可本地 Load unpacked；商店图标与提交审核为人工步骤。
 - `desktop`：默认 Tauri v2 脚手架（Vite webview + Rust 核心），可本地构建出安装包；专业模式可选 `desktopShell: 'electron'`，产出 main/preload/renderer 三层与 `electron-builder.yml`。
 - `mobile`：Expo SDK 52 + expo-router 脚手架与 `eas.json` 构建 profile；质量闸门只做静态检查，真机/模拟器冒烟与 EAS Build 为人工步骤。
-- `api-tool`：Hono on Vercel 的 API-first 单包（无前端、不建 Cloudflare Pages），CORS 来源由 `ALLOWED_ORIGIN` 显式白名单，空值即不信任任何浏览器来源。
+- `api-tool`：MCP（Model Context Protocol）server，通过 stdio 被 MCP 客户端当本地进程 spawn，产物是 npm 包/可执行入口——**不部署到任何 URL，不建云端项目**。这是唯一自带独立交付链路的 API-first 形态；webhook 接收器与 HTTP tool endpoint 走的仍是 web-saas 的 API workspace 那条已验证过的路，不另立形态。
 
 六种类型都已生成真实模板，`notSupportedArtifact` 已删除。签名、公证、商店提交与证书类资产按设计保持人工：每个需要打包的类型都产出 `generated/DISTRIBUTION.md` 列出确切步骤。
 
