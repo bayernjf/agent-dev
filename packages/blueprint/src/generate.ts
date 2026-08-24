@@ -1,7 +1,10 @@
 import type { ProductBlueprint } from './index.js';
 
+// id is intentionally a string rather than a fixed literal union: each product type contributes its
+// own template ids (e.g. `template-landing-index`), and a closed union would force every type to
+// share the web-saas ids. The generator owns the namespace; tests assert by stable `path`.
 export type GeneratedArtifact = {
-  id: 'product-standard' | 'agent-instructions' | 'delivery-workflow' | 'environment-contract' | 'delivery-handoff' | 'template-root-package' | 'template-root-tsconfig' | 'template-eslint-config' | 'template-smoke-script' | 'template-vite-config' | 'template-readme' | 'template-web-package' | 'template-web-index' | 'template-web-main' | 'template-web-styles' | 'template-api-package' | 'template-api-index' | 'template-api-test' | 'template-api-vercel' | 'template-cloudflare' | 'template-gitignore' | 'template-quality-workflow';
+  id: string;
   title: string;
   path: string;
   content: string;
@@ -40,6 +43,48 @@ export type BaselinePlan = {
   resources: BaselinePlanResource[];
 };
 
+// Describes how the Governance layer (shared docs) should describe each product type's stack.
+// `hasBackend` gates whether backend/server-side env vars appear in the Environment Contract: static
+// types (landing page, extension, desktop, mobile) must not advertise Supabase/Vercel secrets.
+export const PRODUCT_TYPE_DESCRIPTORS: Record<string, { frontend: string; backend: string; deploySteps: string; hasBackend: boolean }> = {
+  'web-saas': {
+    frontend: 'React/Vite on Cloudflare Pages',
+    backend: 'Hono on Vercel Functions',
+    deploySteps: 'Deploy the Vercel API Preview, then the Cloudflare Pages Preview.',
+    hasBackend: true,
+  },
+  'landing-page': {
+    frontend: 'Static site on Cloudflare Pages',
+    backend: 'None (static, client-rendered)',
+    deploySteps: 'Deploy the Cloudflare Pages Preview (static build).',
+    hasBackend: false,
+  },
+  'browser-extension': {
+    frontend: 'Browser extension (manifest + injected UI)',
+    backend: 'Optional; defaults to None',
+    deploySteps: 'Build the extension bundle and upload to the store / sideload.',
+    hasBackend: false,
+  },
+  'desktop': {
+    frontend: 'Desktop shell (Tauri/Electron)',
+    backend: 'Optional; defaults to None',
+    deploySteps: 'Build the desktop bundle for the target OS.',
+    hasBackend: false,
+  },
+  'mobile': {
+    frontend: 'Mobile app (Expo/React Native)',
+    backend: 'Optional; defaults to None',
+    deploySteps: 'Build the mobile bundle and submit to the app store.',
+    hasBackend: false,
+  },
+  'api-tool': {
+    frontend: 'None (API-first)',
+    backend: 'Hono on Vercel Functions',
+    deploySteps: 'Deploy the Vercel API Preview.',
+    hasBackend: true,
+  },
+};
+
 function markdown(value: string) {
   return value.replaceAll('```', "'''");
 }
@@ -70,42 +115,48 @@ function analyticsVariables(blueprint: ProductBlueprint) {
 }
 
 function environmentContract(blueprint: ProductBlueprint) {
+  const desc = PRODUCT_TYPE_DESCRIPTORS[blueprint.spec.product.type];
+  const backendVariables = desc?.hasBackend
+    ? [
+        {
+          name: 'VITE_API_BASE_URL',
+          classification: 'public' as const,
+          source: 'derived Vercel deployment URL',
+          targets: 'cloudflare-pages',
+          validation: 'Health-check the deployed API URL before the frontend build.',
+        },
+        {
+          name: 'VITE_SUPABASE_URL',
+          classification: 'managed' as const,
+          source: 'Supabase project output',
+          targets: 'cloudflare-pages',
+          validation: 'Verify the value is a HTTPS Supabase project URL.',
+        },
+        {
+          name: 'VITE_SUPABASE_ANON_KEY',
+          classification: 'public' as const,
+          source: 'Supabase project output',
+          targets: 'cloudflare-pages',
+          validation: 'Verify it is an anon/publishable key, never a service role key.',
+        },
+        {
+          name: 'SUPABASE_SERVICE_ROLE_KEY',
+          classification: 'secret' as const,
+          source: 'Supabase secret reference',
+          targets: 'vercel-functions',
+          validation: 'Verify the key is absent from browser builds, Markdown and logs.',
+        },
+        {
+          name: 'ALLOWED_ORIGINS',
+          classification: 'derived' as const,
+          source: 'Cloudflare Pages deployment URL',
+          targets: 'vercel-functions',
+          validation: 'Run a cross-origin API smoke test from the Pages preview URL.',
+        },
+      ]
+    : [];
   const variables = [
-    {
-      name: 'VITE_API_BASE_URL',
-      classification: 'public',
-      source: 'derived Vercel deployment URL',
-      targets: 'cloudflare-pages',
-      validation: 'Health-check the deployed API URL before the frontend build.',
-    },
-    {
-      name: 'VITE_SUPABASE_URL',
-      classification: 'managed',
-      source: 'Supabase project output',
-      targets: 'cloudflare-pages',
-      validation: 'Verify the value is a HTTPS Supabase project URL.',
-    },
-    {
-      name: 'VITE_SUPABASE_ANON_KEY',
-      classification: 'public',
-      source: 'Supabase project output',
-      targets: 'cloudflare-pages',
-      validation: 'Verify it is an anon/publishable key, never a service role key.',
-    },
-    {
-      name: 'SUPABASE_SERVICE_ROLE_KEY',
-      classification: 'secret',
-      source: 'Supabase secret reference',
-      targets: 'vercel-functions',
-      validation: 'Verify the key is absent from browser builds, Markdown and logs.',
-    },
-    {
-      name: 'ALLOWED_ORIGINS',
-      classification: 'derived',
-      source: 'Cloudflare Pages deployment URL',
-      targets: 'vercel-functions',
-      validation: 'Run a cross-origin API smoke test from the Pages preview URL.',
-    },
+    ...backendVariables,
     ...analyticsVariables(blueprint),
   ];
 
@@ -184,61 +235,21 @@ export function getManualActions(blueprint: ProductBlueprint): ManualAction[] {
   return actions;
 }
 
-export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifact[] {
-  const productType = blueprint.spec.product.type;
-
-  // Only 'web-saas' ships generated templates today. For any other planned product type we return a
-  // guided task package instead of generating a Web scaffold we cannot actually deliver yet. This keeps
-  // the honesty boundary documented in multi-product-delivery-plan.md: Agent-Dev does not pretend to
-  // ship desktop/extension/mobile code.
-  if (productType !== 'web-saas') {
-    const roadmapStage: Record<string, string> = {
-      'landing-page': 'Stage B (static site + SEO/Lighthouse)',
-      'browser-extension': 'Stage C (manifest + bundling)',
-      'desktop': 'Stage D (Tauri/Electron)',
-      'mobile': 'Stage D (Expo/React Native)',
-      'api-tool': 'Stage A-table (API-first tooling)',
-    };
-    return [
-      {
-        id: 'delivery-handoff',
-        title: `Product type ${productType} — not yet auto-generated`,
-        path: 'generated/DELIVERY_HANDOFF.md',
-        content: [
-          `# ${productType} delivery — manual handoff`,
-          '',
-          `Product type: ${productType}`,
-          '',
-          `Agent-Dev currently generates \`web-saas\` products only. \`${productType}\` is part of the multi-product roadmap (${roadmapStage[productType] ?? 'later stage'}).`,
-          '',
-          '## What Agent-Dev will NOT generate',
-          '- No frontend or backend scaffold for this type yet.',
-          '- No deploy pipeline templates for this type yet.',
-          '',
-          '## What you should do',
-          '1. Track the roadmap item for this product type.',
-          '2. If you need this now, build the scaffold manually and connect it to the same Governance layer (Blueprint, Policy, Quality Gate, release).',
-          '',
-          '## Blueprint snapshot',
-          `- Product intent: ${blueprint.metadata.productIntent || 'Not specified'}`,
-          `- Data sensitivity: ${blueprint.spec.product.dataSensitivity}`,
-          `- Runtime: ${blueprint.spec.runtime.provider}`,
-          `- Analytics: ${blueprint.spec.analytics.providers.join(', ') || 'none'}`,
-        ].join('\n'),
-      },
-    ];
-  }
-
+// Governance artifacts are shared across product types: the Blueprint, Policy, Quality Gate and
+// release boundary are identical regardless of the delivered artifact shape. Only the Delivery
+// baseline and deploy step strings differ per type, drawn from PRODUCT_TYPE_DESCRIPTORS.
+function buildGovernanceArtifacts(blueprint: ProductBlueprint): GeneratedArtifact[] {
+  const desc = PRODUCT_TYPE_DESCRIPTORS[blueprint.spec.product.type] ?? PRODUCT_TYPE_DESCRIPTORS['web-saas'];
   const intent = markdown(blueprint.metadata.productIntent || 'Not specified yet.');
   const analytics = blueprint.spec.analytics.providers.length === 0 ? 'None' : blueprint.spec.analytics.providers.join(', ').toUpperCase();
   const quality = blueprint.spec.quality.required.join(', ');
   const header = `> Generated from ProductBlueprint revision ${blueprint.metadata.revision}. Do not edit this file directly.\n\n`;
-  const artifacts: GeneratedArtifact[] = [
+  return [
     {
       id: 'product-standard',
       title: 'Product Standard',
       path: 'generated/PRODUCT_STANDARD.md',
-      content: `${header}# ${markdown(blueprint.metadata.name)} Product Standard\n\n## Product intent\n${intent}\n\n## Delivery baseline\n- Frontend: React/Vite on Cloudflare Pages\n- API: Hono on Vercel Functions\n- Data and auth: Supabase\n- Source control: GitHub pull requests from ${blueprint.spec.sourceControl.integrationBranch} to ${blueprint.spec.sourceControl.productionBranch}\n- Preview: ${blueprint.spec.deployment.previewStrategy}\n- Analytics: ${analytics}\n\n## Quality contract\nRequired before preview: ${quality}.\n\n## Approval boundary\nProduction release, secret changes and sensitive-data changes require human approval.\n`,
+      content: `${header}# ${markdown(blueprint.metadata.name)} Product Standard\n\n## Product intent\n${intent}\n\n## Delivery baseline\n- Frontend: ${desc.frontend}\n- Backend: ${desc.backend}\n- Data and auth: ${desc.hasBackend ? 'Supabase' : 'Not provisioned for this product type'}\n- Source control: GitHub pull requests from ${blueprint.spec.sourceControl.integrationBranch} to ${blueprint.spec.sourceControl.productionBranch}\n- Preview: ${blueprint.spec.deployment.previewStrategy}\n- Analytics: ${analytics}\n\n## Quality contract\nRequired before preview: ${quality}.\n\n## Approval boundary\nProduction release, secret changes and sensitive-data changes require human approval.\n`,
     },
     {
       id: 'agent-instructions',
@@ -250,7 +261,7 @@ export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifac
       id: 'delivery-workflow',
       title: 'Delivery Workflow',
       path: 'generated/DELIVERY_WORKFLOW.md',
-      content: `${header}# Delivery Workflow\n\n1. Clarify feature scope and acceptance criteria.\n2. Create an isolated feature branch and worktree.\n3. Implement with the approved Agent instructions.\n4. Run ${quality}.\n5. Create a pull request to ${blueprint.spec.sourceControl.integrationBranch}.\n6. Deploy the Vercel API Preview, then the Cloudflare Pages Preview.\n7. Run the joint smoke test and request human preview approval.\n8. Open a release PR to ${blueprint.spec.sourceControl.productionBranch}; production deployment requires approval.\n9. Generate a delivery report with evidence and residual risks.\n`,
+      content: `${header}# Delivery Workflow\n\n1. Clarify feature scope and acceptance criteria.\n2. Create an isolated feature branch and worktree.\n3. Implement with the approved Agent instructions.\n4.  Run ${quality}.\n5. Create a pull request to ${blueprint.spec.sourceControl.integrationBranch}.\n6. ${desc.deploySteps}\n7. Run the joint smoke test and request human preview approval.\n8. Open a release PR to ${blueprint.spec.sourceControl.productionBranch}; production deployment requires approval.\n9. Generate a delivery report with evidence and residual risks.\n`,
     },
     {
       id: 'environment-contract',
@@ -265,9 +276,11 @@ export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifac
       content: `${header}# ${markdown(blueprint.metadata.name)} Handoff\n\n## Current state\n- Blueprint revision: ${blueprint.metadata.revision}\n- Delivery state: needs input\n- External resources: not created by this plan\n\n## Next owner actions\n${getManualActions(blueprint).map((action, index) => `${index + 1}. ${action.title}: ${action.reason}`).join('\n')}\n\n## Known boundaries\nProvider authorization, resource provisioning, production release and secret handling remain outside this dry run.\n`,
     },
   ];
+}
+function buildWebSaaS(blueprint: ProductBlueprint): GeneratedArtifact[] {
   const templateHeader = `Generated from ProductBlueprint revision ${blueprint.metadata.revision}.`;
   const templatePackageName = blueprint.metadata.name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-dev-product';
-  artifacts.push(
+  return [
     // Every check named in spec.quality.required has to be a script that really runs. A `quality`
     // script covering only a subset reports a passing gate while the unnamed checks never execute.
     { id: 'template-root-package', title: 'Web SaaS workspace package', path: 'package.json', content: JSON.stringify({ name: templatePackageName, private: true, type: 'module', packageManager: 'npm@10.8.2', scripts: { dev: 'concurrently -k "npm run dev -w web" "npm run dev -w api"', lint: 'eslint .', typecheck: 'tsc --noEmit', unit: 'vitest run', build: 'npm run build -w web', smoke: 'node scripts/smoke.mjs', quality: blueprint.spec.quality.required.map(check => `npm run ${check}`).join(' && ') }, workspaces: ['apps/web', 'apps/api'], devDependencies: { '@eslint/js': '^9.26.0', '@types/node': '^22.15.3', '@types/react': '^19.1.2', '@types/react-dom': '^19.1.2', '@vitejs/plugin-react': '^4.4.1', concurrently: '^9.1.0', eslint: '^9.26.0', globals: '^16.0.0', typescript: '^5.8.3', 'typescript-eslint': '^8.32.0', vite: '^7.3.6', vitest: '^3.1.3' } }, null, 2) + '\n' },
@@ -297,8 +310,84 @@ export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifac
     // file yet. The scaffold intentionally generates the lock file on first `npm install`, so the
     // first pull request must run without a lock file present.
     { id: 'template-quality-workflow', title: 'GitHub quality workflow', path: '.github/workflows/quality.yml', content: `name: quality\non:\n  pull_request:\n  push:\n    branches: [dev, main]\njobs:\n  quality:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-node@v5\n        with:\n          node-version: 22\n          cache: ''\n      - run: npm install\n      - run: npm run quality\n` },
-  );
-  return artifacts;
+  ];
+}
+
+// Landing pages are a single static site: no backend workspace, no workspace package manager. It
+// builds to Cloudflare Pages and the quality gate validates the static markup in-place (no browser).
+function buildLandingPage(blueprint: ProductBlueprint): GeneratedArtifact[] {
+  const templateHeader = `Generated from ProductBlueprint revision ${blueprint.metadata.revision}.`;
+  const safeName = blueprint.metadata.name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-dev-landing';
+  const layout = blueprint.metadata.customInstructions?.trim() || blueprint.metadata.productIntent || 'Your product, distilled to one page.';
+  const analyticsSnippet = blueprint.spec.analytics.providers.map(provider =>
+    provider === 'ga4'
+      ? `    <!-- GA4: injected only after consent; value from %VITE_GA4_MEASUREMENT_ID% -->`
+      : `    <!-- Clarity: injected only after consent; value from %VITE_CLARITY_PROJECT_ID% -->`
+  ).join('\n');
+
+  return [
+    // Plain static site, no workspace tooling. `npm run build` copies src/ to dist/ and asserts the
+    // markup carries a <main> landmark; `npm run quality` runs that build as the verification gate.
+    { id: 'template-root-package', title: 'Landing page package', path: 'package.json', content: JSON.stringify({ name: safeName, private: true, type: 'module', scripts: { build: 'node scripts/build.mjs', lint: 'node scripts/build.mjs --check', quality: blueprint.spec.quality.required.map(check => `npm run ${check}`).join(' && ') } }, null, 2) + '\n' },
+    { id: 'template-build-script', title: 'Static build / inject script', path: 'scripts/build.mjs', content: `import { mkdir, copyFile } from 'node:fs/promises';\n\n// Landing pages are static: this copies the src tree to dist and validates the entry document.\n// Analytics IDs are injected from the environment contract at deploy time, never committed.\nawait mkdir('dist', { recursive: true });\nfor (const file of ['index.html', 'styles.css', 'app.js']) {\n  await copyFile('src/' + file, 'dist/' + file).catch(() => {});\n}\nconst { readFile } = await import('node:fs/promises');\nconst html = await readFile('dist/index.html', 'utf8');\nif (!html.includes('<main')) throw new Error('build: index.html must contain a <main> landmark for SEO/a11y.');\nconsole.log('build: static site prepared at dist/');\n` },
+    { id: 'template-readme', title: 'Landing page README', path: 'README.md', content: `# ${markdown(blueprint.metadata.name)}\n\n${templateHeader}\n\nThis is the Agent-Dev landing-page Golden Path. A single static site deploys to Cloudflare Pages.\n\n## Local commands\n\n- \`npm run build\` (prepare static output)\n- \`npm run quality\`\n\n## Environment\n\nUse \`config/env.contract.yaml\` as the source of truth. Never commit secret values.\n` },
+    { id: 'template-index', title: 'Landing page entry', path: 'src/index.html', content: `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <meta name="description" content="${markdown(layout)}" />\n    <title>${markdown(blueprint.metadata.name)}</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <main>\n      <p class="eyebrow">${markdown(blueprint.metadata.name)}</p>\n      <h1>${markdown(blueprint.metadata.name)}</h1>\n      <p class="subhead">${markdown(layout)}</p>\n      <a class="cta" href="#get-started">Get started</a>\n    </main>\n    ${analyticsSnippet}\n    <script src="app.js"></script>\n  </body>\n</html>\n` },
+    {  id: 'template-styles', title: 'Landing page styles', path: 'src/styles.css', content: ':root { font-family: Inter, system-ui, sans-serif; color: #1d2823; background: #f6f7f3; } body { margin: 0; } main { max-width: 720px; margin: 18vh auto; padding: 32px; } h1 { font-size: clamp(36px, 8vw, 72px); margin: 0 0 16px; } .eyebrow { color: #286b43; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; } .subhead { font-size: 20px; line-height: 1.5; color: #4a5c52; } .cta { display: inline-block; margin-top: 24px; padding: 12px 20px; border-radius: 6px; background: #286b43; color: #fff; text-decoration: none; font-weight: 600; }\n' },
+    { id: 'template-app-js', title: 'Landing page script', path: 'src/app.js', content: `// No framework needed for a landing page. Keep it dependency-free so it loads fast and scores well.\nconst params = new URLSearchParams(location.search);\ndocument.querySelectorAll('[data-param]').forEach(el => {\n  const key = el.getAttribute('data-param');\n  if (params.has(key)) el.textContent = params.get(key);\n});\n` },
+    { id: 'template-cloudflare', title: 'Cloudflare Pages configuration', path: 'wrangler.toml', content: `# ${templateHeader}\nname = "${safeName}"\ncompatibility_date = "2026-01-01"\npages_build_output_dir = "dist"\n` },
+    { id: 'template-forms-gitignore', title: 'Landing page git ignore rules', path: '.gitignore', content: 'node_modules\ndist/\n.env\n.env.*\n!.env.example\n.agent-dev/\n.wrangler/\n' },
+    { id: 'template-quality-workflow', title: 'GitHub quality workflow', path: '.github/workflows/quality.yml', content: `name: quality\non:\n  pull_request:\n  push:\n    branches: [dev, main]\njobs:\n  quality:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-node@v5\n        with:\n          node-version: 22\n          cache: ''\n      - run: npm install\n      - run: npm run quality\n` },
+  ];
+}
+
+function notSupportedArtifact(blueprint: ProductBlueprint): GeneratedArtifact {
+  const productType = blueprint.spec.product.type;
+  const roadmapStage: Record<string, string> = {
+    'browser-extension': 'Stage C (manifest + bundling)',
+    'desktop': 'Stage D (Tauri/Electron)',
+    'mobile': 'Stage D (Expo/React Native)',
+    'api-tool': 'Stage A-table (API-first tooling)',
+  };
+  return {
+    id: 'delivery-handoff',
+    title: `Product type ${productType} — not yet auto-generated`,
+    path: 'generated/DELIVERY_HANDOFF.md',
+    content: [
+      `# ${productType} delivery — manual handoff`,
+      '',
+      `Product type: ${productType}`,
+      '',
+      `Agent-Dev currently generates \`web-saas\` and \`landing-page\` products. \`${productType}\` is part of the multi-product roadmap (${roadmapStage[productType] ?? 'later stage'}).`,
+      '',
+      '## What Agent-Dev will NOT generate',
+      '- No frontend or backend scaffold for this type yet.',
+      '- No deploy pipeline templates for this type yet.',
+      '',
+      '## What you should do',
+      '1. Track the roadmap item for this product type.',
+      '2. If you need this now, build the scaffold manually and connect it to the same Governance layer (Blueprint, Policy, Quality Gate, release).',
+      '',
+      '## Blueprint snapshot',
+      `- Product intent: ${blueprint.metadata.productIntent || 'Not specified'}`,
+      `- Data sensitivity: ${blueprint.spec.product.dataSensitivity}`,
+      `- Runtime: ${blueprint.spec.runtime.provider}`,
+      `- Analytics: ${blueprint.spec.analytics.providers.join(', ') || 'none'}`,
+    ].join('\n'),
+  };
+}
+
+export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifact[] {
+  const governance = buildGovernanceArtifacts(blueprint);
+  switch (blueprint.spec.product.type) {
+    case 'web-saas':
+      return [...governance, ...buildWebSaaS(blueprint)];
+    case 'landing-page':
+      return [...governance, ...buildLandingPage(blueprint)];
+    default:
+      // browser-extension / desktop / mobile / api-tool are enumerated for roadmap honesty but not
+      // yet backed by a template engine (see multi-product-delivery-plan.md).
+      return [notSupportedArtifact(blueprint)];
+  }
 }
 
 export function createDryRunPlan(blueprint: ProductBlueprint): DryRunPlan {

@@ -62,6 +62,8 @@ Product Type
 
 退出条件：非作者用户能从想法生成落地页，并完成一次 Preview 验收。
 
+> **实现进度（2026-08-24）**：`landing-page` 已在 `packages/blueprint/src/generate.ts` 落地为真实模板引擎——`buildLandingPage` 产出 `package.json` / `scripts/build.mjs` / `src/index.html` / `src/styles.css` / `src/app.js` / `wrangler.toml` / GitHub quality 工作流，共享治理文档（PRODUCT_STANDARD / AGENTS / DELIVERY_WORKFLOW / Environment Contract / Handoff）由 `buildGovernanceArtifacts` 复用。质量门禁 `quality` 实际调用静态构建脚本并校验 `<main>` 地标。余下外部依赖（域名、GA4/Clarity 注入到部署时注入）仍为 Manual Action。浏览器插件 / 桌面 / 移动 / API 工具仍为引导式 handoff，尚未生成模板。
+
 ### 阶段 C：浏览器插件
 
 优先参考 `word-picker`、`tab-manager`。范围包括 manifest、权限、浏览器兼容、本地打包、安装 smoke、商店包和商店提交清单。权限、隐私政策和商店审核必须人工批准。
@@ -84,4 +86,13 @@ Product Type
 
 ## 6. 当前边界
 
-当前代码只实现 `web-saas` Product Type。本文是后续架构和产品规划，不代表落地页、插件、桌面端或移动端已经可用。
+已实现并可生成真实模板的产品类型：
+
+- `web-saas`：React/Vite + Hono + Supabase 完整脚手架（Cloudflare Pages + Vercel）。
+- `landing-page`：静态站点脚手架（Cloudflare Pages），无后端依赖；环境契约不含 Supabase/Vercel 密钥。
+
+仍为引导式 handoff、尚未生成模板的产品类型（按路线图顺序，下一步即浏览器插件）：
+
+- `browser-extension`、`desktop`、`mobile`、`api-tool`：当前仅返回 `DELIVERY_HANDOFF.md` 指南，不生成任何源码脚手架；不能把通用代码生成误报为完整交付。
+
+当某类型尚无可验证模板时，Agent-Dev 必须明确显示“仅生成任务包/需人工交付”，不能把通用代码生成误报为完整交付。
