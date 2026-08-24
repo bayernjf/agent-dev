@@ -124,7 +124,7 @@ export const zh = {
     desktopShellTauri: 'Tauri v2（默认）',
     desktopShellElectron: 'Electron',
     desktopShellNote: 'Tauri 安装包更小、核心是 Rust。若主进程需要 Node API，或团队已有 Electron 存量，选 Electron。',
-    productTypeNote: '六种产品类型都已提供自动生成的模板：Web SaaS、落地页、浏览器插件、桌面端（默认 Tauri v2）、移动端（Expo）与 API 工具。签名、公证与商店提交仍是人工步骤，模板内附对应清单。',
+    productTypeNote: '六种产品类型都已提供自动生成的模板：Web SaaS、落地页、浏览器插件、桌面端（默认 Tauri v2）、移动端（Expo）与 API 工具（MCP server，由客户端当本地进程运行，不部署到 URL）。签名、公证与商店提交仍是人工步骤，模板内附对应清单。',
     productTypeWebSaas: 'Web SaaS',
     productTypeLandingPage: '落地页',
     productTypeBrowserExtension: '浏览器插件',

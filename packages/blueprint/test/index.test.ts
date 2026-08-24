@@ -255,18 +255,23 @@ describe('ProductBlueprint', () => {
     expect(path('generated/DISTRIBUTION.md')!.content).toContain('eas submit');
   });
 
-  it('generates an API-first tool with no web frontend', () => {
+  it('generates an MCP server, the one API-first shape with its own delivery path', () => {
     const blueprint = createBlueprint('Soft Desk', { productType: 'api-tool' }, 1);
     const artifacts = createDryRunPlan(blueprint).artifacts;
     const path = (value: string) => artifacts.find(a => a.path === value);
 
     expect(path('generated/DELIVERY_HANDOFF.md')!.content).not.toContain('not yet');
-    expect(path('src/index.ts')!.content).toContain("app.get('/api/health'");
-    expect(path('vercel.json')).toBeDefined();
-    // API-first means no Cloudflare Pages project and no web bundle.
+    expect(path('src/server.ts')!.content).toContain("server.registerTool(");
+    // The client spawns the built entry as a command, so it needs both a bin and a shebang.
+    expect(JSON.parse(path('package.json')!.content).bin).toEqual({ 'soft-desk': 'dist/index.js' });
+    expect(path('src/index.ts')!.content.startsWith('#!/usr/bin/env node')).toBe(true);
+    // stdout carries JSON-RPC; a stray console.log there breaks the client's parser.
+    expect(path('src/index.ts')!.content).toContain('console.error');
+    expect(path('src/index.ts')!.content).not.toContain('console.log');
+    // Nothing is deployed to a URL for this type.
+    expect(path('vercel.json')).toBeUndefined();
     expect(path('wrangler.toml')).toBeUndefined();
     expect(path('index.html')).toBeUndefined();
-    // A wildcard CORS origin would make every browser on the internet a trusted caller.
-    expect(path('src/index.ts')!.content).not.toContain("origin: '*'");
+    expect(path('generated/DISTRIBUTION.md')!.content).toContain('claude_desktop_config.json');
   });
 });

@@ -122,7 +122,7 @@ export const en = {
     desktopShellTauri: 'Tauri v2 (default)',
     desktopShellElectron: 'Electron',
     desktopShellNote: `Tauri ships a small bundle with a Rust core. Pick Electron when you need Node APIs in the main process or already ship Electron.`,
-    productTypeNote: `Every product type ships a generated template: Web SaaS, landing page, browser extension, desktop (Tauri v2 by default), mobile (Expo) and API tool. Signing, notarization and store submission stay manual — each template ships the checklist.`,
+    productTypeNote: `Every product type ships a generated template: Web SaaS, landing page, browser extension, desktop (Tauri v2 by default), mobile (Expo) and API tool (an MCP server run locally by a client, not deployed to a URL). Signing, notarization and store submission stay manual — each template ships the checklist.`,
     productTypeWebSaas: 'Web SaaS',
     productTypeLandingPage: 'Landing page',
     productTypeBrowserExtension: 'Browser extension',
