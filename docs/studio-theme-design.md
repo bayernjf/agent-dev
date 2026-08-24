@@ -1,6 +1,6 @@
 # Agent-Dev Studio 双主题设计方案
 
-> 状态：已定稿，待实施（落代码前依据）
+> 状态：已实施（提交 `90696d4`，`apps/studio/src/theme/` + CSS token 双主题）
 > 日期：2026-08-23
 > 范围：仅 Agent-Dev 产品本身（`apps/studio/` 前端视觉）；功能、文案、导航标签、API、生成产物一律不动
 

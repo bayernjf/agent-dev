@@ -34,6 +34,7 @@ export const zh = {
     valid: '有效',
     invalid: '无效',
     notApplicable: '不适用',
+    comingSoon: '即将上线',
     configured: '已配置',
     back: '返回',
     next: '下一步',
@@ -70,6 +71,14 @@ export const zh = {
       mode: '模式',
       deliveryState: '交付状态',
       updated: '更新时间',
+    },
+    detailEyebrow: '项目 · Revision {revision}',
+    tabs: '项目标签',
+    detailTabs: {
+      blueprint: '规划',
+      delivery: '交付',
+      iteration: '迭代',
+      release: '发布',
     },
   },
   projectState: {
@@ -292,6 +301,7 @@ export const zh = {
   },
   activity: {
     title: '活动',
+    eyebrow: '最近事件',
     panelTitle: '活动',
     localDaemonConnected: '本地 Daemon 已连接',
     localReady: '本地交付控制平面已就绪',
