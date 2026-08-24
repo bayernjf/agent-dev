@@ -4,7 +4,7 @@ import { Activity, ArrowLeft, ArrowRight, CheckCircle2, CircleDot, FolderKanban,
 import { useI18n, type KeyPath } from './i18n/i18n';
 import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
-import { getBlueprintDecisions, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
+import { getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
 import type {
   Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyStep, ApplyRun, DependencyReadiness,
@@ -15,6 +15,15 @@ import type {
   ReleaseSource, ReleasePlan, View,
 } from './types';
 import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
+
+const PRODUCT_TYPE_LABEL_KEYS = [
+  ['web-saas', 'blueprint.productTypeWebSaas'],
+  ['landing-page', 'blueprint.productTypeLandingPage'],
+  ['browser-extension', 'blueprint.productTypeBrowserExtension'],
+  ['desktop', 'blueprint.productTypeDesktop'],
+  ['mobile', 'blueprint.productTypeMobile'],
+  ['api-tool', 'blueprint.productTypeApiTool'],
+] as const satisfies readonly [BlueprintAnswers['productType'], KeyPath][];
 
 
 export function App() {
@@ -1481,8 +1490,8 @@ export function App() {
               <textarea id="product-intent" value={answers.productIntent} onChange={event => setAnswer('productIntent', event.target.value)} placeholder={t('blueprint.productIntentPlaceholder')} maxLength={500} />
 
               <fieldset className="choice-group"><legend>{t('blueprint.productType')}</legend><div className="choice-stack">
-                {(['web-saas', 'landing-page', 'browser-extension', 'desktop', 'mobile', 'api-tool'] as const).map(type => (
-                  <label key={type}><input type="radio" name="productType" checked={answers.productType === type} onChange={() => setAnswer('productType', type)} />{t(`productType.${type}`)}</label>
+                {PRODUCT_TYPE_LABEL_KEYS.map(([type, labelKey]) => (
+                  <label key={type}><input type="radio" name="productType" checked={answers.productType === type} onChange={() => setAnswer('productType', type)} />{t(labelKey)}</label>
                 ))}
                 <small>{t('blueprint.productTypeNote')}</small>
               </div></fieldset>
@@ -1513,11 +1522,16 @@ export function App() {
                 </div></fieldset>
                 <fieldset className="choice-group"><legend>{t('blueprint.runtime')}</legend><p>{t('blueprint.runtimeNote')}</p><div className="choice-stack">
                   {agents.length === 0 ? <small>{t('blueprint.runtimeCatalogLoading')}</small> : agents
-                    .filter(agent => agent.detected)
-                    .map(agent => (
-                      <label key={agent.id}><input type="radio" name="runtime" checked={answers.runtimeProvider === agent.id} onChange={() => setAnswer('runtimeProvider', agent.id)} />{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</label>
+                    .flatMap(agent => {
+                      // Only ids the Blueprint schema accepts can be chosen; a custom Agent whose id
+                      // is outside the enum would fail validation on revision create.
+                      const provider = runtimeProviderSchema.safeParse(agent.id);
+                      return agent.detected && provider.success ? [{ agent, provider: provider.data }] : [];
+                    })
+                    .map(({ agent, provider }) => (
+                      <label key={agent.id}><input type="radio" name="runtime" checked={answers.runtimeProvider === provider} onChange={() => setAnswer('runtimeProvider', provider)} />{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</label>
                     ))}
-                  {agents.filter(agent => agent.detected).length === 0 && <small>{t('blueprint.runtimeNoneDetected')}</small>}
+                  {agents.filter(agent => agent.detected && runtimeProviderSchema.safeParse(agent.id).success).length === 0 && <small>{t('blueprint.runtimeNoneDetected')}</small>}
                 </div></fieldset>
                 <label htmlFor="custom-instructions">{t('blueprint.customImplementationNote')}</label>
                 <textarea id="custom-instructions" value={answers.customInstructions} onChange={event => setAnswer('customInstructions', event.target.value)} placeholder={t('blueprint.customInstructionsPlaceholder')} maxLength={1000} />
