@@ -118,8 +118,29 @@ describe('ProductBlueprint', () => {
     expect(artifacts.find(a => a.path === 'apps/api/src/index.ts')).toBeDefined();
   });
 
-  it('does not pretend to generate non-web-saas types; returns a guided handoff instead', () => {
-    for (const kind of ['landing-page', 'browser-extension', 'desktop', 'mobile', 'api-tool'] as const) {
+  it('generates a real static-site scaffold for landing-page', () => {
+    const blueprint = createBlueprint('Launch Page', { productType: 'landing-page' }, 1);
+    expect(blueprint.spec.product.type).toBe('landing-page');
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+
+    // Landing pages ship real templates, not a guided handoff.
+    expect(artifacts.find(a => a.path === 'src/index.html')).toBeDefined();
+    expect(artifacts.find(a => a.path === 'scripts/build.mjs')).toBeDefined();
+    expect(artifacts.find(a => a.path === 'wrangler.toml')).toBeDefined();
+    const indexHtml = artifacts.find(a => a.path === 'src/index.html')!.content;
+    expect(indexHtml).toContain('<main');
+    expect(indexHtml).not.toContain('api-base-url');
+    // Static landings must not advertise backend secrets in the environment contract.
+    const env = artifacts.find(a => a.path === 'config/env.contract.yaml')!.content;
+    expect(env).not.toContain('SUPABASE_SERVICE_ROLE_KEY');
+    expect(env).not.toContain('VITE_SUPABASE_URL');
+    // Governance docs still describe the static delivery baseline.
+    const standard = artifacts.find(a => a.path === 'generated/PRODUCT_STANDARD.md')!.content;
+    expect(standard).toContain('Static site on Cloudflare Pages');
+  });
+
+  it('does not pretend to generate extension/desktop/mobile/api-tool; returns a guided handoff instead', () => {
+    for (const kind of ['browser-extension', 'desktop', 'mobile', 'api-tool'] as const) {
       const blueprint = createBlueprint('Other Desk', { productType: kind }, 1);
       expect(blueprint.spec.product.type).toBe(kind);
       expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
@@ -129,7 +150,7 @@ describe('ProductBlueprint', () => {
       expect(plan.artifacts[0]!.path).toBe('generated/DELIVERY_HANDOFF.md');
       expect(plan.artifacts[0]!.content).toContain(`Product type: ${kind}`);
       expect(plan.artifacts[0]!.content).toContain('is part of the multi-product roadmap');
-      // No Web scaffold is emitted for non-web-saas types.
+      // No Web scaffold is emitted for these types yet.
       expect(plan.artifacts.find(a => a.path === 'apps/web/src/main.tsx')).toBeUndefined();
     }
   });
