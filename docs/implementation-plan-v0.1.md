@@ -273,7 +273,9 @@ OpenAI 官方 Codex 文档核对在 2026-08-02 返回 `403`；实现阶段不能
 - 每个产品至少交付一个真实功能；
 - Cloudflare Pages 页面与 Vercel API 联合 Preview 可用；
 - Supabase Auth、CORS 和环境变量通过验证；
-- 至少一次真实失败从失败步骤恢复（恢复入口已实现：失败/过期 workspace 走 `apply/recover`，失败的发布走 `release/retry` 回到 `RELEASING`；仍需一次真实失败来满足本条）；
+- 至少一次真实失败从失败步骤恢复（恢复入口已实现：失败/过期 workspace 走 `apply/recover`，失败的发布走 `release/retry` 回到 `RELEASING`）：
+  - **真实证据**：项目 3（`Link Vault`）缺陷 9——被验收提交不在 `main` 上导致生产发布被拒，`release/retry` 补开 dev→main PR 后恢复成功（`real-world-lessons.md` 1.3 节）；
+  - **自动化证据**：`apps/daemon/test/app.test.ts` 的 `release/retry` 端到端用例断言失败发布经 retry 回到 `RELEASING` 并最终 `DELIVERED`，且恢复不重开人工批准闸门（`approvedBy` 保留）；`packages/workflow` 状态机测试覆盖 `FAILED → RETRY → 原步骤 → 继续完成` 的闭环。本条 ✅ 已满足。
 - production 始终保留人工批准（已由状态机与 Schema 强制：未批准的发布不写日志行、不触发任何部署）；
 - 所有完成结论有 Evidence；
 - 不提交、记录或暴露生产 Secret；
