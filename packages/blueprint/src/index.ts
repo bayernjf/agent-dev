@@ -11,9 +11,10 @@ export {
   type ManualAction,
 } from './generate.js';
 
-// Only 'web-saas' ships generated templates today. Other types are enumerated so the Blueprint
-// surface is honest about the upcoming multi-product roadmap (multi-product-delivery-plan.md); for
-// unsupported types the generator returns a guided task package instead of pretending to deliver.
+// Web SaaS, landing page and browser extension ship generated templates. Desktop, mobile and
+// api-tool are enumerated so the Blueprint surface is honest about the upcoming multi-product
+// roadmap (multi-product-delivery-plan.md); for those unsupported types the generator returns a
+// guided task package instead of pretending to deliver.
 export const productTypeSchema = z.enum([
   'web-saas',
   'landing-page',

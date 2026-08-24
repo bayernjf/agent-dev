@@ -139,8 +139,40 @@ describe('ProductBlueprint', () => {
     expect(standard).toContain('Static site on Cloudflare Pages');
   });
 
-  it('does not pretend to generate extension/desktop/mobile/api-tool; returns a guided handoff instead', () => {
-    for (const kind of ['browser-extension', 'desktop', 'mobile', 'api-tool'] as const) {
+  it('generates a real browser-extension (MV3) scaffold with a web-store delivery handoff', () => {
+    const blueprint = createBlueprint('Tab Guardian', { productType: 'browser-extension' }, 1);
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+
+    // Real extension source, not a guided handoff.
+    expect(artifacts.find(a => a.path === 'manifest.config.ts')).toBeDefined();
+    expect(artifacts.find(a => a.path === 'vite.config.ts')).toBeDefined();
+    expect(artifacts.find(a => a.path === 'popup.html')).toBeDefined();
+    expect(artifacts.find(a => a.path === 'options.html')).toBeDefined();
+    expect(artifacts.find(a => a.path === 'src/background.ts')).toBeDefined();
+    expect(artifacts.find(a => a.path === 'src/content.ts')).toBeDefined();
+    // Governance docs are still emitted.
+    expect(artifacts.find(a => a.path === 'generated/PRODUCT_STANDARD.md')).toBeDefined();
+    // No Web SaaS scaffold is emitted.
+    expect(artifacts.find(a => a.path === 'apps/web/src/main.tsx')).toBeUndefined();
+    // The handoff is the normal governance one, not the "not yet auto-generated" placeholder.
+    expect(artifacts.find(a => a.path === 'generated/DELIVERY_HANDOFF.md')?.content).not.toContain('not yet');
+  });
+
+  // Both assertions below pin defects found by really running the generated `quality` script:
+  // without DOM/node libs and skipLibCheck, `tsc --noEmit` fails on vite's own typings, and a
+  // manifest icon the generator never emits makes `vite build` fail with a missing asset.
+  it('generates a browser-extension scaffold whose own quality gate can pass', () => {
+    const artifacts = createDryRunPlan(createBlueprint('Tab Guardian', { productType: 'browser-extension' }, 1)).artifacts;
+    const tsconfig = JSON.parse(artifacts.find(a => a.path === 'tsconfig.json')!.content);
+    expect(tsconfig.compilerOptions.lib).toContain('DOM');
+    expect(tsconfig.compilerOptions.skipLibCheck).toBe(true);
+    expect(tsconfig.compilerOptions.types).toContain('node');
+    expect(JSON.parse(artifacts.find(a => a.path === 'package.json')!.content).devDependencies['@types/node']).toBeDefined();
+    expect(artifacts.find(a => a.path === 'manifest.config.ts')!.content).not.toContain('default_icon');
+  });
+
+  it('does not pretend to generate desktop/mobile/api-tool; returns a guided handoff instead', () => {
+    for (const kind of ['desktop', 'mobile', 'api-tool'] as const) {
       const blueprint = createBlueprint('Other Desk', { productType: kind }, 1);
       expect(blueprint.spec.product.type).toBe(kind);
       expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
