@@ -95,8 +95,18 @@ describe('ProductBlueprint', () => {
   it('backs every declared quality check with a script that actually runs, for every generated product type', () => {
     // The gate is one `npm run quality` chain: a check declared in the contract but missing from
     // scripts stops the chain with "Missing script", so the product's CI can never go green.
-    for (const productType of ['web-saas', 'landing-page', 'browser-extension', 'desktop'] as const) {
-      const blueprint = createBlueprint('Receipt Desk', { productType }, 1);
+    const combos = [
+      { productType: 'web-saas' },
+      { productType: 'landing-page' },
+      { productType: 'browser-extension' },
+      { productType: 'desktop', desktopShell: 'tauri' },
+      { productType: 'desktop', desktopShell: 'electron' },
+      { productType: 'mobile' },
+      { productType: 'api-tool' },
+    ] as const;
+    for (const combo of combos) {
+      const productType = combo.productType;
+      const blueprint = createBlueprint('Receipt Desk', combo, 1);
       const artifacts = createDryRunPlan(blueprint).artifacts;
       const rootPackage = JSON.parse(artifacts.find(artifact => artifact.path === 'package.json')!.content) as { scripts: Record<string, string> };
 
@@ -214,19 +224,49 @@ describe('ProductBlueprint', () => {
     expect(path('.gitignore')!.content).toContain('src-tauri/target/');
   });
 
-  it('does not pretend to generate mobile/api-tool; returns a guided handoff instead', () => {
-    for (const kind of ['mobile', 'api-tool'] as const) {
-      const blueprint = createBlueprint('Other Desk', { productType: kind }, 1);
-      expect(blueprint.spec.product.type).toBe(kind);
-      expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
+  it('generates an Electron desktop scaffold when professional mode picks that shell', () => {
+    const blueprint = createBlueprint('Soft Desk', { productType: 'desktop', desktopShell: 'electron' }, 1);
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    const path = (value: string) => artifacts.find(a => a.path === value);
 
-      const plan = createDryRunPlan(blueprint);
-      expect(plan.artifacts).toHaveLength(1);
-      expect(plan.artifacts[0]!.path).toBe('generated/DELIVERY_HANDOFF.md');
-      expect(plan.artifacts[0]!.content).toContain(`Product type: ${kind}`);
-      expect(plan.artifacts[0]!.content).toContain('is part of the multi-product roadmap');
-      // No Web scaffold is emitted for these types yet.
-      expect(plan.artifacts.find(a => a.path === 'apps/web/src/main.tsx')).toBeUndefined();
-    }
+    expect(path('src-tauri/tauri.conf.json')).toBeUndefined();
+    expect(path('electron/main.ts')!.content).toContain("ipcMain.handle('app-version'");
+    // The renderer must not get Node APIs of its own; the preload bridge is the only channel.
+    expect(path('electron/main.ts')!.content).toContain('nodeIntegration: false');
+    expect(path('electron/preload.ts')!.content).toContain('contextBridge.exposeInMainWorld');
+    // Electron loads the built renderer over file://, where an absolute base 404s every chunk.
+    expect(path('vite.config.mts')!.content).toContain("base: './'");
+    expect(path('electron-builder.yml')).toBeDefined();
+    expect(blueprint.spec.quality.required).toEqual(['typecheck', 'build']);
+  });
+
+  it('generates an Expo mobile scaffold with the store steps kept manual', () => {
+    const blueprint = createBlueprint('Soft Desk', { productType: 'mobile' }, 1);
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    const path = (value: string) => artifacts.find(a => a.path === value);
+
+    expect(path('generated/PRODUCT_STANDARD.md')).toBeDefined();
+    expect(path('generated/DELIVERY_HANDOFF.md')!.content).not.toContain('not yet');
+    expect(path('app/_layout.tsx')!.content).toContain("from 'expo-router'");
+    expect(path('app/index.tsx')).toBeDefined();
+    expect(path('eas.json')).toBeDefined();
+    // Bundle identifiers are dotted and reject the hyphens a product slug carries.
+    expect(JSON.parse(path('app.json')!.content).expo.ios.bundleIdentifier).toBe('io.agentdev.softdesk');
+    expect(path('generated/DISTRIBUTION.md')!.content).toContain('eas submit');
+  });
+
+  it('generates an API-first tool with no web frontend', () => {
+    const blueprint = createBlueprint('Soft Desk', { productType: 'api-tool' }, 1);
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    const path = (value: string) => artifacts.find(a => a.path === value);
+
+    expect(path('generated/DELIVERY_HANDOFF.md')!.content).not.toContain('not yet');
+    expect(path('src/index.ts')!.content).toContain("app.get('/api/health'");
+    expect(path('vercel.json')).toBeDefined();
+    // API-first means no Cloudflare Pages project and no web bundle.
+    expect(path('wrangler.toml')).toBeUndefined();
+    expect(path('index.html')).toBeUndefined();
+    // A wildcard CORS origin would make every browser on the internet a trusted caller.
+    expect(path('src/index.ts')!.content).not.toContain("origin: '*'");
   });
 });
