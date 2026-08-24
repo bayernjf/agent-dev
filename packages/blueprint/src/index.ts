@@ -11,10 +11,9 @@ export {
   type ManualAction,
 } from './generate.js';
 
-// Web SaaS, landing page, browser extension and desktop (Tauri v2) ship generated templates.
-// Mobile and api-tool are enumerated so the Blueprint surface is honest about the upcoming
-// multi-product roadmap (multi-product-delivery-plan.md); for those unsupported types the
-// generator returns a guided task package instead of pretending to deliver.
+// Every product type now ships a generated template: web-saas, landing-page, browser-extension,
+// desktop (Tauri v2 by default, Electron in professional mode), mobile (Expo) and api-tool.
+// See multi-product-delivery-plan.md for what stays a manual step per type (signing, store review).
 export const productTypeSchema = z.enum([
   'web-saas',
   'landing-page',
@@ -24,6 +23,9 @@ export const productTypeSchema = z.enum([
   'api-tool',
 ]);
 export const blueprintModeSchema = z.enum(['beginner', 'professional']);
+// Tauri is the default desktop shell (small bundles, Rust core). Electron is offered in
+// professional mode for teams that need Node APIs in the main process or already ship Electron.
+export const desktopShellSchema = z.enum(['tauri', 'electron']);
 export const analyticsProviderSchema = z.enum(['ga4', 'clarity']);
 
 // Runtime provider ids must match keys in the agent-runtime AGENT_ADAPTERS registry. `local-` is a
@@ -45,6 +47,7 @@ export const blueprintAnswersSchema = z.object({
   previewStrategy: z.enum(['per-pull-request', 'stable-dev-api']).default('per-pull-request'),
   analyticsProviders: z.array(analyticsProviderSchema).default([]),
   runtimeProvider: runtimeProviderSchema.default('local-codex'),
+  desktopShell: desktopShellSchema.default('tauri'),
   customInstructions: z.string().trim().max(1000).default(''),
   githubOwner: z.string().trim().max(120).default(''),
   vercelTeam: z.string().trim().max(120).default(''),
@@ -68,6 +71,7 @@ export const productBlueprintSchema = z.object({
     product: z.object({
       type: productTypeSchema,
       dataSensitivity: z.enum(['standard', 'sensitive']),
+      desktopShell: desktopShellSchema,
     }),
     stack: z.object({
       frontend: z.literal('react-vite'),
@@ -116,12 +120,20 @@ export type BlueprintDecision = {
 
 // Every check named here has to be a real script in that product type's generated package.json,
 // otherwise the generated `quality` gate dies mid-run and CI can never go green.
-const QUALITY_CHECKS_BY_PRODUCT_TYPE: Record<string, ProductBlueprint['spec']['quality']['required']> = {
+const QUALITY_CHECKS: Record<string, ProductBlueprint['spec']['quality']['required']> = {
   'web-saas': ['lint', 'typecheck', 'unit', 'build', 'smoke'],
   'landing-page': ['lint', 'build'],
   'browser-extension': ['typecheck', 'build'],
-  desktop: ['typecheck', 'build', 'rust-check'],
+  'desktop:tauri': ['typecheck', 'build', 'rust-check'],
+  'desktop:electron': ['typecheck', 'build'],
+  mobile: ['typecheck'],
+  'api-tool': ['lint', 'typecheck', 'unit', 'build'],
 };
+
+export function qualityChecksFor(productType: string, desktopShell = 'tauri'): ProductBlueprint['spec']['quality']['required'] {
+  const key = productType === 'desktop' ? `desktop:${desktopShell}` : productType;
+  return QUALITY_CHECKS[key] ?? QUALITY_CHECKS['web-saas']!;
+}
 
 export function createBlueprint(name: string, input: Partial<BlueprintAnswers> = {}, revision = 1): ProductBlueprint {
   const answers = blueprintAnswersSchema.parse(input);
@@ -136,7 +148,11 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
       customInstructions: answers.customInstructions,
     },
     spec: {
-      product: { type: productTypeSchema.parse(answers.productType), dataSensitivity: answers.dataSensitivity },
+      product: {
+        type: productTypeSchema.parse(answers.productType),
+        dataSensitivity: answers.dataSensitivity,
+        desktopShell: desktopShellSchema.parse(answers.desktopShell),
+      },
       stack: { frontend: 'react-vite', api: 'hono', packageManager: 'npm' },
       sourceControl: {
         provider: 'github',
@@ -158,7 +174,7 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
         maxAutomaticFixAttempts: 2,
         secretChangesRequireApproval: true,
       },
-      quality: { required: QUALITY_CHECKS_BY_PRODUCT_TYPE[answers.productType] ?? QUALITY_CHECKS_BY_PRODUCT_TYPE['web-saas'] },
+      quality: { required: qualityChecksFor(answers.productType, answers.desktopShell) },
     },
   });
 }
