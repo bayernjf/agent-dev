@@ -1,4 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <style>
+    .favicon-border { stroke: transparent; }
+    @media (prefers-color-scheme: dark) {
+      .favicon-border { stroke: #7A8695; }
+    }
+  </style>
   <defs>
     <linearGradient id="adBg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#1e2a5a"/>
@@ -18,8 +24,8 @@
 
   <!-- 外框：圆角矩形，深海军蓝渐变底 -->
   <rect width="32" height="32" rx="7" fill="url(#adBg)"/>
-  <!-- 顶部高光描边，增加质感 -->
-  <rect x="0.5" y="0.5" width="31" height="31" rx="6.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <!-- 深色模式下增加浅色描边，提升辨识度 -->
+  <rect class="favicon-border" x="0.5" y="0.5" width="31" height="31" rx="6.5" fill="none" stroke-width="1"/>
 
   <!-- 实体齿轮：圆盘 + 8 个宽齿，占满方形区域 -->
   <g fill="url(#adInk)" mask="url(#adHole)">
