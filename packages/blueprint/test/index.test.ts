@@ -103,10 +103,34 @@ describe('ProductBlueprint', () => {
     }
     // A `unit` script with no test file, or a `lint` script with no config, exits non-zero rather
     // than reporting a passing gate — so the scaffold has to ship both.
-    expect(artifacts.map(artifact => artifact.path)).toEqual(expect.arrayContaining(['eslint.config.js', 'apps/api/src/health.test.ts', 'scripts/smoke.mjs', '.gitignore']));
+    expect(artifacts.map(artifact => artifact.path)).toEqual(expect.arrayContaining(['eslint.config.js', 'apps/api/src/health.test.ts',, 'scripts/smoke.mjs', '.gitignore']));
     // Agent work is committed with `git add -A`, so the generated secret file and the provider CLI
     // state directories have to be ignored or they land in the product's first pull request.
     const ignore = artifacts.find(artifact => artifact.path === '.gitignore')!.content;
     for (const rule of ['.env', '.env.*', '.agent-dev/', '.vercel/', '.wrangler/']) expect(ignore).toContain(rule);
+  });
+
+  it('keeps web-saas as the default product type and generates the full scaffold', () => {
+    const blueprint = createDefaultBlueprint('Receipt Desk');
+    expect(blueprint.spec.product.type).toBe('web-saas');
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    expect(artifacts.find(a => a.path === 'apps/web/src/main.tsx')).toBeDefined();
+    expect(artifacts.find(a => a.path === 'apps/api/src/index.ts')).toBeDefined();
+  });
+
+  it('does not pretend to generate non-web-saas types; returns a guided handoff instead', () => {
+    for (const kind of ['landing-page', 'browser-extension', 'desktop', 'mobile', 'api-tool'] as const) {
+      const blueprint = createBlueprint('Other Desk', { productType: kind }, 1);
+      expect(blueprint.spec.product.type).toBe(kind);
+      expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
+
+      const plan = createDryRunPlan(blueprint);
+      expect(plan.artifacts).toHaveLength(1);
+      expect(plan.artifacts[0]!.path).toBe('generated/DELIVERY_HANDOFF.md');
+      expect(plan.artifacts[0]!.content).toContain(`Product type: ${kind}`);
+      expect(plan.artifacts[0]!.content).toContain('is part of the multi-product roadmap');
+      // No Web scaffold is emitted for non-web-saas types.
+      expect(plan.artifacts.find(a => a.path === 'apps/web/src/main.tsx')).toBeUndefined();
+    }
   });
 });

@@ -185,6 +185,50 @@ export function getManualActions(blueprint: ProductBlueprint): ManualAction[] {
 }
 
 export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifact[] {
+  const productType = blueprint.spec.product.type;
+
+  // Only 'web-saas' ships generated templates today. For any other planned product type we return a
+  // guided task package instead of generating a Web scaffold we cannot actually deliver yet. This keeps
+  // the honesty boundary documented in multi-product-delivery-plan.md: Agent-Dev does not pretend to
+  // ship desktop/extension/mobile code.
+  if (productType !== 'web-saas') {
+    const roadmapStage: Record<string, string> = {
+      'landing-page': 'Stage B (static site + SEO/Lighthouse)',
+      'browser-extension': 'Stage C (manifest + bundling)',
+      'desktop': 'Stage D (Tauri/Electron)',
+      'mobile': 'Stage D (Expo/React Native)',
+      'api-tool': 'Stage A-table (API-first tooling)',
+    };
+    return [
+      {
+        id: 'delivery-handoff',
+        title: `Product type ${productType} — not yet auto-generated`,
+        path: 'generated/DELIVERY_HANDOFF.md',
+        content: [
+          `# ${productType} delivery — manual handoff`,
+          '',
+          `Product type: ${productType}`,
+          '',
+          `Agent-Dev currently generates \`web-saas\` products only. \`${productType}\` is part of the multi-product roadmap (${roadmapStage[productType] ?? 'later stage'}).`,
+          '',
+          '## What Agent-Dev will NOT generate',
+          '- No frontend or backend scaffold for this type yet.',
+          '- No deploy pipeline templates for this type yet.',
+          '',
+          '## What you should do',
+          '1. Track the roadmap item for this product type.',
+          '2. If you need this now, build the scaffold manually and connect it to the same Governance layer (Blueprint, Policy, Quality Gate, release).',
+          '',
+          '## Blueprint snapshot',
+          `- Product intent: ${blueprint.metadata.productIntent || 'Not specified'}`,
+          `- Data sensitivity: ${blueprint.spec.product.dataSensitivity}`,
+          `- Runtime: ${blueprint.spec.runtime.provider}`,
+          `- Analytics: ${blueprint.spec.analytics.providers.join(', ') || 'none'}`,
+        ].join('\n'),
+      },
+    ];
+  }
+
   const intent = markdown(blueprint.metadata.productIntent || 'Not specified yet.');
   const analytics = blueprint.spec.analytics.providers.length === 0 ? 'None' : blueprint.spec.analytics.providers.join(', ').toUpperCase();
   const quality = blueprint.spec.quality.required.join(', ');

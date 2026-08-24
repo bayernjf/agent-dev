@@ -11,7 +11,17 @@ export {
   type ManualAction,
 } from './generate.js';
 
-export const productTypeSchema = z.literal('web-saas');
+// Only 'web-saas' ships generated templates today. Other types are enumerated so the Blueprint
+// surface is honest about the upcoming multi-product roadmap (multi-product-delivery-plan.md); for
+// unsupported types the generator returns a guided task package instead of pretending to deliver.
+export const productTypeSchema = z.enum([
+  'web-saas',
+  'landing-page',
+  'browser-extension',
+  'desktop',
+  'mobile',
+  'api-tool',
+]);
 export const blueprintModeSchema = z.enum(['beginner', 'professional']);
 export const analyticsProviderSchema = z.enum(['ga4', 'clarity']);
 
@@ -28,6 +38,7 @@ export const runtimeProviderSchema = z.enum([
 
 export const blueprintAnswersSchema = z.object({
   mode: blueprintModeSchema.default('beginner'),
+  productType: productTypeSchema.default('web-saas'),
   productIntent: z.string().trim().max(500).default(''),
   dataSensitivity: z.enum(['standard', 'sensitive']).default('standard'),
   previewStrategy: z.enum(['per-pull-request', 'stable-dev-api']).default('per-pull-request'),
@@ -115,7 +126,7 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
       customInstructions: answers.customInstructions,
     },
     spec: {
-      product: { type: 'web-saas', dataSensitivity: answers.dataSensitivity },
+      product: { type: productTypeSchema.parse(answers.productType), dataSensitivity: answers.dataSensitivity },
       stack: { frontend: 'react-vite', api: 'hono', packageManager: 'npm' },
       sourceControl: {
         provider: 'github',
