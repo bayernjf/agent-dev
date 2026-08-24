@@ -1,89 +1,29 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import {
-  Activity, ArrowRight, CheckCircle2, CircleDot, FolderKanban, KeyRound, Moon, PlugZap, RefreshCw, Settings2, ShieldCheck, Sparkles, Sun,
+import { Activity, ArrowLeft, ArrowRight, CheckCircle2, CircleDot, FolderKanban, KeyRound, Moon, PlugZap, RefreshCw, ShieldCheck, Sparkles, Sun,
 } from 'lucide-react';
 import { useI18n, type KeyPath } from './i18n/i18n';
+import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
-import { getBlueprintDecisions, type BaselinePlan, type BlueprintAnswers, type DryRunPlan, type ProductBlueprint } from '@agent-dev/blueprint';
+import { getBlueprintDecisions, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
+import type {
+  Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyStep, ApplyRun, DependencyReadiness,
+  QualityGateResult, DependencyInstallResult, FeatureTask, RuntimeAttempt, RuntimeRun, GitEvidence,
+  PrEvidence, PreviewEvidence, AcceptanceRecord, ProviderPlan, ProviderVerification, AgentDescriptor,
+  AgentCapabilityProbe, CredentialMeta, ProjectResources, CredentialVerifyResult, PreviewStep,
+  PreviewDeploymentResult, WorkspaceVerification, ReleaseStep, ReleaseRun, ReleaseEvidence,
+  ReleaseSource, ReleasePlan, View,
+} from './types';
+import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
 
-type Project = {
-  id: string;
-  name: string;
-  productType: string;
-  state: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type ProjectDetail = Project & { blueprint: ProductBlueprint };
-type ActivityEntry = { id: string; text: string; time: string };
-type BaselineApproval = { projectId: string; blueprintRevision: number; status: 'approved'; approvedBy: string; approvedAt: string };
-type ApplyStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed'; detail?: string };
-type ApplyRun = { id: string; projectId: string; blueprintRevision: number; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; recoveryIndex: number; workspacePath: string; steps: ApplyStep[]; createdAt: string; updatedAt: string };
-type DependencyReadiness = { status: 'not-applied' | 'missing-dependencies' | 'ready'; workspacePath: string | null; packageLockPresent: boolean; nodeModulesPresent: boolean; qualityCommandPresent: boolean; nextAction: string };
-type QualityGateResult = { status: 'passed' | 'failed'; command: string; exitCode: number; output: string; completedAt: string };
-type DependencyInstallResult = { status: 'installed' | 'failed'; exitCode: number; output: string; completedAt: string };
-type FeatureTask = { id: string; blueprintRevision: number; title: string; objective: string; acceptanceCriteria: string[]; status: 'draft' | 'approved'; approvedBy?: string; approvedAt?: string };
-type RuntimeAttempt = { attempt: number; status: 'running' | 'completed' | 'failed'; startedAt: string; completedAt?: string; result?: { exitCode: number | null; signal: string | null; timedOut: boolean; output: string } };
-type RuntimeRun = { id: string; status: 'planned' | 'running' | 'completed' | 'failed' | 'cancelled'; taskId: string; blueprintRevision: number; agentId: string; attempts: number; history: RuntimeAttempt[]; plan: { mode: 'dry-run' | 'execute'; executionAllowed: boolean; noExternalChanges: boolean; command: string[] }; result?: { exitCode: number | null; signal: string | null; timedOut: boolean; output: string } };
-type GitEvidence = { branch: string; head: string; status: string; diffStat: string };
-type PrEvidence = { url: string; checks: string[]; recordedAt: string };
-type PreviewEvidence = { apiUrl: string; webUrl: string; smokeTest: string; recordedAt: string };
-type AcceptanceRecord = { status: 'blocked' | 'ready' | 'approved'; summary: string; criteriaConfirmed: boolean; qualityStatus: 'passed' | 'failed' | 'missing'; approvedBy?: string; approvedAt?: string };
-type ProviderPlan = { providerId: string; idempotencyKey: string; noExternalChanges: true; resources: { spec: { id: string; kind: string; owner: string }; action: 'create' | 'update' | 'noop'; reason: string }[] };
-type ProviderVerification = { providerId: string; verified: boolean; missing: string[]; mismatched: string[] };
-type AgentDescriptor = { id: string; name: string; source: 'built-in' | 'custom'; launchCommand: string; detected: boolean; version: string | null; detail: string; capabilities: string[] };
-type AgentCapabilityProbe = { agentId: string; nonInteractive: boolean; nonInteractiveFlags: string[]; workspaceWrite: boolean; helpAvailable: boolean; adapterStatus: 'verified' | 'candidate' | 'unsupported' };
-type CredentialMeta = { version: 1; updatedAt: string; keys: string[] };
-type ProjectResources = { version: number; projectName: string; projectId: string; blueprintRevision: number; updatedAt: string; providers: Record<string, Record<string, unknown>> } | null;
-type CredentialVerifyResult = { providerId: string; status: 'valid' | 'invalid' | 'not_set'; detail: string };
-type PreviewStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped'; detail?: string };
-type PreviewDeploymentResult = { status: 'completed' | 'failed' | 'cancelled'; steps: PreviewStep[]; apiBaseUrl?: string; pagesUrl?: string; pagesUrlSource?: 'cli-output' | 'derived-fallback'; corsOrigin?: string; evidence?: Record<string, string>; cleanupRequired?: { vercel?: string; cloudflare?: string } };
-type WorkspaceVerification = { usable: boolean; workspaceMissing: boolean; missing: string[]; staleConfig: string[]; reason?: string };
-type ReleaseStep = { id: string; title: string; status: 'pending' | 'running' | 'completed' | 'failed'; detail?: string; startedAt?: string; completedAt?: string };
-type ReleaseRun = { id: string; status: 'queued' | 'running' | 'completed' | 'failed'; attempts: number; approvedBy: string; approvalSummary: string; steps: ReleaseStep[]; createdAt: string; updatedAt: string };
-type ReleaseEvidence = { projectName: string; apiBaseUrl: string; webUrl: string; corsOrigin: string; approvedBy: string; approvalSummary: string; observations: Record<string, unknown>; recordedAt: string };
-type ReleaseSource = { repository: string; branch: string; acceptedCommit: string; checkoutPath: string };
-type ReleasePlan = { steps: ReleaseStep[]; idempotencyKey: string; corsOrigin: string; productionApproval: string; state: string; workspace: WorkspaceVerification; releaseRun: ReleaseRun | null; source: ReleaseSource | null; sourceReason?: string };
-
-const APPROVER_STORAGE_KEY = 'agent-dev.approver';
-
-const defaultAnswers: BlueprintAnswers = {
-  mode: 'beginner',
-  productIntent: '',
-  dataSensitivity: 'standard',
-  previewStrategy: 'per-pull-request',
-  analyticsProviders: [],
-  customInstructions: '',
-  githubOwner: '',
-  vercelTeam: '',
-  cloudflareAccount: '',
-  supabaseOrganization: '',
-};
-
-function formatDate(value: string, locale: string) {
-  return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
-}
-
-function answersFromBlueprint(blueprint: ProductBlueprint): BlueprintAnswers {
-  return {
-    mode: blueprint.metadata.mode,
-    productIntent: blueprint.metadata.productIntent,
-    dataSensitivity: blueprint.spec.product.dataSensitivity,
-    previewStrategy: blueprint.spec.deployment.previewStrategy,
-    analyticsProviders: blueprint.spec.analytics.providers,
-    customInstructions: blueprint.metadata.customInstructions,
-    githubOwner: blueprint.spec.sourceControl.owner,
-    vercelTeam: blueprint.spec.deployment.api.team,
-    cloudflareAccount: blueprint.spec.deployment.web.account,
-    supabaseOrganization: blueprint.spec.data.organization,
-  };
-}
 
 export function App() {
   const { t, locale, setLocale } = useI18n();
   const { theme, toggleTheme } = useTheme();
+
+  const [view, setView] = useState<View>({ kind: 'dashboard' });
+
+  const resetView = () => setView({ kind: 'dashboard' });
 
   const providerFields = useMemo(() => [
     { key: 'GITHUB_TOKEN' as const, label: t('credentials.provider.github.label'), tutorial: 'https://github.com/settings/tokens', hint: t('credentials.provider.github.hint'), providerId: 'github' as const },
@@ -165,7 +105,7 @@ export function App() {
   const [releaseEvidence, setReleaseEvidence] = useState<ReleaseEvidence | null>(null);
   // Every human gate records the same name: an approval nobody is named on cannot be traced back to
   // a person, and two conventions on one chain make the question "who approved this?" unanswerable.
-  const [approver, setApprover] = useState(() => localStorage.getItem(APPROVER_STORAGE_KEY) ?? '');
+  const [approver, setApprover] = useState(() => localStorage.getItem('agent-dev.approver') ?? '');
   const [releaseSummary, setReleaseSummary] = useState('');
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [recoveringWorkspace, setRecoveringWorkspace] = useState(false);
@@ -213,6 +153,7 @@ export function App() {
       void loadProviderPlan(projectId);
       void loadProjectResources(projectId);
       void loadRelease(projectId);
+      setView({ kind: 'project', projectId, tab: 'blueprint' });
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('errors.loadBlueprint'));
@@ -275,9 +216,9 @@ export function App() {
     }
   };
 
-  const recordApprover = (): string => {
+  const recordApproverLocal = (): string => {
     const name = approver.trim();
-    if (name) localStorage.setItem(APPROVER_STORAGE_KEY, name);
+    if (name) localStorage.setItem('agent-dev.approver', name);
     return name;
   };
 
@@ -309,7 +250,7 @@ export function App() {
 
   const approveRelease = async () => {
     if (!selected || releaseBusy) return;
-    const approvedBy = recordApprover();
+    const approvedBy = recordApproverLocal();
     if (!approvedBy || releaseSummary.trim().length === 0) {
       setError(t('errors.releaseNeedsApprover'));
       return;
@@ -717,6 +658,7 @@ export function App() {
 
   const startNewProject = () => {
     setSelected(null);
+    setView({ kind: 'project', projectId: null as unknown as string, tab: 'blueprint' });
     setDryRun(null);
     setBaselinePlan(null);
     setBaselineApproval(null);
@@ -772,7 +714,7 @@ export function App() {
 
   const approveBaseline = async () => {
     if (!selected || !baselinePlan?.readyForApproval || baselineApproval) return;
-    const approvedBy = recordApprover();
+    const approvedBy = recordApproverLocal();
     if (!approvedBy) {
       setError(t('errors.baselineApproverRequired'));
       return;
@@ -952,7 +894,7 @@ export function App() {
 
   const approveFeatureTask = async () => {
     if (!selected || !featureTask || featureTask.status !== 'draft' || savingFeatureTask) return;
-    const approvedBy = recordApprover();
+    const approvedBy = recordApproverLocal();
     if (!approvedBy) {
       setError(t('errors.featureTaskApproverRequired'));
       return;
@@ -1077,7 +1019,7 @@ export function App() {
 
   const approveDelivery = async () => {
     if (!selected || !acceptance || acceptance.status !== 'ready' || submittingAcceptance) return;
-    const approvedBy = recordApprover();
+    const approvedBy = recordApproverLocal();
     if (!approvedBy) {
       setError(t('errors.acceptanceApproverRequired'));
       return;
@@ -1206,25 +1148,219 @@ export function App() {
 
   const isProfessional = answers.mode === 'professional';
 
+  const credentialsPanel = (
+    <section className="credential-panel" id="credentials">
+      <div className="panel-title"><div><p className="eyebrow">{t('common.localOnly')}</p><h2>{t('credentials.title')}</h2></div><KeyRound size={19} aria-hidden="true" /></div>
+      <p className="form-note">{t('credentials.note', { path: '~/.agent-dev/credentials.txt' })}</p>
+
+      {guideMode && credentialMeta?.keys.length === 0 && (
+        <div className="credential-guide">
+          <div className="guide-progress">
+            <span>{t('credentials.step', { current: guideStep + 1, total: providerFields.length })}</span>
+            <button className="guide-skip-button" type="button" onClick={() => setGuideMode(false)}>{t('credentials.skipGuide')}</button>
+          </div>
+          {providerFields.map((field, index) => (
+            <div className={`guide-step ${index === guideStep ? 'active' : index < guideStep ? 'done' : ''}`} key={field.key}>
+              <div className="guide-step-header">
+                <strong>{field.label}</strong>
+                {index < guideStep && credentialInputs[field.key] ? <span className="verify-status valid">{t('common.filled')}</span> : null}
+              </div>
+              {index === guideStep && <>
+                <small>{field.hint}</small>
+                <a href={field.tutorial} target="_blank" rel="noopener noreferrer">{t('credentials.howToGetToken')}</a>
+                <input type="password" className="credential-input" value={credentialInputs[field.key] ?? ''} onChange={event => setCredentialInputs(current => ({ ...current, [field.key]: event.target.value }))} placeholder={`${t('credentials.paste')} ${field.label}`} />
+                <div className="guide-step-actions">
+                  {guideStep > 0 && <button className="secondary-button" type="button" onClick={() => setGuideStep(guideStep - 1)}>{t('common.back')}</button>}
+                  {guideStep < providerFields.length - 1
+                    ? <button className="primary-button" type="button" onClick={() => setGuideStep(guideStep + 1)}>{t('common.next')}</button>
+                    : <button className="primary-button" type="button" onClick={() => { setGuideMode(false); void saveCredentialValues(); }}>{t('credentials.saveAll')}</button>}
+                </div>
+              </>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!guideMode && <>
+        <div className="credential-list">
+          {providerFields.map(field => {
+            const connected = credentialMeta?.keys.includes(field.key) ?? false;
+            const verifyResult = verifyResults.find(r => r.providerId === field.providerId);
+            return (
+              <article className="credential-item" key={field.key}>
+                <div className="credential-header">
+                  <strong>{field.label}</strong>
+                  <span className={`credential-status ${connected ? 'connected' : 'missing'}`}>{connected ? t('common.connected') : t('common.notSet')}</span>
+                  {verifyResult && <span className={`verify-status ${verifyResult.status}`}>{verifyResult.status === 'valid' ? t('common.valid') : verifyResult.status === 'invalid' ? t('common.invalid') : t('common.notApplicable')}</span>}
+                </div>
+                <small className="credential-hint">{field.hint}</small>
+                <a className="credential-tutorial" href={field.tutorial} target="_blank" rel="noopener noreferrer">{t('credentials.howToGetToken')}</a>
+                {connected ? (
+                  <button className="quiet-button credential-delete" type="button" onClick={() => void deleteCredential(field.key)}>{t('common.delete')}</button>
+                ) : (
+                  <input
+                    type="password"
+                    className="credential-input"
+                    value={credentialInputs[field.key] ?? ''}
+                    onChange={event => setCredentialInputs(current => ({ ...current, [field.key]: event.target.value }))}
+                    placeholder={`${t('credentials.paste')} ${field.label}`}
+                  />
+                )}
+              </article>
+            );
+          })}
+        </div>
+        <div className="credential-actions-row">
+          <button className="primary-button" type="button" onClick={() => void saveCredentialValues()} disabled={savingCredentials}>
+            {savingCredentials ? t('credentials.saving') : t('credentials.saveToLocal')}
+            <KeyRound size={15} aria-hidden="true" />
+          </button>
+          <button className="secondary-button" type="button" onClick={() => void verifyAllCredentials()} disabled={verifying}>
+            {verifying ? t('credentials.verifying') : t('credentials.verifyCredentials')}
+            <ShieldCheck size={15} aria-hidden="true" />
+          </button>
+        </div>
+        {verifyResults.length > 0 && (
+          <div className="verify-results">
+            {verifyResults.map(result => (
+              <div className={`verify-item ${result.status}`} key={result.providerId}>
+                <strong>{result.providerId}</strong>
+                <span>{result.status}</span>
+                <small>{result.detail}</small>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Supabase Manual Setup */}
+        <div className="supabase-manual">
+          <div className="section-heading"><div><p className="eyebrow">{t('credentials.manualSetup')}</p><h3>{t('credentials.supabaseConfiguration')}</h3></div></div>
+          <p className="form-note">{t('credentials.supabaseDescription')}</p>
+          <ol className="supabase-steps">
+            <li>{t('credentials.supabaseStep1', { link: 'Supabase Dashboard' })} <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer">Supabase Dashboard</a></li>
+            <li>{t('credentials.supabaseStep2')}</li>
+            <li>{t('credentials.supabaseStep4')}</li>
+            <li>{t('credentials.supabaseStep3')}</li>
+          </ol>
+          <div className="supabase-inputs">
+            <label htmlFor="supabase-url">{t('credentials.projectUrl')}</label>
+            <input id="supabase-url" className="credential-input" value={supabaseInputs.SUPABASE_URL} onChange={event => setSupabaseInputs(current => ({ ...current, SUPABASE_URL: event.target.value }))} placeholder={t('credentials.urlPlaceholder')} />
+            <label htmlFor="supabase-anon">{t('credentials.anonPublicKey')}</label>
+            <input id="supabase-anon" className="credential-input" value={supabaseInputs.SUPABASE_ANON_KEY} onChange={event => setSupabaseInputs(current => ({ ...current, SUPABASE_ANON_KEY: event.target.value }))} placeholder={t('credentials.keyPlaceholder')} />
+            <label htmlFor="supabase-service">{t('credentials.serviceRoleKey')}</label>
+            <input id="supabase-service" className="credential-input" value={supabaseInputs.SUPABASE_SERVICE_ROLE_KEY} onChange={event => setSupabaseInputs(current => ({ ...current, SUPABASE_SERVICE_ROLE_KEY: event.target.value }))} placeholder={t('credentials.keyPlaceholder')} />
+            <button className="secondary-button" type="button" onClick={() => void saveSupabaseManual()} disabled={savingCredentials}>{savingCredentials ? t('credentials.saving') : t('credentials.saveSupabaseConfig')}<KeyRound size={14} aria-hidden="true" /></button>
+          </div>
+        </div>
+
+        {/* Custom API Keys */}
+        <div className="custom-key-section">
+          <div className="section-heading"><div><p className="eyebrow">{t('credentials.thirdParty')}</p><h3>{t('credentials.customApiKeys')}</h3></div></div>
+          {credentialMeta?.keys.filter(key => !providerFields.some(f => f.key === key)).map(key => (
+            <article className="credential-item" key={key}>
+              <div className="credential-header">
+                <strong>{key}</strong>
+                <span className="credential-status connected">{t('credentials.configured')}</span>
+              </div>
+              <button className="quiet-button credential-delete" type="button" onClick={() => void deleteCredential(key)}>{t('common.delete')}</button>
+            </article>
+          ))}
+          <div className="custom-key-form">
+            <label htmlFor="custom-key-name">{t('credentials.keyNameLabel')}</label>
+            <input id="custom-key-name" value={newCustomKey} onChange={event => setNewCustomKey(event.target.value)} placeholder={t('credentials.keyNamePlaceholder')} maxLength={60} />
+            <label htmlFor="custom-key-value">{t('credentials.valueLabel')}</label>
+            <input id="custom-key-value" type="password" value={newCustomValue} onChange={event => setNewCustomValue(event.target.value)} placeholder={t('credentials.valuePlaceholder')} maxLength={200} />
+            <button className="secondary-button" type="button" onClick={() => void addCustomKey()} disabled={savingCredentials}>{savingCredentials ? t('credentials.saving') : t('credentials.addCustomKey')}<ArrowRight size={14} aria-hidden="true" /></button>
+          </div>
+        </div>
+      </>}
+
+      {credentialMeta?.updatedAt && <small className="credential-updated">{t('credentials.lastUpdated', { date: formatDate(credentialMeta.updatedAt, locale) })}</small>}
+      {selected && projectResources && (
+        <div className="credential-resources">
+          <p className="eyebrow">{t('credentials.projectResources')}</p>
+          <div className="resource-list">
+            {Object.entries(projectResources.providers).map(([providerId, state]) => (
+              <article className="resource-item" key={providerId}>
+                <strong>{providerId}</strong>
+                <code>{'url' in state ? String(state.url) : 'projectId' in state ? String(state.projectId) : 'projectRef' in state ? String(state.projectRef) : 'created'}</code>
+              </article>
+            ))}
+          </div>
+          <button className="secondary-button" type="button" onClick={() => void regenerateEnv()} disabled={regeneratingEnv}>
+            {regeneratingEnv ? t('credentials.regenerating') : t('credentials.regenerateEnv')}
+            <RefreshCw size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+    </section>
+  );
+
+  const agentsPanel = (
+    <section className="agent-catalog-panel" id="agents">
+      <div className="panel-title"><div><p className="eyebrow">{t('agents.eyebrow')}</p><h2>{t('agents.title')}</h2></div><button className="icon-button" type="button" onClick={() => void loadAgents()} disabled={loadingAgents} aria-label={t('agents.refresh')} title={t('agents.refresh')}><RefreshCw size={17} /></button></div>
+      <p className="form-note">{t('agents.formNote')}</p>
+      {loadingAgents && agents.length === 0 ? <p className="empty-state">{t('agents.detecting')}</p> : agents.length === 0 ? <p className="empty-state">{t('agents.notFound')}</p> : <div className="agent-list">{agents.map(agent => (
+        <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => void probeAgent(agent)} disabled={!agent.detected || probingAgentId !== null}>
+          <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source === 'built-in' ? t('agents.builtIn') : t('agents.custom')}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? t('agents.runningProbe') : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{agentProbes[agent.id] && <div className="agent-caps"><span className="agent-cap">{agentProbes[agent.id].nonInteractive ? t('agents.nonInteractiveYes') : t('agents.nonInteractiveUnknown')}</span><span className="agent-cap">{agentProbes[agent.id].workspaceWrite ? t('agents.workspaceWriteYes') : t('agents.workspaceWriteNo')}</span><span className="agent-cap">{t('agents.adapter', { status: agentProbes[agent.id].adapterStatus })}</span></div>}<code className="agent-command">{agent.launchCommand}</code></div>
+          <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? t('agents.detected') : t('agents.notDetected')}</span>
+        </button>
+      ))}</div>}
+      <details className="agent-form-toggle">
+        <summary>{t('agents.addCustomSummary')}</summary>
+        <div className="agent-form">
+          <label htmlFor="custom-agent-name">{t('agents.agentName')}</label>
+          <input id="custom-agent-name" value={customAgentName} onChange={event => setCustomAgentName(event.target.value)} placeholder={t('agents.namePlaceholder')} maxLength={80} />
+          <label htmlFor="custom-agent-command">{t('agents.launchCommand')}</label>
+          <input id="custom-agent-command" value={customAgentCommand} onChange={event => setCustomAgentCommand(event.target.value)} placeholder={t('agents.commandPlaceholder')} maxLength={200} />
+          <button className="primary-button" type="button" onClick={() => void addCustomAgent()} disabled={savingAgent}>{savingAgent ? t('agents.registering') : t('agents.register')}<ArrowRight size={15} aria-hidden="true" /></button>
+        </div>
+      </details>
+    </section>
+  );
+
+  const activityPanel = (
+    <section className="activity-panel" id="activity"><div className="panel-title"><h2>{t('activity.panelTitle')}</h2><Activity size={18} aria-hidden="true" /></div><ol>{activity.map(item => <li key={item.id}><span>{item.text}</span><time>{item.time}</time></li>)}</ol></section>
+  );
+
   return (
     <main className="shell">
       <aside className="sidebar">
-        <div className="brand"><img className="brand-mark" src="/favicon.svg" alt="" width={22} height={22} /><span>{t('common.brandName')}</span></div>
+        <button className="brand" type="button" onClick={() => setView({ kind: 'dashboard' })} title={t('nav.projects')}>
+          <img className="brand-mark" src="/favicon.svg" alt="" width={22} height={22} /><span>{t('common.brandName')}</span>
+        </button>
         <nav aria-label="Studio navigation">
-          <a className="nav-item active" href="#projects"><FolderKanban size={18} aria-hidden="true" />{t('nav.projects')}</a>
-          <a className="nav-item" href="#decisions"><ShieldCheck size={18} aria-hidden="true" />{t('nav.decisions')}</a>
-          <a className="nav-item" href="#connections"><PlugZap size={18} aria-hidden="true" />{t('nav.connections')}</a>
-          <a className="nav-item" href="#credentials"><KeyRound size={18} aria-hidden="true" />{t('nav.credentials')}</a>
-          <a className="nav-item" href="#agents"><CircleDot size={18} aria-hidden="true" />{t('nav.agents')}</a>
-          <a className="nav-item" href="#activity"><Activity size={18} aria-hidden="true" />{t('nav.activity')}</a>
-          <a className="nav-item" href="#standards"><Settings2 size={18} aria-hidden="true" />{t('nav.standards')}</a>
+          <button className={`nav-item ${view.kind === 'dashboard' || view.kind === 'project' ? 'active' : ''}`} type="button" onClick={() => setView({ kind: 'dashboard' })}><FolderKanban size={18} aria-hidden="true" />{t('nav.projects')}</button>
+          <button className={`nav-item ${view.kind === 'credentials' ? 'active' : ''}`} type="button" onClick={() => setView({ kind: 'credentials' })}><KeyRound size={18} aria-hidden="true" />{t('nav.credentials')}</button>
+          <button className={`nav-item ${view.kind === 'agents' ? 'active' : ''}`} type="button" onClick={() => setView({ kind: 'agents' })}><CircleDot size={18} aria-hidden="true" />{t('nav.agents')}</button>
+          <button className={`nav-item ${view.kind === 'activity' ? 'active' : ''}`} type="button" onClick={() => setView({ kind: 'activity' })}><Activity size={18} aria-hidden="true" />{t('nav.activity')}</button>
         </nav>
         <div className="sidebar-note"><CircleDot size={14} aria-hidden="true" />{t('activity.localDaemonConnected')}</div>
       </aside>
 
       <section className="workspace" id="projects">
         <header className="topbar">
-          <div><p className="eyebrow">{t('hero.eyebrow')}</p><h1>{t('hero.title')}</h1></div>
+          <div>
+            {view.kind === 'project' && selected ? (
+              <div className="project-detail-title">
+                <button className="icon-button back-button" type="button" onClick={() => setView({ kind: 'dashboard' })} aria-label={t('common.back')} title={t('common.back')}>
+                  <ArrowLeft size={18} />
+                </button>
+                <div>
+                  <p className="eyebrow">{t('projects.detailEyebrow', { revision: selected.blueprint.metadata.revision })}</p>
+                  <h1>{selected.name}</h1>
+                </div>
+              </div>
+            ) : view.kind === 'credentials' ? (
+              <div><p className="eyebrow">{t('common.localOnly')}</p><h1>{t('credentials.title')}</h1></div>
+            ) : view.kind === 'agents' ? (
+              <div><p className="eyebrow">{t('agents.eyebrow')}</p><h1>{t('agents.title')}</h1></div>
+            ) : view.kind === 'activity' ? (
+              <div><p className="eyebrow">{t('activity.eyebrow')}</p><h1>{t('activity.panelTitle')}</h1></div>
+            ) : view.kind === 'dashboard' ? (
+              <div><p className="eyebrow">{t('hero.eyebrow')}</p><h1>{t('hero.title')}</h1></div>
+            ) : null}
+          </div>
           <div className="topbar-actions">
             <div className="locale-switcher" role="group" aria-label={t('common.language')}>
               <button className={locale === 'en' ? 'active' : ''} type="button" onClick={() => setLocale('en')}>EN</button>
@@ -1234,22 +1370,41 @@ export function App() {
               {theme === 'dark' ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
             </button>
             <button className="icon-button" type="button" onClick={() => void loadProjects()} aria-label={t('common.refresh')} title={t('common.refresh')}><RefreshCw size={18} /></button>
+            {view.kind === 'dashboard' && (
+              <button className="quiet-button" type="button" onClick={startNewProject}>
+                {t('projects.newBlueprint')}
+              </button>
+            )}
           </div>
         </header>
 
-        <div className="studio-grid">
-          <section className="project-area" aria-label="Projects">
-            <div className="section-heading"><div><h2>{t('projects.title')}</h2><p>{t('projects.description')}</p></div><button className="quiet-button" type="button" onClick={startNewProject}>{t('projects.newBlueprint')}</button></div>
-            {error && <p className="error" role="alert">{error}</p>}
-            <div className="project-table" role="table" aria-label="Projects">
-              <div className="table-head" role="row"><span>{t('projects.table.project')}</span><span>{t('projects.table.mode')}</span><span>{t('projects.table.deliveryState')}</span><span>{t('projects.table.updated')}</span></div>
-              {loading ? <p className="empty-state">{t('projects.loading')}</p> : projects.length === 0 ? <p className="empty-state">{t('projects.empty')}</p> : projects.map(project => (
-                <button className={`table-row project-row ${selected?.id === project.id ? 'selected' : ''}`} role="row" type="button" onClick={() => void selectProject(project.id)} key={project.id}>
-                  <strong>{project.name}</strong><span>{project.productType}</span><span className="state">{t(`projectState.${project.state}` as KeyPath) ?? project.state.replaceAll('_', ' ')}</span><time dateTime={project.updatedAt}>{formatDate(project.updatedAt, locale)}</time>
+        {view.kind === 'dashboard' && (
+          <Dashboard
+            projects={projects}
+            selected={selected}
+            loading={loading}
+            error={error}
+            onSelectProject={selectProject}
+          />
+        )}
+
+        {view.kind === 'project' && (
+        <div className="studio-grid project-detail-grid">
+          <section className="project-area project-detail-main" aria-label={selected ? selected.name : t('projects.title')}>
+            <nav className="detail-tabs" aria-label={t('projects.tabs')}>
+              {(['blueprint', 'delivery', 'iteration', 'release'] as const).map(tab => (
+                <button
+                  key={tab}
+                  type="button"
+                  className={`detail-tab ${view.kind === 'project' && view.tab === tab ? 'active' : ''}`}
+                  onClick={() => setView({ kind: 'project', projectId: view.kind === 'project' ? view.projectId : '', tab })}
+                >
+                  {t(`projects.detailTabs.${tab}` as KeyPath)}
                 </button>
               ))}
-            </div>
+            </nav>
 
+            {view.kind === 'project' && view.tab === 'blueprint' && <>
             {selected && <section className="decision-section" id="decisions">
               <div className="section-heading"><div><p className="eyebrow">{t('decisions.eyebrowRevision', { revision: selected.blueprint.metadata.revision })}</p><h2>{t('decisions.title')}</h2></div><span className="mode-tag">{selected.blueprint.metadata.mode === 'beginner' ? t('blueprint.beginner') : t('blueprint.professional')}</span></div>
               <div className="decision-list">{decisions.map(decision => <article className="decision" key={decision.id}>
@@ -1267,7 +1422,9 @@ export function App() {
               <div className="artifact-list">{dryRun.artifacts.map(artifact => <button className={`artifact-button ${selectedArtifact?.id === artifact.id ? 'selected' : ''}`} type="button" key={artifact.id} onClick={() => setSelectedArtifactId(artifact.id)}><strong>{artifact.title}</strong><span>{artifact.path}</span></button>)}</div>
               {selectedArtifact && <article className="artifact-preview"><div><h3>{selectedArtifact.title}</h3><p>{selectedArtifact.path}</p></div><pre>{selectedArtifact.content}</pre></article>}
             </section>}
+            </>}
 
+            {view.kind === 'project' && view.tab === 'delivery' && <>
             {selected?.state === 'LOCAL_ACCEPTED' && <section className="evidence-section"><div className="section-heading"><div><p className="eyebrow">{t('evidence.eyebrow')}</p><h2>{t('evidence.openPullRequest')}</h2><p>{t('evidence.openPullRequestDescription')}</p></div><span className="dry-run-tag">{t('projectState.LOCAL_ACCEPTED')}</span></div><div className="evidence-form"><button className="primary-button" type="button" onClick={() => void openPullRequest()} disabled={recordingDeliveryEvidence}>{recordingDeliveryEvidence ? t('evidence.opening') : t('evidence.pushAndOpen')}<ArrowRight size={15} aria-hidden="true" /></button></div></section>}
             {selected?.state === 'PR_OPEN' && <section className="evidence-section"><div className="section-heading"><div><p className="eyebrow">{t('evidence.eyebrow')}</p><h2>{t('evidence.recordDualPreview')}</h2><p>{t('evidence.recordDualPreviewDescription')}</p></div><span className="dry-run-tag">{t('projectState.PR_OPEN')}</span></div><div className="evidence-form"><label htmlFor="preview-api-url">{t('evidence.apiPreviewUrl')}</label><input id="preview-api-url" type="url" value={previewApiUrl} onChange={event => setPreviewApiUrl(event.target.value)} placeholder={t('evidence.apiPreviewPlaceholder')} /><label htmlFor="preview-web-url">{t('evidence.webPreviewUrl')}</label><input id="preview-web-url" type="url" value={previewWebUrl} onChange={event => setPreviewWebUrl(event.target.value)} placeholder={t('evidence.webPreviewPlaceholder')} /><label htmlFor="preview-smoke-test">{t('evidence.smokeTestResult')}</label><textarea id="preview-smoke-test" value={previewSmokeTest} onChange={event => setPreviewSmokeTest(event.target.value)} placeholder={t('evidence.smokeTestPlaceholder')} /><button className="primary-button" type="button" onClick={() => void recordPreviewEvidence()} disabled={recordingDeliveryEvidence || !previewApiUrl.trim() || !previewWebUrl.trim() || !previewSmokeTest.trim()}>{recordingDeliveryEvidence ? t('evidence.recording') : t('evidence.recordPreviewEvidence')}<ArrowRight size={15} aria-hidden="true" /></button></div></section>}
 
@@ -1283,6 +1440,10 @@ export function App() {
               {applyRun && <div className={`apply-run ${applyRun.status}`}><div className="apply-run-heading"><strong>{t('baseline.localApplyStatus', { status: applyRun.status })}</strong><small>{t('baseline.attemptOf', { attempt: applyRun.attempts, count: 3, workspacePath: applyRun.workspacePath ?? '' })}</small></div><ol>{applyRun.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{t(`stepStatus.${step.status}` as KeyPath)}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{applyRun.status === 'failed' && applyRun.attempts < 3 && <button className="secondary-button retry-button" type="button" onClick={() => void retryApply()} disabled={applyingBaseline}>{applyingBaseline ? t('baseline.retrying') : t('baseline.retryLocalApply')}<RefreshCw size={15} aria-hidden="true" /></button>}{(applyRun.status === 'failed' || releasePlan?.workspace.usable === false) && <div className="workspace-recovery"><p>{releasePlan?.workspace.usable === false ? t('baseline.workspaceNotUsable', { reason: ([...releasePlan.workspace.missing, ...releasePlan.workspace.staleConfig].join(', ') || releasePlan.workspace.reason) ?? '' }) : t('baseline.retryInPlace')}</p><button className="secondary-button" type="button" onClick={() => void recoverWorkspace()} disabled={recoveringWorkspace}>{recoveringWorkspace ? t('baseline.recovering') : t('baseline.recoverWorkspace')}<RefreshCw size={15} aria-hidden="true" /></button></div>}</div>}
               {applyRun?.status === 'completed' && dependencyReadiness && <div className={`quality-gate ${dependencyReadiness.status}`}><div><p className="eyebrow">{t('qualityGate.eyebrow')}</p><h3>{qualityGateResult ? t('qualityGate.lastRun', { status: qualityGateResult.status }) : dependencyReadiness.status === 'ready' ? t('qualityGate.ready') : t('qualityGate.dependenciesRequired')}</h3><p>{dependencyReadiness.nextAction}</p></div>{dependencyReadiness.status === 'missing-dependencies' && <button className="secondary-button" type="button" onClick={() => void installDependencies()} disabled={installingDependencies}>{installingDependencies ? t('qualityGate.installing') : t('qualityGate.installDependencies')}<ArrowRight size={15} aria-hidden="true" /></button>}{dependencyReadiness.status === 'ready' && <button className="secondary-button" type="button" onClick={() => void runQualityGate()} disabled={applyingBaseline}>{applyingBaseline ? t('qualityGate.running') : t('qualityGate.runQualityGate')}<CheckCircle2 size={15} aria-hidden="true" /></button>}</div>}
               {applyRun?.status === 'completed' && qualityGateResult?.status === 'passed' && <div className="preview-deployment"><div className="runtime-heading"><div><p className="eyebrow">{t('preview.eyebrow')}</p><h3>{previewResult ? t('preview.previewStatus', { status: previewResult.status }) : t('preview.deployTitle')}</h3><p>{previewResult?.status === 'completed' ? t('preview.completedDescription', { apiUrl: previewResult.apiBaseUrl ?? '', pagesUrl: previewResult.pagesUrl ?? '' }) : previewResult?.status === 'failed' ? t('preview.failedDescription') : t('preview.defaultDescription')}</p></div></div>{!previewResult ? <div className="preview-deploy-form"><label htmlFor="preview-branch">{t('preview.branch')}</label><input id="preview-branch" value={previewBranch} onChange={event => setPreviewBranch(event.target.value)} placeholder={t('preview.branchPlaceholder')} pattern="[a-z0-9-]+" maxLength={100} /><button className="primary-button" type="button" onClick={() => void deployPreview()} disabled={deployingPreview}>{deployingPreview ? t('preview.deploying') : t('preview.deploy')}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="preview-steps"><ol>{previewResult.steps.map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{t(`stepStatus.${step.status}` as KeyPath)}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>{previewResult.status === 'completed' && <div className="preview-urls"><span>{t('preview.api')} <a href={previewResult.apiBaseUrl} target="_blank" rel="noreferrer">{previewResult.apiBaseUrl}</a></span><span>{t('preview.pages')} <a href={previewResult.pagesUrl} target="_blank" rel="noreferrer">{previewResult.pagesUrl}</a></span><span>{t('preview.cors')} <code>{previewResult.corsOrigin}</code></span></div>}{previewResult.cleanupRequired && <button className="secondary-button" type="button" onClick={() => void cleanupPreview()} disabled={deployingPreview}>{deployingPreview ? t('preview.cleaningUp') : t('preview.cleanupProjects')}<RefreshCw size={15} aria-hidden="true" /></button>}</div>}</div>}
+            </section>}
+            </>}
+
+            {view.kind === 'project' && view.tab === 'release' && selected && <>
               {releasePlan && <div className={`production-release ${selected.state.toLowerCase()}`}><div className="runtime-heading"><div><p className="eyebrow">{t('release.eyebrow')}</p><h3>{selected.state === 'DELIVERED' ? t('release.released') : selected.state === 'AWAITING_APPROVAL' ? t('release.awaitingApproval') : selected.state === 'RELEASING' ? t('release.releasing') : t('release.requestTitle')}</h3><p>{t('release.productionOriginWithValue', { origin: releasePlan.corsOrigin })} · {t('release.approvalIs', { approval: releasePlan.productionApproval })}</p></div></div>
                 <ol className="release-steps">{(releaseRun?.steps ?? releasePlan.steps).map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{t(`stepStatus.${step.status}` as KeyPath)}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>
                 {releasePlan.source
@@ -1292,13 +1453,19 @@ export function App() {
                 {selected.state === 'AWAITING_APPROVAL' && <div className="release-approval">{approverField('release-approver', t('release.whoApproves'))}<label htmlFor="release-summary">{t('release.whatIsReleased')}</label><textarea id="release-summary" value={releaseSummary} onChange={event => setReleaseSummary(event.target.value)} placeholder={t('release.releaseSummaryPlaceholder')} maxLength={500} /><button className="primary-button" type="button" onClick={() => void approveRelease()} disabled={releaseBusy}>{releaseBusy ? t('release.releasingButton') : t('release.approveAndRelease')}<ShieldCheck size={15} aria-hidden="true" /></button></div>}
                 {releaseRun?.status === 'failed' && <button className="secondary-button retry-button" type="button" onClick={() => void retryRelease()} disabled={releaseBusy || releaseRun.attempts >= 3}>{releaseBusy ? t('release.retrying') : releaseRun.attempts >= 3 ? t('release.retryLimitReached') : t('release.retryApprovedRelease')}<RefreshCw size={15} aria-hidden="true" /></button>}
                 {releaseEvidence && <div className="release-evidence"><p>{t('release.approvedBy', { approvedBy: releaseEvidence.approvedBy, date: new Date(releaseEvidence.recordedAt).toLocaleString(), summary: releaseEvidence.approvalSummary })}</p><div className="preview-urls"><span>{t('release.api')} <a href={releaseEvidence.apiBaseUrl} target="_blank" rel="noreferrer">{releaseEvidence.apiBaseUrl}</a></span><span>{t('release.web')} <a href={releaseEvidence.webUrl} target="_blank" rel="noreferrer">{releaseEvidence.webUrl}</a></span><span>{t('evidence.cors')}: <code>{releaseEvidence.corsOrigin}</code></span></div><pre className="evidence-observations">{JSON.stringify(releaseEvidence.observations, null, 2)}</pre></div>}</div>}
+            </>}
+
+            {view.kind === 'project' && view.tab === 'iteration' && <>
               {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">{t('featureTask.eyebrow')}</p><h3>{featureTask ? featureTask.title : t('featureTask.defineNext')}</h3><p>{featureTask ? t('featureTask.taskIs', { status: featureTask.status }) : t('featureTask.createTaskDescription')}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{t(`status.${featureTask.status}` as KeyPath)}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">{t('featureTask.title')} <small>{t('featureTask.titleHint')}</small></label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder={t('featureTask.titlePlaceholder')} maxLength={120} /><label htmlFor="feature-objective">{t('featureTask.objective')} <small>{t('featureTask.objectiveHint')}</small></label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder={t('featureTask.objectivePlaceholder')} maxLength={2000} /><label htmlFor="feature-criteria">{t('featureTask.acceptanceCriteria')} <small>{t('featureTask.criteriaHint')}</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder={t('featureTask.criteriaPlaceholder')} maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? t('featureTask.creating') : t('featureTask.createTask')}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.status === 'draft' ? <>{approverField('feature-approver', t('featureTask.whoApproves'))}<button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? t('featureTask.approving') : t('featureTask.approveForAgent')}<ShieldCheck size={15} aria-hidden="true" /></button></> : <small>{t('featureTask.approvedBy', { approvedBy: featureTask.approvedBy ?? '', date: featureTask.approvedAt ? formatDate(featureTask.approvedAt, locale) : '' })}</small>}</div>}</div>}
               {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">{t('runtime.eyebrow')}{selectedAgentId && agents.find(a => a.id === selectedAgentId) ? ` · ${agents.find(a => a.id === selectedAgentId)!.name}` : ''}</p><h3>{runtimeRun ? t('runtime.status', { mode: runtimeRun.plan.mode === 'execute' ? 'Codex' : 'Dry-run', status: runtimeRun.status }) : t('runtime.runtimeNotPrepared')}</h3><p>{runtimeRun?.status === 'completed' ? t('runtime.completed') : runtimeRun?.status === 'failed' ? t('runtime.failed', { attempts: runtimeRun.attempts }) : runtimeRun?.status === 'running' ? t('runtime.running') : runtimeRun ? t('runtime.planned') : t('runtime.prepareDescription')}</p></div>{runtimeRun?.status === 'planned' ? <div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.cancelling') : t('runtime.cancelDryRun')}<RefreshCw size={15} aria-hidden="true" /></button><button className="primary-button" type="button" onClick={() => void executeRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.runningCodex') : t('runtime.runCodex')}<ArrowRight size={15} aria-hidden="true" /></button></div> : runtimeRun?.status === 'failed' ? <button className="primary-button" type="button" onClick={() => void retryRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.retryingCodex') : t('runtime.retryCodex')}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.preparing') : t('runtime.prepare')}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{gitEvidence && <div className="git-evidence"><span>{t('runtime.gitBranch')} <strong>{gitEvidence.branch}</strong></span><span>{t('runtime.gitHead')} <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>{t('runtime.gitWorkingTree')} <strong>{gitEvidence.status || t('runtime.gitClean')}</strong></span><span>{t('runtime.gitDiff')} <strong>{gitEvidence.diffStat || t('runtime.gitNoChanges')}</strong></span></div>}{runtimeRun?.result?.output && <pre className="provider-report">{runtimeRun.result.output}</pre>}{runtimeRun?.history.length ? <div className="runtime-history"><small>{runtimeRun.history.length} {runtimeRun.history.length === 1 ? t('runtime.attemptRecorded') : t('runtime.attemptsRecorded')}</small></div> : null}</div>}
               {featureTask?.status === 'approved' && runtimeRun && <div className={`acceptance-panel ${acceptance?.status ?? 'pending'}`}><div className="runtime-heading"><div><p className="eyebrow">{t('acceptance.eyebrow')}</p><h3>{acceptance ? t('acceptance.acceptanceStatus', { status: acceptance.status }) : t('acceptance.submitTitle')}</h3><p>{acceptance?.status === 'blocked' ? t('acceptance.blocked', { status: acceptance.qualityStatus }) : t('acceptance.confirmCriteria')}</p></div>{acceptance?.status === 'ready' && <div className="acceptance-approval">{approverField('acceptance-approver', t('acceptance.whoAccepts'))}<button className="secondary-button" type="button" onClick={() => void approveDelivery()} disabled={submittingAcceptance}>{submittingAcceptance ? t('acceptance.approving') : t('acceptance.approveDelivery')}<ShieldCheck size={15} aria-hidden="true" /></button></div>}</div>{acceptance?.status !== 'approved' && <div className="acceptance-form"><label htmlFor="acceptance-summary">{t('acceptance.summary')} <small>{t('acceptance.summaryHint')}</small></label><textarea id="acceptance-summary" value={acceptanceSummary} onChange={event => setAcceptanceSummary(event.target.value)} placeholder={t('acceptance.summaryPlaceholder')} maxLength={2000} /><label className="check-row"><input type="checkbox" checked={criteriaConfirmed} onChange={event => setCriteriaConfirmed(event.target.checked)} /> {t('acceptance.reviewedCriteria')}</label><button className="primary-button" type="button" onClick={() => void submitAcceptance()} disabled={submittingAcceptance}>{submittingAcceptance ? t('acceptance.submitting') : t('acceptance.submitEvidence')}<ArrowRight size={15} aria-hidden="true" /></button></div>}</div>}
+            </>}
+
+            {view.kind === 'project' && view.tab === 'release' && selected && <>
               {finalDeliveryReport && <div className="final-report"><div className="artifact-heading"><div><p className="eyebrow">{t('simulation.eyebrow')}</p><h3>{t('evidence.finalDeliveryReport')}</h3></div><button className="icon-button" type="button" onClick={() => selected && void loadFinalDeliveryReport(selected.id)} aria-label={t('evidence.refreshReport')} title={t('evidence.refreshReport')}><RefreshCw size={17} /></button></div><pre className="provider-report">{finalDeliveryReport}</pre></div>}
               <p className="baseline-note">{t('simulation.note')}</p>
               <div className="provider-simulation"><div className="provider-simulation-heading"><div><p className="eyebrow">{t('simulation.eyebrow')}</p><h3>{t('simulation.title')}</h3><p>{t('simulation.description')}</p></div><span className="dry-run-tag">{t('simulation.noExternalWrites')}</span></div><div className="provider-plan-list">{providerPlans.map(plan => <article className="provider-plan" key={plan.providerId}><div><strong>{plan.providerId}</strong><small>{plan.idempotencyKey}</small></div><ol>{plan.resources.map(resource => <li key={resource.spec.id}><span>{resource.spec.id}</span><em>{resource.action}</em><small>{resource.reason}</small></li>)}</ol></article>)}</div><div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void verifyProviders()} disabled={verifyingProviders}>{verifyingProviders ? t('simulation.verifying') : t('simulation.verifyState')}<RefreshCw size={15} aria-hidden="true" /></button>{baselineApproval && <button className="secondary-button" type="button" onClick={() => void applyFakeProviders()} disabled={applyingFakeProviders}>{applyingFakeProviders ? t('simulation.applying') : t('simulation.applyFakeProviders')}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{providerVerification && <div className="provider-verification">{providerVerification.map(item => <span className={item.verified ? 'verified' : 'unverified'} key={item.providerId}>{item.verified ? t('simulation.verified', { providerId: item.providerId }) : t('simulation.unverified', { providerId: item.providerId, missing: item.missing.length, drift: item.mismatched.length })}</span>)}</div>}{providerReport && <pre className="provider-report">{providerReport}</pre>}</div>
-            </section>}
+            </>}
           </section>
 
           <aside className="right-rail">
@@ -1359,174 +1526,27 @@ export function App() {
                 <div><h3>{account.title}</h3><p>{account.identity ?? t('connections.noIdentity')}</p><small>{account.detail}</small><em>{account.nextAction}</em></div><span className={`connector-status ${account.status}`}>{account.status === 'authenticated' ? t('connections.authenticated') : account.status === 'manual' ? t('connections.manual') : account.status === 'missing' ? t('connections.installRequired') : t('connections.signInRequired')}</span>
               </article>)}</div>}
             </section>
-            <section className="credential-panel" id="credentials">
-              <div className="panel-title"><div><p className="eyebrow">{t('common.localOnly')}</p><h2>{t('credentials.title')}</h2></div><KeyRound size={19} aria-hidden="true" /></div>
-              <p className="form-note">{t('credentials.note', { path: '~/.agent-dev/credentials.txt' })}</p>
-
-              {guideMode && credentialMeta?.keys.length === 0 && (
-                <div className="credential-guide">
-                  <div className="guide-progress">
-                    <span>{t('credentials.step', { current: guideStep + 1, total: providerFields.length })}</span>
-                    <button className="guide-skip-button" type="button" onClick={() => setGuideMode(false)}>{t('credentials.skipGuide')}</button>
-                  </div>
-                  {providerFields.map((field, index) => (
-                    <div className={`guide-step ${index === guideStep ? 'active' : index < guideStep ? 'done' : ''}`} key={field.key}>
-                      <div className="guide-step-header">
-                        <strong>{field.label}</strong>
-                        {index < guideStep && credentialInputs[field.key] ? <span className="verify-status valid">{t('common.filled')}</span> : null}
-                      </div>
-                      {index === guideStep && <>
-                        <small>{field.hint}</small>
-                        <a href={field.tutorial} target="_blank" rel="noopener noreferrer">{t('credentials.howToGetToken')}</a>
-                        <input type="password" className="credential-input" value={credentialInputs[field.key] ?? ''} onChange={event => setCredentialInputs(current => ({ ...current, [field.key]: event.target.value }))} placeholder={`${t('credentials.paste')} ${field.label}`} />
-                        <div className="guide-step-actions">
-                          {guideStep > 0 && <button className="secondary-button" type="button" onClick={() => setGuideStep(guideStep - 1)}>{t('common.back')}</button>}
-                          {guideStep < providerFields.length - 1
-                            ? <button className="primary-button" type="button" onClick={() => setGuideStep(guideStep + 1)}>{t('common.next')}</button>
-                            : <button className="primary-button" type="button" onClick={() => { setGuideMode(false); void saveCredentialValues(); }}>{t('credentials.saveAll')}</button>}
-                        </div>
-                      </>}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {!guideMode && <>
-                <div className="credential-list">
-                  {providerFields.map(field => {
-                    const connected = credentialMeta?.keys.includes(field.key) ?? false;
-                    const verifyResult = verifyResults.find(r => r.providerId === field.providerId);
-                    return (
-                      <article className="credential-item" key={field.key}>
-                        <div className="credential-header">
-                          <strong>{field.label}</strong>
-                          <span className={`credential-status ${connected ? 'connected' : 'missing'}`}>{connected ? t('common.connected') : t('common.notSet')}</span>
-                          {verifyResult && <span className={`verify-status ${verifyResult.status}`}>{verifyResult.status === 'valid' ? t('common.valid') : verifyResult.status === 'invalid' ? t('common.invalid') : t('common.notApplicable')}</span>}
-                        </div>
-                        <small className="credential-hint">{field.hint}</small>
-                        <a className="credential-tutorial" href={field.tutorial} target="_blank" rel="noopener noreferrer">{t('credentials.howToGetToken')}</a>
-                        {connected ? (
-                          <button className="quiet-button credential-delete" type="button" onClick={() => void deleteCredential(field.key)}>{t('common.delete')}</button>
-                        ) : (
-                          <input
-                            type="password"
-                            className="credential-input"
-                            value={credentialInputs[field.key] ?? ''}
-                            onChange={event => setCredentialInputs(current => ({ ...current, [field.key]: event.target.value }))}
-                            placeholder={`${t('credentials.paste')} ${field.label}`}
-                          />
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-                <div className="credential-actions-row">
-                  <button className="primary-button" type="button" onClick={() => void saveCredentialValues()} disabled={savingCredentials}>
-                    {savingCredentials ? t('credentials.saving') : t('credentials.saveToLocal')}
-                    <KeyRound size={15} aria-hidden="true" />
-                  </button>
-                  <button className="secondary-button" type="button" onClick={() => void verifyAllCredentials()} disabled={verifying}>
-                    {verifying ? t('credentials.verifying') : t('credentials.verifyCredentials')}
-                    <ShieldCheck size={15} aria-hidden="true" />
-                  </button>
-                </div>
-                {verifyResults.length > 0 && (
-                  <div className="verify-results">
-                    {verifyResults.map(result => (
-                      <div className={`verify-item ${result.status}`} key={result.providerId}>
-                        <strong>{result.providerId}</strong>
-                        <span>{result.status}</span>
-                        <small>{result.detail}</small>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Supabase Manual Setup */}
-                <div className="supabase-manual">
-                  <div className="section-heading"><div><p className="eyebrow">{t('credentials.manualSetup')}</p><h3>{t('credentials.supabaseConfiguration')}</h3></div></div>
-                  <p className="form-note">{t('credentials.supabaseDescription')}</p>
-                  <ol className="supabase-steps">
-                    <li>{t('credentials.supabaseStep1', { link: 'Supabase Dashboard' })} <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer">Supabase Dashboard</a></li>
-                    <li>{t('credentials.supabaseStep2')}</li>
-                    <li>{t('credentials.supabaseStep4')}</li>
-                    <li>{t('credentials.supabaseStep3')}</li>
-                  </ol>
-                  <div className="supabase-inputs">
-                    <label htmlFor="supabase-url">{t('credentials.projectUrl')}</label>
-                    <input id="supabase-url" className="credential-input" value={supabaseInputs.SUPABASE_URL} onChange={event => setSupabaseInputs(current => ({ ...current, SUPABASE_URL: event.target.value }))} placeholder={t('credentials.urlPlaceholder')} />
-                    <label htmlFor="supabase-anon">{t('credentials.anonPublicKey')}</label>
-                    <input id="supabase-anon" className="credential-input" value={supabaseInputs.SUPABASE_ANON_KEY} onChange={event => setSupabaseInputs(current => ({ ...current, SUPABASE_ANON_KEY: event.target.value }))} placeholder={t('credentials.keyPlaceholder')} />
-                    <label htmlFor="supabase-service">{t('credentials.serviceRoleKey')}</label>
-                    <input id="supabase-service" className="credential-input" value={supabaseInputs.SUPABASE_SERVICE_ROLE_KEY} onChange={event => setSupabaseInputs(current => ({ ...current, SUPABASE_SERVICE_ROLE_KEY: event.target.value }))} placeholder={t('credentials.keyPlaceholder')} />
-                    <button className="secondary-button" type="button" onClick={() => void saveSupabaseManual()} disabled={savingCredentials}>{savingCredentials ? t('credentials.saving') : t('credentials.saveSupabaseConfig')}<KeyRound size={14} aria-hidden="true" /></button>
-                  </div>
-                </div>
-
-                {/* Custom API Keys */}
-                <div className="custom-key-section">
-                  <div className="section-heading"><div><p className="eyebrow">{t('credentials.thirdParty')}</p><h3>{t('credentials.customApiKeys')}</h3></div></div>
-                  {credentialMeta?.keys.filter(key => !providerFields.some(f => f.key === key)).map(key => (
-                    <article className="credential-item" key={key}>
-                      <div className="credential-header">
-                        <strong>{key}</strong>
-                        <span className="credential-status connected">{t('credentials.configured')}</span>
-                      </div>
-                      <button className="quiet-button credential-delete" type="button" onClick={() => void deleteCredential(key)}>{t('common.delete')}</button>
-                    </article>
-                  ))}
-                  <div className="custom-key-form">
-                    <label htmlFor="custom-key-name">{t('credentials.keyNameLabel')}</label>
-                    <input id="custom-key-name" value={newCustomKey} onChange={event => setNewCustomKey(event.target.value)} placeholder={t('credentials.keyNamePlaceholder')} maxLength={60} />
-                    <label htmlFor="custom-key-value">{t('credentials.valueLabel')}</label>
-                    <input id="custom-key-value" type="password" value={newCustomValue} onChange={event => setNewCustomValue(event.target.value)} placeholder={t('credentials.valuePlaceholder')} maxLength={200} />
-                    <button className="secondary-button" type="button" onClick={() => void addCustomKey()} disabled={savingCredentials}>{savingCredentials ? t('credentials.saving') : t('credentials.addCustomKey')}<ArrowRight size={14} aria-hidden="true" /></button>
-                  </div>
-                </div>
-              </>}
-
-              {credentialMeta?.updatedAt && <small className="credential-updated">{t('credentials.lastUpdated', { date: formatDate(credentialMeta.updatedAt, locale) })}</small>}
-              {selected && projectResources && (
-                <div className="credential-resources">
-                  <p className="eyebrow">{t('credentials.projectResources')}</p>
-                  <div className="resource-list">
-                    {Object.entries(projectResources.providers).map(([providerId, state]) => (
-                      <article className="resource-item" key={providerId}>
-                        <strong>{providerId}</strong>
-                        <code>{'url' in state ? String(state.url) : 'projectId' in state ? String(state.projectId) : 'projectRef' in state ? String(state.projectRef) : 'created'}</code>
-                      </article>
-                    ))}
-                  </div>
-                  <button className="secondary-button" type="button" onClick={() => void regenerateEnv()} disabled={regeneratingEnv}>
-                    {regeneratingEnv ? t('credentials.regenerating') : t('credentials.regenerateEnv')}
-                    <RefreshCw size={14} aria-hidden="true" />
-                  </button>
-                </div>
-              )}
-            </section>
-            <section className="agent-catalog-panel" id="agents">
-              <div className="panel-title"><div><p className="eyebrow">{t('agents.eyebrow')}</p><h2>{t('agents.title')}</h2></div><button className="icon-button" type="button" onClick={() => void loadAgents()} disabled={loadingAgents} aria-label={t('agents.refresh')} title={t('agents.refresh')}><RefreshCw size={17} /></button></div>
-              <p className="form-note">{t('agents.formNote')}</p>
-              {loadingAgents && agents.length === 0 ? <p className="empty-state">{t('agents.detecting')}</p> : agents.length === 0 ? <p className="empty-state">{t('agents.notFound')}</p> : <div className="agent-list">{agents.map(agent => (
-                <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => void probeAgent(agent)} disabled={!agent.detected || probingAgentId !== null}>
-                  <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source === 'built-in' ? t('agents.builtIn') : t('agents.custom')}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? t('agents.runningProbe') : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{agentProbes[agent.id] && <div className="agent-caps"><span className="agent-cap">{agentProbes[agent.id].nonInteractive ? t('agents.nonInteractiveYes') : t('agents.nonInteractiveUnknown')}</span><span className="agent-cap">{agentProbes[agent.id].workspaceWrite ? t('agents.workspaceWriteYes') : t('agents.workspaceWriteNo')}</span><span className="agent-cap">{t('agents.adapter', { status: agentProbes[agent.id].adapterStatus })}</span></div>}<code className="agent-command">{agent.launchCommand}</code></div>
-                  <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? t('agents.detected') : t('agents.notDetected')}</span>
-                </button>
-              ))}</div>}
-              <details className="agent-form-toggle">
-                <summary>{t('agents.addCustomSummary')}</summary>
-                <div className="agent-form">
-                  <label htmlFor="custom-agent-name">{t('agents.agentName')}</label>
-                  <input id="custom-agent-name" value={customAgentName} onChange={event => setCustomAgentName(event.target.value)} placeholder={t('agents.namePlaceholder')} maxLength={80} />
-                  <label htmlFor="custom-agent-command">{t('agents.launchCommand')}</label>
-                  <input id="custom-agent-command" value={customAgentCommand} onChange={event => setCustomAgentCommand(event.target.value)} placeholder={t('agents.commandPlaceholder')} maxLength={200} />
-                  <button className="primary-button" type="button" onClick={() => void addCustomAgent()} disabled={savingAgent}>{savingAgent ? t('agents.registering') : t('agents.register')}<ArrowRight size={15} aria-hidden="true" /></button>
-                </div>
-              </details>
-            </section>
-            <section className="activity-panel" id="activity"><div className="panel-title"><h2>{t('activity.panelTitle')}</h2><Activity size={18} aria-hidden="true" /></div><ol>{activity.map(item => <li key={item.id}><span>{item.text}</span><time>{item.time}</time></li>)}</ol></section>
           </aside>
         </div>
+        )}
+
+        {view.kind === 'credentials' && (
+          <div className="standalone-view">
+            {credentialsPanel}
+          </div>
+        )}
+
+        {view.kind === 'agents' && (
+          <div className="standalone-view">
+            {agentsPanel}
+          </div>
+        )}
+
+        {view.kind === 'activity' && (
+          <div className="standalone-view">
+            {activityPanel}
+          </div>
+        )}
       </section>
     </main>
   );
