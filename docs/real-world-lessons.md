@@ -52,6 +52,8 @@
 | 18 | **生成的浏览器插件 `tsconfig` 让自己的 quality gate 必挂** | 没有 `lib: DOM`、没有 `skipLibCheck`、`types` 缺 `node`，`tsc --noEmit` 直接在 vite 自己的 `.d.ts` 上报 `Cannot find name 'Buffer'`——与缺陷 8（生成的 CI 在首个 PR 必然失败）同一类：**模板的 quality 脚本必须真跑过一次**，光有单测断言产物存在是不够的。修复：补 `lib`/`skipLibCheck`/`@types/node`，并加回归测试锁住。 |
 | 19 | **manifest 引用了生成器产不出的 PNG** | 生成的 MV3 manifest 写了 `default_icon: 'icons/icon128.png'`，但产物全是文本、生成器无法产出 PNG，`vite build` 报 `Could not load manifest asset`。修复：manifest 去掉 `default_icon`，把「发布前自行补齐图标」写进交接 README（诚实边界而不是假装有图标）。 |
 | 20 | **Studio 用了不存在的 i18n key，且把 catalog 的 string 当枚举** | 产品形态单选框调 `t('productType.<type>')`，而字典里在 `blueprint.productTypeXxx`，界面会渲染出原始 key；Runtime 单选框把 `agent.id: string` 直接写进 `runtimeProvider` 枚举。**两处在已提交的 HEAD 上 typecheck 就是红的**——提交前没跑全量 typecheck。改为显式 key 映射表 + 只列 `runtimeProviderSchema` 认得的 id。 |
+| 21 | **质量契约按类型硬编码，落地页 gate 中途死掉** | `spec.quality.required` 对所有产品类型都写死 `lint/typecheck/unit/build/smoke`，但落地页模板只定义了 `build` 和 `lint`——真跑 `npm run quality` 到第二步就 `npm error Missing script: "typecheck"`，CI 永远无法转绿（与缺陷 8/18 同类）。修复：`QUALITY_CHECKS_BY_PRODUCT_TYPE` 让契约按类型只声明模板真实定义了脚本的检查项，回归测试对**每个**已实现类型都校验「声明的每一项都有真脚本、且都在 `quality` 链里」。 |
+| 22 | **Tauri 不给图标就编不过，而生成器只能产文本** | `tauri::generate_context!` 在编译期读 `bundle.icon`，缺 `src-tauri/icons/icon.png` 直接 `proc macro panicked`；跟缺陷 19 同样撞上「文本生成器产不出 PNG」，但这次不能靠删配置绕过——桌面应用没有图标就无法编译。修复：模板附带 `scripts/ensure-icon.mjs`（用 `node:zlib` 现场写一张占位 PNG）并挂在 `rust-check` 前面，真实图标仍是发布前的人工步骤。 |
 
 ## 2. 由缺陷沉淀的架构规则
 

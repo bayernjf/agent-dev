@@ -87,7 +87,8 @@
   - **web-saas / landing-page**：已生成真实代码（React/Vite + Hono 与静态站两条 Golden Path）。
   - **browser-extension（Stage C）**：已生成真实 MV3 脚手架（Vite + `@crxjs/vite-plugin`：manifest/popup/options/background/content + 应用商店发布交接 README），不接入 v0.1 Cloudflare/Vercel/Supabase 云管线，仅交付本地可构建产物。详见 `packages/blueprint/src/generate.ts` 的 `buildBrowserExtension`。**已真实验证「可构建」**：把生成物落到 `/tmp/ext-build-check` 后 `npm install` + `npm run quality`（`tsc --noEmit && vite build`）通过，产出 `dist/manifest.json`（MV3、service-worker-loader、content script 注入）。这一步真跑一次暴露并修掉两个必然失败的缺陷：(1) 生成的 `tsconfig.json` 没有 `lib: DOM`、没有 `skipLibCheck`、`types` 缺 `node`，`tsc --noEmit` 直接在 vite 自己的 `.d.ts` 上报错（`Cannot find name 'Buffer'`），第一个 PR 的 CI 必挂——与项目 2 缺陷 8 同一类；(2) manifest 引用了 `icons/icon128.png`，但产物是纯文本、生成器无法产出 PNG，`vite build` 报 `Could not load manifest asset`。修复：补 `lib`/`skipLibCheck`/`@types/node`，manifest 去掉 `default_icon` 并在 README 交接里要求发布前自行补齐图标。已加回归测试锁住这两点。
     - 另修掉 HEAD（`1a22754`）上两个已提交但 typecheck 就红的缺陷：Studio 产品形态单选框用的是不存在的 i18n key（`productType.<type>`，实际在 `blueprint.productTypeXxx`，界面上会渲染出原始 key），以及 Runtime 单选框把 catalog 的 `agent.id: string` 直接当成 `runtimeProvider` 枚举写入。现在形态标签走显式 key 映射表，Runtime 只列 `runtimeProviderSchema` 认得的 id。
-  - **desktop / mobile / api-tool**：仍是枚举占位 + `generated/DELIVERY_HANDOFF.md` 引导式交接（守住 multi-product 诚实边界，见 `multi-product-delivery-plan.md` 的 Stage D/E/F）。
+  - **desktop（Stage D，Tauri v2）**：技术栈决策为**先 Tauri，Electron 留作专业模式可选**（参考项目 `soft-desk` 用的是 Electron）。`buildDesktop` 产出 Vite/TypeScript webview（`index.html` / `src/main.ts` 通过 `invoke('app_version')` 真实走一次 IPC，IPC 断了会立刻显形）、Rust 核心（`src-tauri/` 下 `lib.rs` / `main.rs` / `build.rs` / `Cargo.toml`）、`tauri.conf.json`、占位图标生成脚本、`.gitignore`，以及带 `dtolnay/rust-toolchain` 与 Linux webview 依赖的 quality 工作流。**已真实验证**：`/tmp/gen-check-desktop` 冷启动跑 `npm install` + `npm run quality`（`typecheck` → `vite build` → `rust-check`=`cargo check`）全绿，再跑 `npm run bundle` 产出 macOS `Gen Check.app` 与 `Gen Check_0.1.0_aarch64.dmg`（未签名、未公证）。生成的 GitHub 工作流**未**在真实 CI 跑过。真跑暴露两个缺陷：(1) `tauri::generate_context!` 编译期就要 `src-tauri/icons/icon.png`，缺图标直接 `proc macro panicked`——和插件的图标问题同源，但桌面端删不掉，改为模板附带 `scripts/ensure-icon.mjs` 用 `node:zlib` 现场写占位 PNG 并挂在 `rust-check` 前；(2) 质量契约 `spec.quality.required` 对所有类型硬编码五项检查，落地页真跑到第二步就 `Missing script: "typecheck"`，现按类型收敛为 `QUALITY_CHECKS_BY_PRODUCT_TYPE`（web-saas 五项 / landing-page `lint+build` / extension `typecheck+build` / desktop `typecheck+build+rust-check`），回归测试对每个已实现类型都校验声明与脚本一致。签名、公证、Windows 代码签名、自动更新分发与商店提交仍是人工步骤。
+  - **mobile / api-tool**：仍是枚举占位 + `generated/DELIVERY_HANDOFF.md` 引导式交接（守住 multi-product 诚实边界，见 `multi-product-delivery-plan.md`）。
   - 部署平台可组合（Cloudflare/Vercel 任意组合）仍是 M2 待做。详见 [可定制化方案](docs/customizable-blueprint-plan.md) 与 [多产品类型交付方案](docs/multi-product-delivery-plan.md)。
 - 真实 Provider Adapter 端到端验证通过：GitHub 仓库创建、Vercel 部署、Cloudflare Pages 部署、Supabase 自动降级。验证项目 `e2e-test-real`，GitHub 仓库 `bayernjf/e2e-test-real`，Vercel URL `e2e-test-real-bayernjfs-projects.vercel.app`。
 - `fix: resolve Vercel CLI non-TTY hanging and stderr output in adapter`：修复 Vercel CLI 在非交互环境挂起（添加 `--no-wait` + `CI=true`）和 stdout 为空（discover 改为 `stdout || stderr`）的问题。
@@ -222,7 +223,7 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 10. [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)
 11. [通用开发 SOP](ai-agent-development-sop.md)
 12. [Agent Runtime Catalog](docs/agent-runtime-catalog.md)
-13. [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目与模板引擎暴露的 20 个缺陷、架构规则、免费模型选型、环境前提与遗留资源
+13. [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目与模板引擎暴露的 22 个缺陷、架构规则、免费模型选型、环境前提与遗留资源
 
 市场判断和长期范围见 [市场分析](docs/market-analysis.md) 与 [路线图](docs/roadmap.md)。现有项目事实依据见 [项目组合复盘](portfolio-development-review.md)。
 
@@ -257,7 +258,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
    - `release/approve` 只校验「被验收提交是生产分支祖先」，不会自动把 `dev` 提升到 `main`；若 PR 目标是 `dev`，发布前需显式补开 dev→main PR。
    - 生产发布必须由用户本人批准，不能由 Agent 代按；Daemon 必须带代理变量与 `NODE_USE_ENV_PROXY=1` 启动，否则云端验证会假失败。
    - Daemon 的 PATH 需同时含 node22 运行时、homebrew（codex 0.142.3，避免解析到有兼容 bug 的 0.147.0）和 fnm node20 全局 bin（`vercel`/`wrangler`）。
-8. 多产品形态按 `docs/multi-product-delivery-plan.md` 的 Stage 顺序推进：web-saas / landing-page / browser-extension 已生成真实模板（extension 的本地构建已实测通过），desktop / mobile / api-tool 仍是引导式交接；部署平台可组合（M2）未做。
+8. 多产品形态按 `docs/multi-product-delivery-plan.md` 的 Stage 顺序推进：web-saas / landing-page / browser-extension / desktop 已生成真实模板（四类的生成物都在本地真跑过自己的 quality gate，desktop 还真产出了未签名的 .app/.dmg），mobile / api-tool 仍是引导式交接；桌面端 Electron 选项、签名/公证/分发与部署平台可组合（M2）未做。
 
 ## 9. 用户决策
 

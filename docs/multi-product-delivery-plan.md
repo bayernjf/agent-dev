@@ -62,7 +62,7 @@ Product Type
 
 退出条件：非作者用户能从想法生成落地页，并完成一次 Preview 验收。
 
-> **实现进度（2026-08-24）**：`landing-page` 已在 `packages/blueprint/src/generate.ts` 落地为真实模板引擎——`buildLandingPage` 产出 `package.json` / `scripts/build.mjs` / `src/index.html` / `src/styles.css` / `src/app.js` / `wrangler.toml` / GitHub quality 工作流，共享治理文档（PRODUCT_STANDARD / AGENTS / DELIVERY_WORKFLOW / Environment Contract / Handoff）由 `buildGovernanceArtifacts` 复用。质量门禁 `quality` 实际调用静态构建脚本并校验 `<main>` 地标。余下外部依赖（域名、GA4/Clarity 注入到部署时注入）仍为 Manual Action。浏览器插件 / 桌面 / 移动 / API 工具仍为引导式 handoff，尚未生成模板。
+> **实现进度（2026-08-24）**：`landing-page` 已在 `packages/blueprint/src/generate.ts` 落地为真实模板引擎——`buildLandingPage` 产出 `package.json` / `scripts/build.mjs` / `src/index.html` / `src/styles.css` / `src/app.js` / `wrangler.toml` / GitHub quality 工作流，共享治理文档（PRODUCT_STANDARD / AGENTS / DELIVERY_WORKFLOW / Environment Contract / Handoff）由 `buildGovernanceArtifacts` 复用。质量门禁 `quality` 实际调用静态构建脚本并校验 `<main>` 地标。余下外部依赖（域名、GA4/Clarity 注入到部署时注入）仍为 Manual Action。
 
 ### 阶段 C：浏览器插件
 
@@ -70,11 +70,17 @@ Product Type
 
 退出条件：生成的插件可在本地安装，并能产生可审查的发布包。
 
+> **实现进度（2026-08-24）**：`browser-extension` 已落地为真实模板引擎——`buildBrowserExtension` 产出 MV3 `manifest.config.ts`、Vite + `@crxjs/vite-plugin` 配置、popup/options/background/content 源码、tsconfig 与 quality 工作流。生成物已在临时目录真跑一次 `npm install && npm run quality`（`typecheck` + `vite build`），产出 `dist/manifest.json`，可 Load unpacked。商店图标（栅格 PNG）与商店提交/审核仍为人工步骤。
+
 ### 阶段 D：桌面应用与移动应用
 
 桌面端优先参考 `soft-desk`，移动端优先参考 `word-base` 的跨端需求。范围包括 Tauri/Electron、Expo/React Native 模板、平台构建、签名、版本管理、设备 smoke 和安装包证据。证书、商店账号和最终提交始终是人工步骤。
 
 退出条件：至少一个平台完成从功能任务到可安装包的完整交付。
+
+> **实现进度（2026-08-24，桌面端）**：技术栈决策为**先 Tauri v2**，Electron 留作后续专业模式可选项（`soft-desk` 用的是 Electron，可作为迁移参考）。`buildDesktop` 产出 Vite/TypeScript webview（`index.html` / `src/main.ts` 通过 `invoke('app_version')` 真实走一次 IPC）、Rust 核心（`src-tauri/src/lib.rs` + `main.rs` + `build.rs` + `Cargo.toml`）、`tauri.conf.json`、占位图标生成脚本、`.gitignore`、以及带 Rust toolchain 和 Linux webview 依赖的 quality 工作流。
+>
+> 证据：生成物在 `/tmp/gen-check-desktop` 冷启动真跑一次 `npm install && npm run quality`（`typecheck` → `vite build` → `rust-check` = `cargo check`）全绿；并真跑 `npm run bundle` 产出 macOS `Gen Check.app` 与 `Gen Check_0.1.0_aarch64.dmg`（未签名、未公证）。生成的 GitHub 工作流**未**在真实 CI 执行过。签名、公证、Windows 代码签名、自动更新分发与商店提交仍是人工步骤。移动端（Expo/React Native）尚未开始。
 
 ## 5. 选择规则
 
@@ -90,9 +96,13 @@ Product Type
 
 - `web-saas`：React/Vite + Hono + Supabase 完整脚手架（Cloudflare Pages + Vercel）。
 - `landing-page`：静态站点脚手架（Cloudflare Pages），无后端依赖；环境契约不含 Supabase/Vercel 密钥。
+- `browser-extension`：MV3 + Vite/crxjs 脚手架，可本地 Load unpacked；商店图标与提交审核为人工步骤。
+- `desktop`：Tauri v2 脚手架（Vite webview + Rust 核心），可本地构建出安装包；签名、公证与分发为人工步骤。
 
-仍为引导式 handoff、尚未生成模板的产品类型（按路线图顺序，下一步即浏览器插件）：
+仍为引导式 handoff、尚未生成模板的产品类型（按路线图顺序，下一步即移动端）：
 
-- `browser-extension`、`desktop`、`mobile`、`api-tool`：当前仅返回 `DELIVERY_HANDOFF.md` 指南，不生成任何源码脚手架；不能把通用代码生成误报为完整交付。
+- `mobile`、`api-tool`：当前仅返回 `DELIVERY_HANDOFF.md` 指南，不生成任何源码脚手架；不能把通用代码生成误报为完整交付。
+
+每个已实现类型的 `spec.quality.required` 只声明该模板真实定义了脚本的检查项（`packages/blueprint/src/index.ts` 的 `QUALITY_CHECKS_BY_PRODUCT_TYPE`）：多声明一项就会让生成物的 `npm run quality` 中途 `Missing script` 而永远无法通过 CI。
 
 当某类型尚无可验证模板时，Agent-Dev 必须明确显示“仅生成任务包/需人工交付”，不能把通用代码生成误报为完整交付。
