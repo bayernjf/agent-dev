@@ -51,12 +51,12 @@
 
 * { box-sizing: border-box; }
 
-body { margin: 0; min-width: 320px; min-height: 100vh; }
+body { margin: 0; min-width: 320px; min-height: 100vh; overflow-x: auto; }
 
 button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 
-.shell { min-height: 100vh; display: grid; grid-template-columns: 224px minmax(0, 1fr); }
+.shell { min-height: 100vh; display: grid; grid-template-columns: 224px minmax(0, 1fr); min-width: 1200px; }
 
 .sidebar {
   background: var(--surface);
@@ -65,9 +65,28 @@ button { cursor: pointer; }
   flex-direction: column;
   padding: 28px 18px 20px;
   border-right: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
 
-.brand { display: flex; gap: 10px; align-items: center; font-weight: 700; font-size: 18px; }
+.brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-weight: 700;
+  font-size: 18px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.brand:hover span { color: var(--brand); }
 .brand-mark { display: block; width: 22px; height: 22px; border-radius: 5px; }
 
 nav { display: grid; gap: 6px; margin-top: 46px; }
@@ -82,6 +101,10 @@ nav { display: grid; gap: 6px; margin-top: 46px; }
   border-radius: 5px;
   font-size: 14px;
   transition: color .15s, background .15s;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
 }
 
 .nav-item:hover { background: var(--surface-muted); color: var(--text-1); }
@@ -101,10 +124,20 @@ nav { display: grid; gap: 6px; margin-top: 46px; }
 .topbar {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  padding-bottom: 28px;
+  align-items: center;
+  height: 76px;
+  padding-bottom: 24px;
   border-bottom: 1px solid var(--line);
+  box-sizing: border-box;
 }
+
+.topbar > div:first-child {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+}
+
+.topbar h1 { white-space: nowrap; }
 
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
 
@@ -188,6 +221,33 @@ h2 { font-size: 16px; margin-bottom: 5px; color: var(--text-1); }
 }
 
 .studio-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 32px; padding-top: 32px; }
+.project-detail-grid { grid-template-columns: minmax(0, 1fr) 380px; }
+
+.detail-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 26px;
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-tab {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color .15s;
+}
+
+.detail-tab:hover { color: var(--text-1); }
+.detail-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
 
 .section-heading,
 .panel-title {
@@ -254,6 +314,9 @@ h2 { font-size: 16px; margin-bottom: 5px; color: var(--text-1); }
 }
 
 .right-rail { display: grid; align-content: start; gap: 18px; }
+
+.standalone-view { max-width: 960px; margin: 0 auto; padding-top: 24px; }
+.standalone-view .panel-title { display: none; }
 
 .blueprint-panel,
 .connector-panel,
@@ -1450,29 +1513,6 @@ input:disabled {
   color: var(--text-1);
   font-size: 10px;
   overflow-x: auto;
-}
-
-@media (max-width: 920px) {
-  .shell { grid-template-columns: 1fr; }
-  .sidebar { min-height: auto; padding: 16px 22px; flex-direction: row; align-items: center; gap: 24px; border-right: none; border-bottom: 1px solid var(--line); }
-  nav { margin: 0; display: flex; }
-  .nav-item { padding: 8px; }
-  .sidebar-note { margin: 0 0 0 auto; }
-  .studio-grid { grid-template-columns: 1fr; }
-  .right-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-@media (max-width: 620px) {
-  .workspace { padding: 24px 16px; }
-  .sidebar { padding: 14px 16px; }
-  .sidebar-note, .nav-item:not(.active) { display: none; }
-  .table-head { display: none; }
-  .table-row { grid-template-columns: 1fr 1fr; gap: 10px; }
-  .table-row span, .table-row time { font-size: 12px; }
-  .right-rail, .plan-grid, .artifact-list, .provider-plan-list, .provider-actions, .git-evidence { grid-template-columns: 1fr; }
-  .decision { flex-direction: column; gap: 10px; }
-  .approval-action { align-items: stretch; flex-direction: column; }
-  .approval-action .primary-button { width: 100%; }
 }
 
 .retry-button { margin-top: 13px; }
