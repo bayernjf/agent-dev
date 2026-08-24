@@ -10,6 +10,32 @@ describe('ProductBlueprint', () => {
     expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
   });
 
+  it('defaults the runtime to local-codex for the Golden Path', () => {
+    const blueprint = createDefaultBlueprint('Receipt Desk');
+    expect(blueprint.spec.runtime.provider).toBe('local-codex');
+    expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
+  });
+
+  it('accepts every supported runtime provider without mutating the value', () => {
+    for (const provider of ['local-codex', 'local-opencode', 'local-claude', 'local-aider', 'local-openclaw', 'local-codebuddy'] as const) {
+      const blueprint = createBlueprint('Runtime Desk', { runtimeProvider: provider }, 1);
+      expect(blueprint.spec.runtime.provider).toBe(provider);
+      expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
+    }
+  });
+
+  it('surfaces the runtime as a designer-facing decision in professional mode', () => {
+    const blueprint = createBlueprint('Sensitive Desk', {
+      mode: 'professional',
+      runtimeProvider: 'local-opencode',
+    }, 2);
+
+    const decisions = getBlueprintDecisions(blueprint);
+    expect(decisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'runtime', value: 'local-opencode', mode: 'ask' }),
+    ]));
+  });
+
   it('blocks baseline approval until every ownership target is selected', () => {
     const incomplete = createBaselinePlan(createDefaultBlueprint('Receipt Desk'));
     const complete = createBaselinePlan(createBlueprint('Receipt Desk', {

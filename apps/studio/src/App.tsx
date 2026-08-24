@@ -1504,6 +1504,14 @@ export function App() {
                   <label><input type="checkbox" checked={answers.analyticsProviders.includes('ga4')} onChange={() => toggleAnalytics('ga4')} />{t('blueprint.googleAnalytics4')}</label>
                   <label><input type="checkbox" checked={answers.analyticsProviders.includes('clarity')} onChange={() => toggleAnalytics('clarity')} />{t('blueprint.microsoftClarity')}</label>
                 </div></fieldset>
+                <fieldset className="choice-group"><legend>{t('blueprint.runtime')}</legend><p>{t('blueprint.runtimeNote')}</p><div className="choice-stack">
+                  {agents.length === 0 ? <small>{t('blueprint.runtimeCatalogLoading')}</small> : agents
+                    .filter(agent => agent.detected)
+                    .map(agent => (
+                      <label key={agent.id}><input type="radio" name="runtime" checked={answers.runtimeProvider === agent.id} onChange={() => setAnswer('runtimeProvider', agent.id)} />{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</label>
+                    ))}
+                  {agents.filter(agent => agent.detected).length === 0 && <small>{t('blueprint.runtimeNoneDetected')}</small>}
+                </div></fieldset>
                 <label htmlFor="custom-instructions">{t('blueprint.customImplementationNote')}</label>
                 <textarea id="custom-instructions" value={answers.customInstructions} onChange={event => setAnswer('customInstructions', event.target.value)} placeholder={t('blueprint.customInstructionsPlaceholder')} maxLength={1000} />
               </>}

@@ -15,12 +15,24 @@ export const productTypeSchema = z.literal('web-saas');
 export const blueprintModeSchema = z.enum(['beginner', 'professional']);
 export const analyticsProviderSchema = z.enum(['ga4', 'clarity']);
 
+// Runtime provider ids must match keys in the agent-runtime AGENT_ADAPTERS registry. `local-` is a
+// namespace prefix so Blueprint stays explicit about which local Agent is chosen.
+export const runtimeProviderSchema = z.enum([
+  'local-codex',
+  'local-opencode',
+  'local-claude',
+  'local-aider',
+  'local-openclaw',
+  'local-codebuddy',
+]);
+
 export const blueprintAnswersSchema = z.object({
   mode: blueprintModeSchema.default('beginner'),
   productIntent: z.string().trim().max(500).default(''),
   dataSensitivity: z.enum(['standard', 'sensitive']).default('standard'),
   previewStrategy: z.enum(['per-pull-request', 'stable-dev-api']).default('per-pull-request'),
   analyticsProviders: z.array(analyticsProviderSchema).default([]),
+  runtimeProvider: runtimeProviderSchema.default('local-codex'),
   customInstructions: z.string().trim().max(1000).default(''),
   githubOwner: z.string().trim().max(120).default(''),
   vercelTeam: z.string().trim().max(120).default(''),
@@ -68,7 +80,7 @@ export const productBlueprintSchema = z.object({
       previewStrategy: z.enum(['per-pull-request', 'stable-dev-api']),
     }),
     analytics: z.object({ providers: z.array(analyticsProviderSchema) }),
-    runtime: z.object({ provider: z.literal('local-codex') }),
+    runtime: z.object({ provider: runtimeProviderSchema }),
     policy: z.object({
       productionApproval: z.literal('required'),
       maxAutomaticFixAttempts: z.literal(2),
@@ -119,7 +131,7 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
         previewStrategy: answers.previewStrategy,
       },
       analytics: { providers: answers.analyticsProviders },
-      runtime: { provider: 'local-codex' },
+      runtime: { provider: runtimeProviderSchema.parse(answers.runtimeProvider) },
       policy: {
         productionApproval: 'required',
         maxAutomaticFixAttempts: 2,
@@ -195,6 +207,20 @@ export function getBlueprintDecisions(blueprint: ProductBlueprint): BlueprintDec
     reason: analytics.length === 0
       ? 'No tracking setup is required.'
       : 'Analytics affects privacy notices, account authorization and environment variables.',
+  });
+
+  const runtimeProvider = blueprint.spec.runtime.provider;
+  decisions.push({
+    id: 'runtime',
+    title: 'Local agent runtime',
+    value: runtimeProvider,
+    // In beginner mode the verified default is chosen automatically. In professional mode the caller
+    // passes an explicit runtimeProvider (ask), so we surface it as a confirmed choice.
+    mode: blueprint.metadata.mode === 'beginner' ? 'auto' : 'ask',
+    reason:
+      blueprint.metadata.mode === 'beginner'
+        ? 'Beginner mode uses the verified default local agent (local-codex).'
+        : 'Professional mode selects which local agent runtime implements the feature tasks.',
   });
 
   if (blueprint.metadata.customInstructions) {
