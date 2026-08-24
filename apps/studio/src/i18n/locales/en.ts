@@ -32,6 +32,7 @@ export const en = {
     valid: 'Valid',
     invalid: 'Invalid',
     notApplicable: 'N/A',
+    comingSoon: 'Coming soon',
     configured: 'Configured',
     back: 'Back',
     next: 'Next',
@@ -68,6 +69,14 @@ export const en = {
       mode: 'Mode',
       deliveryState: 'Delivery state',
       updated: 'Updated',
+    },
+    detailEyebrow: 'Project · Revision {revision}',
+    tabs: 'Project tabs',
+    detailTabs: {
+      blueprint: 'Blueprint',
+      delivery: 'Delivery',
+      iteration: 'Iteration',
+      release: 'Release',
     },
   },
   projectState: {
@@ -290,6 +299,7 @@ export const en = {
   },
   activity: {
     title: 'Activity',
+    eyebrow: 'Recent events',
     panelTitle: 'Activity',
     localDaemonConnected: 'Local daemon connected',
     localReady: 'Local delivery control plane ready',

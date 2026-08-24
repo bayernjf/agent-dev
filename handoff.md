@@ -6,6 +6,14 @@
 
 ## 最近进度
 
+- **Studio 交互与视觉打磨（i18n + 双主题 + 交互重构，2026-08-24）**：
+  - **i18n + 双主题已实施**（提交 `90696d4`）：`apps/studio/src/i18n/`（en/zh 字典，默认英文，技术术语保留英文）+ `apps/studio/src/theme/`（ThemeProvider/useTheme + CSS token 双主题，`index.html` 防 FOUC 脚本，favicon 暗色描边 `#7A8695`）。设计文档 `docs/studio-i18n-design.md`、`docs/studio-theme-design.md` 状态已从「待实施」更新为「已实施」。
+  - **视图状态系统**：`View` 类型（dashboard / project / credentials / agents / activity）+ `App.tsx` 按视图拆分；Dashboard 独立为 `views/Dashboard.tsx`，工具函数抽到 `lib/`；Credentials / Agents / Activity 独立视图复用右侧栏真实面板，替换 "Coming soon" 占位；项目详情页移除重复的项目列表。
+  - **项目详情页阶段 Tab 化**：12 个交付区块按 `ProjectTab` 四阶段分组——Blueprint（规划：decisions + dry-run plan）、Delivery（交付：PR/Preview 证据 + baseline + quality gate + preview deploy）、Iteration（迭代：feature task + runtime + acceptance）、Release（发布：production + final report + provider simulation），一次只显示一个阶段，顶部 tab bar 切换；右栏移除 Credentials/Agents/Activity 面板，只留 Blueprint 表单 + Connections。
+  - **纯桌面布局（不再适配移动端）**：移除全部移动端响应式断点；`.shell` 设 `min-width: 1200px` + `body overflow-x: auto`（窗口窄于 1200px 时横向滚动而非挤压内容），`.sidebar` `position: sticky; left: 0` 在滚动时固定左侧。见 `apps/studio/src/styles.css`。
+  - **其他交互修正**：topbar 固定 `height: 76px`（切换 tab 顶部高度一致）；侧边栏 Logo 改为可点击按钮返回首页。
+  - **遗留已知问题**：凭证加载失败的错误串到首页展示（全局 `error` 状态未按视图隔离），待修。
+
 - **项目 3（`Link Vault`）已完整交付上线（3/3，2026-08-24 完成）**。三个真实项目验证目标全部达成：
   - **Runtime 用 OpenCode 2.0 + 免费模型跑通**：Codex 因火山方舟套餐额度耗尽持续 429，改为 OpenCode 2.0 会话式执行。OpenCode 2.0 去掉了 v1 的 `-p --print`，非交互执行走 `api` 子命令 + `opencode2-driver.mjs`（会话创建 → 轮询 `message` 端点 → 按 `finish === 'stop'` 判定完成）。驱动在 `576b701` 提交（`fix(runtime): complete opencode runs on finish=stop and switch to nemotron-3-ultra-free`）。
   - **免费模型选型（实测结论）**：目录里挂着的免费模型 ≠ 网关实际可用。`ling-3.0-flash-free`/`deepseek-v4-flash-free` 实测 401/400（网关不认模型名或凭证无权）；`big-pickle` 实测 429 限流；`hy3-free` 已废弃。最终锁定 `nemotron-3-ultra-free`（内置 `opencode` provider 的免费模型，1M 上下文 / 128K 输出，工具调用可用），设为 OpenCode 默认模型。默认模型定义见 `packages/agent-runtime/src/index.ts` 的 `opencode.buildCommand`。
