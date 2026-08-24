@@ -1496,6 +1496,12 @@ export function App() {
                 <small>{t('blueprint.productTypeNote')}</small>
               </div></fieldset>
 
+              {answers.productType === 'desktop' && <fieldset className="choice-group"><legend>{t('blueprint.desktopShell')}</legend><div className="choice-grid">
+                <button className={answers.desktopShell === 'tauri' ? 'selected' : ''} type="button" onClick={() => setAnswer('desktopShell', 'tauri')}>{t('blueprint.desktopShellTauri')}</button>
+                <button className={answers.desktopShell === 'electron' ? 'selected' : ''} type="button" onClick={() => setAnswer('desktopShell', 'electron')}>{t('blueprint.desktopShellElectron')}</button>
+                <small>{t('blueprint.desktopShellNote')}</small>
+              </div></fieldset>}
+
               <fieldset className="choice-group"><legend>{t('blueprint.dataSensitivity')}</legend><div className="choice-grid">
                 <button className={answers.dataSensitivity === 'standard' ? 'selected' : ''} type="button" onClick={() => setAnswer('dataSensitivity', 'standard')}><CheckCircle2 size={15} />{t('blueprint.standard')}</button>
                 <button className={answers.dataSensitivity === 'sensitive' ? 'selected' : ''} type="button" onClick={() => setAnswer('dataSensitivity', 'sensitive')}><ShieldCheck size={15} />{t('blueprint.sensitive')}</button>
