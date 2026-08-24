@@ -1480,6 +1480,13 @@ export function App() {
               <label htmlFor="product-intent">{t('blueprint.productIntent')}</label>
               <textarea id="product-intent" value={answers.productIntent} onChange={event => setAnswer('productIntent', event.target.value)} placeholder={t('blueprint.productIntentPlaceholder')} maxLength={500} />
 
+              <fieldset className="choice-group"><legend>{t('blueprint.productType')}</legend><div className="choice-stack">
+                {(['web-saas', 'landing-page', 'browser-extension', 'desktop', 'mobile', 'api-tool'] as const).map(type => (
+                  <label key={type}><input type="radio" name="productType" checked={answers.productType === type} onChange={() => setAnswer('productType', type)} />{t(`productType.${type}`)}</label>
+                ))}
+                <small>{t('blueprint.productTypeNote')}</small>
+              </div></fieldset>
+
               <fieldset className="choice-group"><legend>{t('blueprint.dataSensitivity')}</legend><div className="choice-grid">
                 <button className={answers.dataSensitivity === 'standard' ? 'selected' : ''} type="button" onClick={() => setAnswer('dataSensitivity', 'standard')}><CheckCircle2 size={15} />{t('blueprint.standard')}</button>
                 <button className={answers.dataSensitivity === 'sensitive' ? 'selected' : ''} type="button" onClick={() => setAnswer('dataSensitivity', 'sensitive')}><ShieldCheck size={15} />{t('blueprint.sensitive')}</button>
