@@ -120,7 +120,7 @@ export const zh = {
     googleAnalytics4: 'Google Analytics 4',
     microsoftClarity: 'Microsoft Clarity',
     productType: '产品形态',
-    productTypeNote: '当前仅“Web SaaS”提供自动生成的模板。其他形态属于路线图规划项；选择它们会给出引导式交接说明，而非自动生成代码。',
+    productTypeNote: '当前 Web SaaS、落地页与浏览器插件提供自动生成的模板。桌面端、移动端与 API 工具属于路线图规划项；选择它们会给出引导式交接说明，而非自动生成代码。',
     productTypeWebSaas: 'Web SaaS',
     productTypeLandingPage: '落地页',
     productTypeBrowserExtension: '浏览器插件',

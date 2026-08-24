@@ -83,7 +83,12 @@
 - **凭证管理 Phase 2 已实现**：`verifyCredentials()` 通过 CLI（gh/vercel/wrangler/supabase）验证各 Provider Token 有效性；Studio 凭证面板新增首次引导模式（无凭证时自动进入分步引导）、Supabase 手动配置区块（遵循用户决策：Supabase 不做自动化，仅引导用户手动创建项目后填入 URL/Key）、自定义第三方 API Key 管理和凭证验证 UI。
 - Dual Preview Spike 已通过真实云端验证：Vercel API 部署（`/api/health` 公网可访问）、Cloudflare Pages 部署、跨域通信和 API URL 注入均取得真实 Evidence。解决了 Vercel SSO Protection 阻塞公网访问、`vercel.json` 配置、API Handler 兼容性、部署目录和 Cloudflare 构建注入等问题。详见 [Dual Preview Spike](docs/spikes/dual-preview.md)。
 - Supabase Auth Spike 已确认采用 Manual 降级路径（路径 C）：由用户手动完成 Supabase 项目创建和凭证管理，Agent-Dev 负责展示最小人工步骤和凭证注入，RealProviderRegistry 已实现自动降级为 ManualProviderAdapter。详见 [Supabase Auth Spike](docs/spikes/supabase-auth.md)。
-- **Blueprint 可定制化（M1/M3 已实现，提交 `62d4bba` / `336443f`）**：本地 Agent Runtime 选择已在 professional 模式开放——`runtimeProvider` 改为 enum（codex/opencode/claude/aider/openclaw/codebuddy），从 `/api/runtime/catalog` 检测到的 Agent 中挑，daemon plan/prepare 不再硬编码 `codex`；Studio 表单新增 Runtime 卡片。产品形态 `productType` 改为 enum（web-saas/landing-page/browser-extension/desktop/mobile/api-tool），表单可勾选；非 web-saas 不假装生成代码，而是返回 `generated/DELIVERY_HANDOFF.md` 引导式交接（守住 multi-product 诚实边界）。部署平台可组合（Cloudflare/Vercel 任意组合）仍是 M2 待做。详见 [可定制化方案](docs/customizable-blueprint-plan.md)。
+- **Blueprint 多产品形态（M1/M3 推进中，提交 `62d4bba` / `336443f` 起）**：本地 Agent Runtime 选择已在 professional 模式开放——`runtimeProvider` 改为 enum（codex/opencode/claude/aider/openclaw/codebuddy），从 `/api/runtime/catalog` 检测到的 Agent 中挑，daemon plan/prepare 不再硬编码 `codex`；Studio 表单新增 Runtime 卡片。产品形态 `productType` 改为 enum（web-saas/landing-page/browser-extension/desktop/mobile/api-tool），表单可勾选，按路线图顺序逐个落地模板引擎：
+  - **web-saas / landing-page**：已生成真实代码（React/Vite + Hono 与静态站两条 Golden Path）。
+  - **browser-extension（Stage C）**：已生成真实 MV3 脚手架（Vite + `@crxjs/vite-plugin`：manifest/popup/options/background/content + 应用商店发布交接 README），不接入 v0.1 Cloudflare/Vercel/Supabase 云管线，仅交付本地可构建产物。详见 `packages/blueprint/src/generate.ts` 的 `buildBrowserExtension`。**已真实验证「可构建」**：把生成物落到 `/tmp/ext-build-check` 后 `npm install` + `npm run quality`（`tsc --noEmit && vite build`）通过，产出 `dist/manifest.json`（MV3、service-worker-loader、content script 注入）。这一步真跑一次暴露并修掉两个必然失败的缺陷：(1) 生成的 `tsconfig.json` 没有 `lib: DOM`、没有 `skipLibCheck`、`types` 缺 `node`，`tsc --noEmit` 直接在 vite 自己的 `.d.ts` 上报错（`Cannot find name 'Buffer'`），第一个 PR 的 CI 必挂——与项目 2 缺陷 8 同一类；(2) manifest 引用了 `icons/icon128.png`，但产物是纯文本、生成器无法产出 PNG，`vite build` 报 `Could not load manifest asset`。修复：补 `lib`/`skipLibCheck`/`@types/node`，manifest 去掉 `default_icon` 并在 README 交接里要求发布前自行补齐图标。已加回归测试锁住这两点。
+    - 另修掉 HEAD（`1a22754`）上两个已提交但 typecheck 就红的缺陷：Studio 产品形态单选框用的是不存在的 i18n key（`productType.<type>`，实际在 `blueprint.productTypeXxx`，界面上会渲染出原始 key），以及 Runtime 单选框把 catalog 的 `agent.id: string` 直接当成 `runtimeProvider` 枚举写入。现在形态标签走显式 key 映射表，Runtime 只列 `runtimeProviderSchema` 认得的 id。
+  - **desktop / mobile / api-tool**：仍是枚举占位 + `generated/DELIVERY_HANDOFF.md` 引导式交接（守住 multi-product 诚实边界，见 `multi-product-delivery-plan.md` 的 Stage D/E/F）。
+  - 部署平台可组合（Cloudflare/Vercel 任意组合）仍是 M2 待做。详见 [可定制化方案](docs/customizable-blueprint-plan.md) 与 [多产品类型交付方案](docs/multi-product-delivery-plan.md)。
 - 真实 Provider Adapter 端到端验证通过：GitHub 仓库创建、Vercel 部署、Cloudflare Pages 部署、Supabase 自动降级。验证项目 `e2e-test-real`，GitHub 仓库 `bayernjf/e2e-test-real`，Vercel URL `e2e-test-real-bayernjfs-projects.vercel.app`。
 - `fix: resolve Vercel CLI non-TTY hanging and stderr output in adapter`：修复 Vercel CLI 在非交互环境挂起（添加 `--no-wait` + `CI=true`）和 stdout 为空（discover 改为 `stdout || stderr`）的问题。
 - `feat: add real CLI-based Provider Adapters with auto-degradation`：新增基于 CLI 的 GitHub/Vercel/Cloudflare Provider Adapter，通过 RealProviderRegistry 统一编排，支持 CLI 可用性自动检测和 Manual 降级。
@@ -112,7 +117,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 
 > 让人专注于产品为何存在，让 Agent 负责产品如何可靠地存在。
 
-首版完成结果不是生成代码，而是交付一个归用户所有、可以访问、可以继续开发和维护的 Web 产品基线，并通过相同流程交付至少一个真实功能。Web SaaS 是当前验证类型；落地页、浏览器插件、桌面端和移动端属于后续独立 Product Type，不应被当前固定模板误认为已实现。详见 [多产品类型交付方案](docs/multi-product-delivery-plan.md)。
+首版完成结果不是生成代码，而是交付一个归用户所有、可以访问、可以继续开发和维护的 Web 产品基线，并通过相同流程交付至少一个真实功能。Web SaaS 是当前验证类型，落地页与浏览器插件已生成真实模板（MV3 脚手架），桌面端、移动端与 API 工具属于后续独立 Product Type（暂为引导式交接）。详见 [多产品类型交付方案](docs/multi-product-delivery-plan.md)。
 
 ## 2. 当前真实状态
 
@@ -133,7 +138,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | 真实 Provider Adapter | GitHub/Vercel/Cloudflare 真实 CLI 接入已验证；Supabase Manual 降级已验证；RealProviderRegistry 统一编排，支持 CLI 可用性自动检测和 Manual 降级；Promise.allSettled 部分失败处理 |
 | 凭证管理方案 | Phase 1 + Phase 2 已实现（详见 [凭证管理方案](docs/credential-management.md)）。凭证/元数据写入 Agent-Dev `.agent-dev` 目录，项目资源清单写入 workspace `.agent-dev`，自动生成 `.env`；Studio 凭证面板（引导模式 + 验证 + Supabase 手动配置 + 自定义 Key）已完成 |
 | Dual Preview 部署编排 | `packages/deployment-composer` 已实现：7 步幂等编排（含 Vercel SSO Protection 关闭）、精确 CORS origin、临时项目清理、Daemon Preview API 和 Studio 部署区块；证据会区分 Wrangler 实测 URL 与推导兜底 URL；真实云端 7/7 步已于 2026-08-14 跑通并独立复验，剩余未验证项是 PR 关闭后的清理链路 |
-| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、固定 Web SaaS 模板、隔离工作区 Git baseline、Feature Task 与人工 Approval、Codex Runtime dry-run/Execute/Retry、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、Local Apply Simulator、XState 状态推进（含 `LOCAL_ACCEPTED`）、PR/Preview 证据推进 API、Fake Provider Adapter、真实 Provider Adapter（GitHub/Vercel/Cloudflare）及 Studio 展示、凭证管理 UI（含验证和引导）、Dual Preview 部署编排；Agent Catalog 已支持 Key-Value 内置目录、Studio 选择、Custom Agent 弹窗和 `.agent-dev/agents.conf` 持久化、刷新检测和只读 Capability Probe 展示；内置未安装项隐藏、custom 未安装项置灰；多 Agent 真实执行 Adapter、Supabase 真实自动接入尚未实现 |
+| 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、固定 Web SaaS / 落地页 / 浏览器插件（MV3）模板、隔离工作区 Git baseline、Feature Task 与人工 Approval、Codex Runtime dry-run/Execute/Retry、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、Local Apply Simulator、XState 状态推进（含 `LOCAL_ACCEPTED`）、PR/Preview 证据推进 API、Fake Provider Adapter、真实 Provider Adapter（GitHub/Vercel/Cloudflare）及 Studio 展示、凭证管理 UI（含验证和引导）、Dual Preview 部署编排；Agent Catalog 已支持 Key-Value 内置目录、Studio 选择、Custom Agent 弹窗和 `.agent-dev/agents.conf` 持久化、刷新检测和只读 Capability Probe 展示；内置未安装项隐藏、custom 未安装项置灰；桌面端/移动端/API 工具模板、多 Agent 真实执行 Adapter、Supabase 真实自动接入尚未实现（前三者暂为引导式交接） |
 | 生产交付路径 | 已实现并**已在真实云端跑通**（2026-08-23 `Receipt Test` → `DELIVERED`，批准人 `feng`；2026-08-24 项目 3 `Link Vault` 同样从 `main` checkout 独立发布验证）：`ReleaseComposer` 9 步编排 + `release_runs` 日志 + Daemon `release/plan\|request\|approve\|retry` + Studio 发布区块。两道人工闸门（请求、具名批准）由状态机与 Schema 强制，Evidence 记录观测值而非判定常量，生产批准始终由用户本人给出。从记录仓库的生产分支 checkout 后发布，并要求该分支已带上被验收的提交（`962932a`），此前的"从本地 workspace 发布"缺口已修、并已真实跑过 |
 | 失败步骤恢复（v0.1 验收） | ✅ 已闭环。**两类恢复均在真实链路验证**：(1) workspace 恢复 `POST .../apply/recover` 新建干净 workspace、保留旧的并报告其 Git 状态，`apply_runs.recovery_index` 保证顺序确定——`Receipt Test` 交付就跑在 `revision-5-recovery-1` 这个被 Codex 破坏后恢复出来的 workspace 上；(2) 发布失败恢复 `POST .../release/retry`——项目 3（`Link Vault`）缺陷 9 被验收提交不在 `main` 上导致发布被拒，补开 dev→main PR 后 `release/retry` 恢复成功。自动化侧：`apps/daemon/test/app.test.ts` 的 `release/retry` 端到端断言失败发布经 retry 回到 `RELEASING` 并最终 `DELIVERED`，且恢复不重开人工批准闸门；`packages/workflow` 状态机测试覆盖 `FAILED → RETRY → 原步骤 → 继续完成` 闭环 |
 | 完整周期真实验证 | 3/3。`Receipt Test`（1/3）、`Workspace Verify Fresh`（2/3）、`Link Vault`（3/3）均已完成 Blueprint → Preview → Production 全周期；详见第 1 节项目条目 |
@@ -217,7 +222,7 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 10. [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)
 11. [通用开发 SOP](ai-agent-development-sop.md)
 12. [Agent Runtime Catalog](docs/agent-runtime-catalog.md)
-13. [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目暴露的 17 个缺陷、架构规则、免费模型选型、环境前提与遗留资源
+13. [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目与模板引擎暴露的 20 个缺陷、架构规则、免费模型选型、环境前提与遗留资源
 
 市场判断和长期范围见 [市场分析](docs/market-analysis.md) 与 [路线图](docs/roadmap.md)。现有项目事实依据见 [项目组合复盘](portfolio-development-review.md)。
 
@@ -247,13 +252,12 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 4. ✅ ~~为 Catalog 增加只读 Capability Probe~~：Daemon API 已提供探测结果，Studio 选择 Agent 后显示非交互、workspace-write 和 Adapter 状态；仍需在各 Agent 实际安装环境逐个验证 Adapter；
 5. ✅ ~~用一次必然产生 Git diff 的真实功能任务验证 Runtime 写入和 Quality Gate~~：已于 2026-08-11 完成；Human Acceptance 仍需由用户明确确认；
 6. ✅ ~~将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联~~：已于 2026-08-10 完成；本地批准进入 `LOCAL_ACCEPTED`，不代表生产交付；
-7. 使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期。**进度 1/3**：`Receipt Test` 已于 2026-08-23 走完全周期并交付上线（`DELIVERED`，证据与本轮修掉的 6 个缺陷见「最近进度」首条）。剩余动作：
-   - **项目 2**：`Workspace Verify Fresh` 已推进到 PR + Preview（详见「最近进度」项目 2 条目）。归属已换真实值（revision 3），仓库 `bayernjf/workspace-verify-fresh` 已建，PR #1 已开，功能（`/api/version`）已实现并通过本地 Quality Gate 与人工验收。剩余：等 Cloudflare 三层证书恢复后补跑 Preview 联合 Smoke；生产发布（`release/request` 后由用户本人批准）——这是「从生产分支发布 + 要求被验收提交是该分支祖先」路径的第一次真实云端验证。它的 Preview 资源按用户要求保留，不要清理。
-   - **项目 3**：尚未创建，需要新建一个 Blueprint。
-   - 每个旧项目开始前仍要先走一次 workspace 恢复（CI actions 版本升级让所有既存 workspace 变成 `staleConfig`）；项目 2 是全新 revision 3，直接 Apply 即得干净 workspace，未走 recover。
+7. ✅ ~~使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期~~：**3/3 已完成**——`Receipt Test`（2026-08-23）、`Workspace Verify Fresh`（2026-08-23）、`Link Vault`（2026-08-24）都走完 Blueprint → Preview → Production 并上线，证据与三轮共修掉的缺陷见「最近进度」。遗留动作：
+   - 三个项目的 Preview 资源仍在账号里（`receipt-test-*-pr-1`、`workspace-verify-fresh-*`、`link-vault-*-pr-1`），清理入口 `POST .../preview/cleanup`（`CLEANUP_PREVIEW`）；生产项目是交付物，不要清理。
+   - `release/approve` 只校验「被验收提交是生产分支祖先」，不会自动把 `dev` 提升到 `main`；若 PR 目标是 `dev`，发布前需显式补开 dev→main PR。
    - 生产发布必须由用户本人批准，不能由 Agent 代按；Daemon 必须带代理变量与 `NODE_USE_ENV_PROXY=1` 启动，否则云端验证会假失败。
-   - 项目 1 暴露的两处缺口已在项目 2 之前修完（生产改为从生产分支发布；每个闸门都要求具名）。项目 2 已通过 API 验证「每个闸门都要求具名」（基线/Feature Task/交付验收三处 `feng` 通过）；「从生产分支发布」的生产阶段验证仍在待办（见上）。
-   - **新增环境注意**：Daemon 的 PATH 需同时含 node22 运行时、homebrew（codex 0.142.3，避免解析到有兼容 bug 的 0.147.0）和 fnm node20 全局 bin（`vercel`/`wrangler`），否则会出现 codex 超时或 Vercel 未认证。
+   - Daemon 的 PATH 需同时含 node22 运行时、homebrew（codex 0.142.3，避免解析到有兼容 bug 的 0.147.0）和 fnm node20 全局 bin（`vercel`/`wrangler`）。
+8. 多产品形态按 `docs/multi-product-delivery-plan.md` 的 Stage 顺序推进：web-saas / landing-page / browser-extension 已生成真实模板（extension 的本地构建已实测通过），desktop / mobile / api-tool 仍是引导式交接；部署平台可组合（M2）未做。
 
 ## 9. 用户决策
 
