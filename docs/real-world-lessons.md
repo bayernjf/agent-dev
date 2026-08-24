@@ -6,7 +6,7 @@
 
 ## 1. 真实缺陷清单
 
-以下缺陷**没有一个是单元测试自己能发现的**，全部由真实链路暴露。每条含：表现 → 根因 → 修复（提交）。
+以下缺陷**没有一个是既有单元测试能发现的**，全部由真实链路或真跑一次生成物暴露。每条含：表现 → 根因 → 修复（提交）。
 
 ### 1.1 项目 1（`Receipt Test`）暴露的 6 个
 
@@ -49,6 +49,9 @@
 | 15 | **`npm ci` 在 Node 20 下必然失败** | `wrangler@4.120.0` 要求 node ≥22，`.npmrc` 的 `engine-strict=true` 使其成为硬错误。新增 `.node-version`（`22`）作为 fnm 与 CI `actions/setup-node` 唯一来源，`engines.node` 提升为 `>=22.0.0`。 |
 | 16 | **CI 测试依赖本机环境而非产品契约** | 有测试断言 runtime catalog 含 `id:'codex'`，但 catalog 只返回 PATH 上真实存在的 Agent，runner 没装 Codex 就返回空数组。改为断言路由真正拥有的契约。用最小 PATH 复现验证，排除同类环境依赖测试潜伏。 |
 | 17 | **`workspace.ts` 用 `node:fs` 被拖进 Vite 打包** | blueprint 的 barrel 再导出 `workspace.ts`，Studio 浏览器 import barrel 时 `node:fs` 进 Vite 打包直接构建失败（`"readFile" is not exported by "__vite-browser-external"`）。typecheck/test 全绿也发现不了——只有 build 会。改为子路径 `@agent-dev/blueprint/workspace` 导出；alias 是前缀匹配，子路径规则要排在裸包名前。 |
+| 18 | **生成的浏览器插件 `tsconfig` 让自己的 quality gate 必挂** | 没有 `lib: DOM`、没有 `skipLibCheck`、`types` 缺 `node`，`tsc --noEmit` 直接在 vite 自己的 `.d.ts` 上报 `Cannot find name 'Buffer'`——与缺陷 8（生成的 CI 在首个 PR 必然失败）同一类：**模板的 quality 脚本必须真跑过一次**，光有单测断言产物存在是不够的。修复：补 `lib`/`skipLibCheck`/`@types/node`，并加回归测试锁住。 |
+| 19 | **manifest 引用了生成器产不出的 PNG** | 生成的 MV3 manifest 写了 `default_icon: 'icons/icon128.png'`，但产物全是文本、生成器无法产出 PNG，`vite build` 报 `Could not load manifest asset`。修复：manifest 去掉 `default_icon`，把「发布前自行补齐图标」写进交接 README（诚实边界而不是假装有图标）。 |
+| 20 | **Studio 用了不存在的 i18n key，且把 catalog 的 string 当枚举** | 产品形态单选框调 `t('productType.<type>')`，而字典里在 `blueprint.productTypeXxx`，界面会渲染出原始 key；Runtime 单选框把 `agent.id: string` 直接写进 `runtimeProvider` 枚举。**两处在已提交的 HEAD 上 typecheck 就是红的**——提交前没跑全量 typecheck。改为显式 key 映射表 + 只列 `runtimeProviderSchema` 认得的 id。 |
 
 ## 2. 由缺陷沉淀的架构规则
 
