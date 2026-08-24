@@ -80,7 +80,11 @@ Product Type
 
 > **实现进度（2026-08-24，桌面端）**：技术栈决策为**先 Tauri v2**，Electron 留作后续专业模式可选项（`soft-desk` 用的是 Electron，可作为迁移参考）。`buildDesktop` 产出 Vite/TypeScript webview（`index.html` / `src/main.ts` 通过 `invoke('app_version')` 真实走一次 IPC）、Rust 核心（`src-tauri/src/lib.rs` + `main.rs` + `build.rs` + `Cargo.toml`）、`tauri.conf.json`、占位图标生成脚本、`.gitignore`、以及带 Rust toolchain 和 Linux webview 依赖的 quality 工作流。
 >
-> 证据：生成物在 `/tmp/gen-check-desktop` 冷启动真跑一次 `npm install && npm run quality`（`typecheck` → `vite build` → `rust-check` = `cargo check`）全绿；并真跑 `npm run bundle` 产出 macOS `Gen Check.app` 与 `Gen Check_0.1.0_aarch64.dmg`（未签名、未公证）。生成的 GitHub 工作流**未**在真实 CI 执行过。签名、公证、Windows 代码签名、自动更新分发与商店提交仍是人工步骤。移动端（Expo/React Native）尚未开始。
+> 证据：生成物在 `/tmp/gen-check-desktop` 冷启动真跑一次 `npm install && npm run quality`（`typecheck` → `vite build` → `rust-check` = `cargo check`）全绿；并真跑 `npm run bundle` 产出 macOS `Gen Check.app` 与 `Gen Check_0.1.0_aarch64.dmg`（未签名、未公证）。生成的 GitHub 工作流**未**在真实 CI 执行过。签名、公证、Windows 代码签名、自动更新分发与商店提交仍是人工步骤。
+>
+> **实现进度（2026-08-24，补齐 Electron / 移动端 / api-tool）**：`desktop` 新增 `desktopShell: 'tauri' | 'electron'`（默认 tauri，Electron 面向需要 Node API 或已有 Electron 存量的团队）；Electron 分支产出 `electron/main.ts` + `electron/preload.ts` + Vite 渲染进程 + `electron-builder.yml`，渲染进程 `contextIsolation: true` / `nodeIntegration: false`，只能通过 preload 桥调用主进程。`mobile` 产出 Expo SDK 52 + expo-router 模板（`app/_layout.tsx` / `app/index.tsx` / `app.json` / `eas.json` / `babel.config.js`）。`api-tool` 产出 Hono on Vercel 的 API-first 单包（`/api/health` + `/api/echo`，`ALLOWED_ORIGIN` 显式白名单，无前端、不建 Cloudflare Pages）。
+>
+> 证据：三份生成物分别冷启动 `npm install` 后真跑自己的 `npm run quality` 全绿——api-tool `lint → typecheck → unit(2 tests) → build`、electron `typecheck(渲染+主进程两份 tsconfig) → build`、mobile `typecheck`（另用一行故意的类型错误确认它不是空跑）。**未做**：未启动 Electron 窗口、未跑 Expo 模拟器或 EAS Build、未在真实 CI 执行生成的工作流。真跑暴露缺陷 23（渲染进程入口不是模块，`declare global` 触发 `TS2669`），修复为把桥接类型移入 `src/desktop.d.ts`。签名/公证/商店提交改为每个需打包类型产出 `generated/DISTRIBUTION.md`。
 
 ## 5. 选择规则
 
@@ -97,12 +101,12 @@ Product Type
 - `web-saas`：React/Vite + Hono + Supabase 完整脚手架（Cloudflare Pages + Vercel）。
 - `landing-page`：静态站点脚手架（Cloudflare Pages），无后端依赖；环境契约不含 Supabase/Vercel 密钥。
 - `browser-extension`：MV3 + Vite/crxjs 脚手架，可本地 Load unpacked；商店图标与提交审核为人工步骤。
-- `desktop`：Tauri v2 脚手架（Vite webview + Rust 核心），可本地构建出安装包；签名、公证与分发为人工步骤。
+- `desktop`：默认 Tauri v2 脚手架（Vite webview + Rust 核心），可本地构建出安装包；专业模式可选 `desktopShell: 'electron'`，产出 main/preload/renderer 三层与 `electron-builder.yml`。
+- `mobile`：Expo SDK 52 + expo-router 脚手架与 `eas.json` 构建 profile；质量闸门只做静态检查，真机/模拟器冒烟与 EAS Build 为人工步骤。
+- `api-tool`：Hono on Vercel 的 API-first 单包（无前端、不建 Cloudflare Pages），CORS 来源由 `ALLOWED_ORIGIN` 显式白名单，空值即不信任任何浏览器来源。
 
-仍为引导式 handoff、尚未生成模板的产品类型（按路线图顺序，下一步即移动端）：
+六种类型都已生成真实模板，`notSupportedArtifact` 已删除。签名、公证、商店提交与证书类资产按设计保持人工：每个需要打包的类型都产出 `generated/DISTRIBUTION.md` 列出确切步骤。
 
-- `mobile`、`api-tool`：当前仅返回 `DELIVERY_HANDOFF.md` 指南，不生成任何源码脚手架；不能把通用代码生成误报为完整交付。
-
-每个已实现类型的 `spec.quality.required` 只声明该模板真实定义了脚本的检查项（`packages/blueprint/src/index.ts` 的 `QUALITY_CHECKS_BY_PRODUCT_TYPE`）：多声明一项就会让生成物的 `npm run quality` 中途 `Missing script` 而永远无法通过 CI。
+每个已实现类型的 `spec.quality.required` 只声明该模板真实定义了脚本的检查项（`packages/blueprint/src/index.ts` 的 `QUALITY_CHECKS` / `qualityChecksFor()`）：多声明一项就会让生成物的 `npm run quality` 中途 `Missing script` 而永远无法通过 CI。
 
 当某类型尚无可验证模板时，Agent-Dev 必须明确显示“仅生成任务包/需人工交付”，不能把通用代码生成误报为完整交付。
