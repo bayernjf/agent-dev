@@ -68,9 +68,11 @@ export const PRODUCT_TYPE_DESCRIPTORS: Record<string, { frontend: string; backen
     hasBackend: false,
   },
   'desktop': {
-    frontend: 'Desktop shell (Tauri/Electron)',
-    backend: 'Optional; defaults to None',
-    deploySteps: 'Build the desktop bundle for the target OS.',
+    frontend: 'Tauri v2 (Rust shell) + Vite/TypeScript webview UI',
+    backend: 'Rust core in `src-tauri/` exposed through Tauri commands (IPC); Supabase optional for accounts / sync',
+    deploySteps:
+      'Run `npm run quality` (typecheck + web build + `cargo check`), then `npm run bundle` to produce the '
+      + 'platform installer. Code signing, notarization and store/update distribution stay manual (outside v0.1).',
     hasBackend: false,
   },
   'mobile': {
@@ -279,13 +281,18 @@ function buildGovernanceArtifacts(blueprint: ProductBlueprint): GeneratedArtifac
     },
   ];
 }
+
+// Every check named in spec.quality.required has to be a real script in the generated package.json,
+// otherwise `npm run quality` dies mid-run ("Missing script") and the product's CI can never go green.
+function qualityScript(blueprint: ProductBlueprint): string {
+  return blueprint.spec.quality.required.map(check => `npm run ${check}`).join(' && ');
+}
+
 function buildWebSaaS(blueprint: ProductBlueprint): GeneratedArtifact[] {
   const templateHeader = `Generated from ProductBlueprint revision ${blueprint.metadata.revision}.`;
   const templatePackageName = blueprint.metadata.name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-dev-product';
   return [
-    // Every check named in spec.quality.required has to be a script that really runs. A `quality`
-    // script covering only a subset reports a passing gate while the unnamed checks never execute.
-    { id: 'template-root-package', title: 'Web SaaS workspace package', path: 'package.json', content: JSON.stringify({ name: templatePackageName, private: true, type: 'module', packageManager: 'npm@10.8.2', scripts: { dev: 'concurrently -k "npm run dev -w web" "npm run dev -w api"', lint: 'eslint .', typecheck: 'tsc --noEmit', unit: 'vitest run', build: 'npm run build -w web', smoke: 'node scripts/smoke.mjs', quality: blueprint.spec.quality.required.map(check => `npm run ${check}`).join(' && ') }, workspaces: ['apps/web', 'apps/api'], devDependencies: { '@eslint/js': '^9.26.0', '@types/node': '^22.15.3', '@types/react': '^19.1.2', '@types/react-dom': '^19.1.2', '@vitejs/plugin-react': '^4.4.1', concurrently: '^9.1.0', eslint: '^9.26.0', globals: '^16.0.0', typescript: '^5.8.3', 'typescript-eslint': '^8.32.0', vite: '^7.3.6', vitest: '^3.1.3' } }, null, 2) + '\n' },
+    { id: 'template-root-package', title: 'Web SaaS workspace package', path: 'package.json', content: JSON.stringify({ name: templatePackageName, private: true, type: 'module', packageManager: 'npm@10.8.2', scripts: { dev: 'concurrently -k "npm run dev -w web" "npm run dev -w api"', lint: 'eslint .', typecheck: 'tsc --noEmit', unit: 'vitest run', build: 'npm run build -w web', smoke: 'node scripts/smoke.mjs', quality: qualityScript(blueprint) }, workspaces: ['apps/web', 'apps/api'], devDependencies: { '@eslint/js': '^9.26.0', '@types/node': '^22.15.3', '@types/react': '^19.1.2', '@types/react-dom': '^19.1.2', '@vitejs/plugin-react': '^4.4.1', concurrently: '^9.1.0', eslint: '^9.26.0', globals: '^16.0.0', typescript: '^5.8.3', 'typescript-eslint': '^8.32.0', vite: '^7.3.6', vitest: '^3.1.3' } }, null, 2) + '\n' },
     // `vite/client` is required, not cosmetic: the web entrypoint reads `import.meta.env`, so
     // without it the generated baseline cannot pass its own typecheck.
     { id: 'template-root-tsconfig', title: 'Web SaaS TypeScript configuration', path: 'tsconfig.json', content: JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', jsx: 'react-jsx', strict: true, noEmit: true, skipLibCheck: true, types: ['node', 'vite/client'] }, include: ['apps/web/src', 'apps/api/src', 'vite.config.ts', 'eslint.config.js'] }, null, 2) + '\n' },
@@ -330,7 +337,7 @@ function buildLandingPage(blueprint: ProductBlueprint): GeneratedArtifact[] {
   return [
     // Plain static site, no workspace tooling. `npm run build` copies src/ to dist/ and asserts the
     // markup carries a <main> landmark; `npm run quality` runs that build as the verification gate.
-    { id: 'template-root-package', title: 'Landing page package', path: 'package.json', content: JSON.stringify({ name: safeName, private: true, type: 'module', scripts: { build: 'node scripts/build.mjs', lint: 'node scripts/build.mjs --check', quality: blueprint.spec.quality.required.map(check => `npm run ${check}`).join(' && ') } }, null, 2) + '\n' },
+    { id: 'template-root-package', title: 'Landing page package', path: 'package.json', content: JSON.stringify({ name: safeName, private: true, type: 'module', scripts: { build: 'node scripts/build.mjs', lint: 'node scripts/build.mjs --check', quality: qualityScript(blueprint) } }, null, 2) + '\n' },
     { id: 'template-build-script', title: 'Static build / inject script', path: 'scripts/build.mjs', content: `import { mkdir, copyFile } from 'node:fs/promises';\n\n// Landing pages are static: this copies the src tree to dist and validates the entry document.\n// Analytics IDs are injected from the environment contract at deploy time, never committed.\nawait mkdir('dist', { recursive: true });\nfor (const file of ['index.html', 'styles.css', 'app.js']) {\n  await copyFile('src/' + file, 'dist/' + file).catch(() => {});\n}\nconst { readFile } = await import('node:fs/promises');\nconst html = await readFile('dist/index.html', 'utf8');\nif (!html.includes('<main')) throw new Error('build: index.html must contain a <main> landmark for SEO/a11y.');\nconsole.log('build: static site prepared at dist/');\n` },
     { id: 'template-readme', title: 'Landing page README', path: 'README.md', content: `# ${markdown(blueprint.metadata.name)}\n\n${templateHeader}\n\nThis is the Agent-Dev landing-page Golden Path. A single static site deploys to Cloudflare Pages.\n\n## Local commands\n\n- \`npm run build\` (prepare static output)\n- \`npm run quality\`\n\n## Environment\n\nUse \`config/env.contract.yaml\` as the source of truth. Never commit secret values.\n` },
     { id: 'template-index', title: 'Landing page entry', path: 'src/index.html', content: `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <meta name="description" content="${markdown(layout)}" />\n    <title>${markdown(blueprint.metadata.name)}</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <main>\n      <p class="eyebrow">${markdown(blueprint.metadata.name)}</p>\n      <h1>${markdown(blueprint.metadata.name)}</h1>\n      <p class="subhead">${markdown(layout)}</p>\n      <a class="cta" href="#get-started">Get started</a>\n    </main>\n    ${analyticsSnippet}\n    <script src="app.js"></script>\n  </body>\n</html>\n` },
@@ -354,7 +361,7 @@ function buildBrowserExtension(blueprint: ProductBlueprint): GeneratedArtifact[]
   return [
     { id: 'ext-manifest-config', title: 'Extension manifest (MV3)', path: 'manifest.config.ts', content: `import { defineManifest } from '@crxjs/vite-plugin';\n\nexport default defineManifest({\n  manifest_version: 3,\n  name: ${JSON.stringify(productName)},\n  version: '0.1.0',\n  description: ${JSON.stringify(intent)},\n  action: {\n    default_popup: 'popup.html',\n  },\n  // Store submission requires raster icons; add public/icons/icon128.png and reference it here.\n  background: {\n    service_worker: 'src/background.ts',\n  },\n  content_scripts: [\n    {\n      matches: ['<all_urls>'],\n      js: ['src/content.ts'],\n    },\n  ],\n  options_page: 'options.html',\n  permissions: ['storage', 'activeTab'],\n  host_permissions: ['<all_urls>'],\n});\n` },
     { id: 'ext-vite-config', title: 'Vite + crx config', path: 'vite.config.ts', content: `import { defineConfig } from 'vite';\nimport { crx } from '@crxjs/vite-plugin';\nimport manifest from './manifest.config';\n\nexport default defineConfig({\n  plugins: [crx({ manifest })],\n  build: {\n    outDir: 'dist',\n  },\n});\n` },
-    { id: 'ext-package', title: 'Extension package', path: 'package.json', content: JSON.stringify({ name: slug, private: true, version: '0.1.0', type: 'module', scripts: { dev: 'vite', build: 'vite build', quality: 'tsc --noEmit && vite build', preview: 'vite preview' }, devDependencies: { '@crxjs/vite-plugin': '^2.0.0-beta.27', '@types/chrome': '^0.0.270', '@types/node': '^22.15.3', typescript: '^5.6.3', vite: '^5.4.10' } }, null, 2) + '\n' },
+    { id: 'ext-package', title: 'Extension package', path: 'package.json', content: JSON.stringify({ name: slug, private: true, version: '0.1.0', type: 'module', scripts: { dev: 'vite', typecheck: 'tsc --noEmit', build: 'vite build', quality: qualityScript(blueprint), preview: 'vite preview' }, devDependencies: { '@crxjs/vite-plugin': '^2.0.0-beta.27', '@types/chrome': '^0.0.270', '@types/node': '^22.15.3', typescript: '^5.6.3', vite: '^5.4.10' } }, null, 2) + '\n' },
     { id: 'ext-tsconfig', title: 'Extension tsconfig', path: 'tsconfig.json', content: JSON.stringify({ compilerOptions: { target: 'ES2022', lib: ['ES2022', 'DOM', 'DOM.Iterable'], module: 'ESNext', moduleResolution: 'bundler', strict: true, noEmit: true, resolveJsonModule: true, skipLibCheck: true, types: ['chrome', 'node'] }, include: ['src', 'manifest.config.ts', 'vite.config.ts'] }, null, 2) + '\n' },
     { id: 'ext-popup-html', title: 'Popup HTML', path: 'popup.html', content: `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1" />\n    <link rel="stylesheet" href="src/popup.css" />\n    <title>${markdown(productName)}</title>\n  </head>\n  <body>\n    <main class="popup">\n      <h1>${markdown(productName)}</h1>\n      <p class="hint">Generated by Agent-Dev. Edit <code>src/popup.ts</code> to build your popup UI.</p>\n    </main>\n    <script type="module" src="/src/popup.ts"></script>\n  </body>\n</html>\n` },
     { id: 'ext-popup-ts', title: 'Popup entry', path: 'src/popup.ts', content: `const root = document.querySelector<HTMLElement>('.popup');\nif (root) {\n  // TODO: build your popup UI here.\n  console.log('[${productName}] popup loaded');\n}\n` },
@@ -369,10 +376,35 @@ function buildBrowserExtension(blueprint: ProductBlueprint): GeneratedArtifact[]
   ];
 }
 
+function buildDesktop(blueprint: ProductBlueprint): GeneratedArtifact[] {
+  const productName = blueprint.metadata.name;
+  const intent = blueprint.metadata.productIntent || 'No product intent provided.';
+  const slug = productName.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-dev-desktop';
+  // Cargo package names may not start with a digit and are used as the Rust crate name.
+  const crateName = (/^[0-9]/.test(slug) ? `app-${slug}` : slug).replaceAll('-', '_');
+
+  return [
+    { id: 'desktop-package', title: 'Desktop package', path: 'package.json', content: JSON.stringify({ name: slug, private: true, version: '0.1.0', type: 'module', scripts: { dev: 'tauri dev', 'dev:web': 'vite', typecheck: 'tsc --noEmit', build: 'vite build', 'rust-check': 'node scripts/ensure-icon.mjs && cargo check --manifest-path src-tauri/Cargo.toml', quality: qualityScript(blueprint), bundle: 'tauri build' }, devDependencies: { '@tauri-apps/cli': '^2.1.0', '@types/node': '^22.15.3', typescript: '^5.6.3', vite: '^5.4.10' }, dependencies: { '@tauri-apps/api': '^2.1.0' } }, null, 2) + '\n' },
+    { id: 'desktop-tsconfig', title: 'Desktop tsconfig', path: 'tsconfig.json', content: JSON.stringify({ compilerOptions: { target: 'ES2022', lib: ['ES2022', 'DOM', 'DOM.Iterable'], module: 'ESNext', moduleResolution: 'bundler', strict: true, noEmit: true, skipLibCheck: true, types: ['node'] }, include: ['src', 'vite.config.ts'] }, null, 2) + '\n' },
+    { id: 'desktop-vite-config', title: 'Vite config', path: 'vite.config.ts', content: `import { defineConfig } from 'vite';\n\n// Tauri drives this dev server, so the port has to be fixed and failures must be loud.\nexport default defineConfig({\n  clearScreen: false,\n  server: {\n    port: 1420,\n    strictPort: true,\n  },\n  build: {\n    outDir: 'dist',\n    target: 'es2022',\n  },\n});\n` },
+    { id: 'desktop-index-html', title: 'Webview HTML', path: 'index.html', content: `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1" />\n    <link rel="stylesheet" href="/src/styles.css" />\n    <title>${markdown(productName)}</title>\n  </head>\n  <body>\n    <main class="shell">\n      <h1>${markdown(productName)}</h1>\n      <p class="intent">${markdown(intent)}</p>\n      <p class="version">Rust core version: <strong data-version>loading…</strong></p>\n    </main>\n    <script type="module" src="/src/main.ts"></script>\n  </body>\n</html>\n` },
+    { id: 'desktop-main-ts', title: 'Webview entry', path: 'src/main.ts', content: `import { invoke } from '@tauri-apps/api/core';\n\n// Real IPC round trip to the Rust core, so a broken command surfaces immediately.\nconst target = document.querySelector<HTMLElement>('[data-version]');\n\ninvoke<string>('app_version')\n  .then(version => {\n    if (target) target.textContent = version;\n  })\n  .catch(error => {\n    if (target) target.textContent = 'unavailable';\n    console.error('[${productName}] app_version failed', error);\n  });\n` },
+    { id: 'desktop-styles', title: 'Webview styles', path: 'src/styles.css', content: `:root { color-scheme: light dark; }\n* { box-sizing: border-box; }\nbody { margin: 0; font-family: system-ui, sans-serif; }\n.shell { padding: 32px; max-width: 720px; }\n.shell h1 { font-size: 22px; margin: 0 0 12px; }\n.intent { color: #666; line-height: 1.6; }\n.version { margin-top: 24px; font-size: 14px; }\n` },
+    { id: 'desktop-cargo-toml', title: 'Rust crate manifest', path: 'src-tauri/Cargo.toml', content: `[package]\nname = "${crateName}"\nversion = "0.1.0"\nedition = "2021"\nrust-version = "1.77"\n\n[lib]\nname = "${crateName}_lib"\npath = "src/lib.rs"\n\n[[bin]]\nname = "${crateName}"\npath = "src/main.rs"\n\n[build-dependencies]\ntauri-build = { version = "2", features = [] }\n\n[dependencies]\ntauri = { version = "2", features = [] }\nserde = { version = "1", features = ["derive"] }\nserde_json = "1"\n` },
+    { id: 'desktop-build-rs', title: 'Rust build script', path: 'src-tauri/build.rs', content: 'fn main() {\n    tauri_build::build()\n}\n' },
+    { id: 'desktop-lib-rs', title: 'Rust core', path: 'src-tauri/src/lib.rs', content: `#[tauri::command]\nfn app_version() -> String {\n    env!("CARGO_PKG_VERSION").to_string()\n}\n\npub fn run() {\n    tauri::Builder::default()\n        .invoke_handler(tauri::generate_handler![app_version])\n        .run(tauri::generate_context!())\n        .expect("failed to start ${productName}");\n}\n` },
+    { id: 'desktop-main-rs', title: 'Rust entry point', path: 'src-tauri/src/main.rs', content: `// Keeps the extra console window from appearing in Windows release builds.\n#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]\n\nfn main() {\n    ${crateName}_lib::run()\n}\n` },
+    { id: 'desktop-tauri-conf', title: 'Tauri config', path: 'src-tauri/tauri.conf.json', content: JSON.stringify({ $schema: 'https://schema.tauri.app/config/2', productName, version: '0.1.0', identifier: `io.agent-dev.${slug}`, build: { frontendDist: '../dist', devUrl: 'http://localhost:1420', beforeDevCommand: 'npm run dev:web', beforeBuildCommand: 'npm run build' }, app: { windows: [{ title: productName, width: 960, height: 640, resizable: true }], security: { csp: null } }, bundle: { active: true, targets: 'all', icon: ['icons/icon.png'] } }, null, 2) + '\n' },
+    { id: 'desktop-icon-script', title: 'Placeholder icon generator', path: 'scripts/ensure-icon.mjs', content: "// Tauri's generate_context! macro fails to compile without src-tauri/icons/icon.png,\n// so this writes a plain placeholder when none exists. Replace it before shipping:\n// `npx tauri icon path/to/your-icon.png` generates the full platform icon set.\nimport { existsSync, mkdirSync, writeFileSync } from 'node:fs';\nimport { dirname, join } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nimport { deflateSync } from 'node:zlib';\n\nconst root = dirname(fileURLToPath(import.meta.url));\nconst target = join(root, '..', 'src-tauri', 'icons', 'icon.png');\nif (existsSync(target)) process.exit(0);\n\nconst size = 512;\nconst rgba = [0x1f, 0x2a, 0x44, 0xff];\nconst scanlines = Buffer.concat(\n  Array.from({ length: size }, () => Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: size }, () => rgba).flat())])),\n);\n\nconst crcTable = Array.from({ length: 256 }, (_, n) => {\n  let c = n;\n  for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;\n  return c >>> 0;\n});\nfunction crc32(buffer) {\n  let c = 0xffffffff;\n  for (const byte of buffer) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8);\n  return (c ^ 0xffffffff) >>> 0;\n}\nfunction chunk(type, data) {\n  const length = Buffer.alloc(4);\n  length.writeUInt32BE(data.length);\n  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);\n  const crc = Buffer.alloc(4);\n  crc.writeUInt32BE(crc32(body));\n  return Buffer.concat([length, body, crc]);\n}\n\nconst ihdr = Buffer.alloc(13);\nihdr.writeUInt32BE(size, 0);\nihdr.writeUInt32BE(size, 4);\nihdr[8] = 8; // bit depth\nihdr[9] = 6; // colour type RGBA\n\nmkdirSync(dirname(target), { recursive: true });\nwriteFileSync(target, Buffer.concat([\n  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),\n  chunk('IHDR', ihdr),\n  chunk('IDAT', deflateSync(scanlines)),\n  chunk('IEND', Buffer.alloc(0)),\n]));\nconsole.log('icon: wrote placeholder src-tauri/icons/icon.png (replace before packaging)');\n" },
+    { id: 'desktop-gitignore', title: 'Desktop git ignore rules', path: '.gitignore', content: 'node_modules\ndist/\nsrc-tauri/target/\nsrc-tauri/gen/\n.env\n.env.*\n!.env.example\n.agent-dev/\n' },
+    { id: 'desktop-readme', title: 'Desktop README', path: 'README.md', content: `# ${markdown(productName)}\n\nDesktop application (Tauri v2) generated by Agent-Dev.\n\n## Structure\n- \`index.html\` / \`src/main.ts\` — webview UI (Vite + TypeScript)\n- \`src-tauri/src/lib.rs\` — Rust core and Tauri commands (\`app_version\` is a working example)\n- \`src-tauri/tauri.conf.json\` — window, build and bundle configuration\n\n## Prerequisites\n- Node.js 22+\n- Rust toolchain (\`rustup\`), plus the platform webview prerequisites listed at https://tauri.app/start/prerequisites/\n\n## Develop\n1. \`npm install\`\n2. \`npm run dev\` — Tauri starts the Vite dev server and opens the native window\n\n## Quality gate\n\`npm run quality\` → ${blueprint.spec.quality.required.join(' → ')}\n\n\`rust-check\` runs \`cargo check\`, which needs the Rust toolchain on the machine and in CI.\n\n## Package (manual, outside v0.1 pipeline)\n- \`scripts/ensure-icon.mjs\` writes a plain placeholder \`src-tauri/icons/icon.png\` when none exists, because \`tauri::generate_context!\` cannot compile without one. Replace it with real artwork (\`npx tauri icon path/to/icon.png\` generates the full platform set) before packaging.\n- \`npm run bundle\` produces the installer for the OS you run it on; cross-OS installers need a matching runner.\n- macOS code signing + notarization (Apple Developer ID) and Windows code signing are manual and require certificates Agent-Dev never handles.\n- Auto-update distribution is not configured; wire up \`tauri-plugin-updater\` and your own release hosting if you need it.\n\n## Intent\n${markdown(intent)}\n` },
+    { id: 'desktop-quality-workflow', title: 'GitHub quality workflow', path: '.github/workflows/quality.yml', content: `name: quality\non:\n  pull_request:\n  push:\n    branches: [dev, main]\njobs:\n  quality:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-node@v5\n        with:\n          node-version: 22\n          cache: ''\n      - uses: dtolnay/rust-toolchain@stable\n      - name: Install Linux webview dependencies\n        run: |\n          sudo apt-get update\n          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf\n      - run: npm install\n      - run: npm run quality\n` },
+  ];
+}
+
 function notSupportedArtifact(blueprint: ProductBlueprint): GeneratedArtifact {
   const productType = blueprint.spec.product.type;
   const roadmapStage: Record<string, string> = {
-    'desktop': 'Stage D (Tauri/Electron)',
     'mobile': 'Stage D (Expo/React Native)',
     'api-tool': 'Stage A-table (API-first tooling)',
   };
@@ -385,7 +417,7 @@ function notSupportedArtifact(blueprint: ProductBlueprint): GeneratedArtifact {
       '',
       `Product type: ${productType}`,
       '',
-      `Agent-Dev currently generates \`web-saas\`, \`landing-page\` and \`browser-extension\` products. \`${productType}\` is part of the multi-product roadmap (${roadmapStage[productType] ?? 'later stage'}).`,
+      `Agent-Dev currently generates \`web-saas\`, \`landing-page\`, \`browser-extension\` and \`desktop\` products. \`${productType}\` is part of the multi-product roadmap (${roadmapStage[productType] ?? 'later stage'}).`,
       '',
       '## What Agent-Dev will NOT generate',
       '- No frontend or backend scaffold for this type yet.',
@@ -412,8 +444,10 @@ export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifac
       return [...buildGovernanceArtifacts(blueprint), ...buildLandingPage(blueprint)];
     case 'browser-extension':
       return [...buildGovernanceArtifacts(blueprint), ...buildBrowserExtension(blueprint)];
+    case 'desktop':
+      return [...buildGovernanceArtifacts(blueprint), ...buildDesktop(blueprint)];
     default:
-      // desktop / mobile / api-tool are enumerated for roadmap honesty but not yet backed by a
+      // mobile / api-tool are enumerated for roadmap honesty but not yet backed by a
       // template engine (see multi-product-delivery-plan.md).
       return [notSupportedArtifact(blueprint)];
   }

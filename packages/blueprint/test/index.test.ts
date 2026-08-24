@@ -92,18 +92,27 @@ describe('ProductBlueprint', () => {
     ]));
   });
 
-  it('backs every declared quality check with a script that actually runs', () => {
-    const blueprint = createBlueprint('Receipt Desk', {}, 1);
-    const artifacts = createDryRunPlan(blueprint).artifacts;
-    const rootPackage = JSON.parse(artifacts.find(artifact => artifact.path === 'package.json')!.content) as { scripts: Record<string, string> };
+  it('backs every declared quality check with a script that actually runs, for every generated product type', () => {
+    // The gate is one `npm run quality` chain: a check declared in the contract but missing from
+    // scripts stops the chain with "Missing script", so the product's CI can never go green.
+    for (const productType of ['web-saas', 'landing-page', 'browser-extension', 'desktop'] as const) {
+      const blueprint = createBlueprint('Receipt Desk', { productType }, 1);
+      const artifacts = createDryRunPlan(blueprint).artifacts;
+      const rootPackage = JSON.parse(artifacts.find(artifact => artifact.path === 'package.json')!.content) as { scripts: Record<string, string> };
 
-    for (const check of blueprint.spec.quality.required) {
-      expect(rootPackage.scripts[check], `spec.quality.required names "${check}" but no script runs it`).toBeDefined();
-      expect(rootPackage.scripts.quality).toContain(`npm run ${check}`);
+      expect(blueprint.spec.quality.required.length, `${productType} declares no quality checks`).toBeGreaterThan(0);
+      for (const check of blueprint.spec.quality.required) {
+        expect(rootPackage.scripts[check], `${productType}: spec.quality.required names "${check}" but no script runs it`).toBeDefined();
+        expect(rootPackage.scripts.quality, `${productType}: quality script skips "${check}"`).toContain(`npm run ${check}`);
+      }
     }
+  });
+
+  it('ships the config and fixtures the web-saas quality checks need', () => {
+    const artifacts = createDryRunPlan(createBlueprint('Receipt Desk', {}, 1)).artifacts;
     // A `unit` script with no test file, or a `lint` script with no config, exits non-zero rather
     // than reporting a passing gate — so the scaffold has to ship both.
-    expect(artifacts.map(artifact => artifact.path)).toEqual(expect.arrayContaining(['eslint.config.js', 'apps/api/src/health.test.ts',, 'scripts/smoke.mjs', '.gitignore']));
+    expect(artifacts.map(artifact => artifact.path)).toEqual(expect.arrayContaining(['eslint.config.js', 'apps/api/src/health.test.ts', 'scripts/smoke.mjs', '.gitignore']));
     // Agent work is committed with `git add -A`, so the generated secret file and the provider CLI
     // state directories have to be ignored or they land in the product's first pull request.
     const ignore = artifacts.find(artifact => artifact.path === '.gitignore')!.content;
@@ -171,8 +180,42 @@ describe('ProductBlueprint', () => {
     expect(artifacts.find(a => a.path === 'manifest.config.ts')!.content).not.toContain('default_icon');
   });
 
-  it('does not pretend to generate desktop/mobile/api-tool; returns a guided handoff instead', () => {
-    for (const kind of ['desktop', 'mobile', 'api-tool'] as const) {
+  it('generates a Tauri v2 desktop scaffold whose own quality gate can pass', () => {
+    const blueprint = createBlueprint('Soft Desk', { productType: 'desktop' }, 1);
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    const path = (value: string) => artifacts.find(a => a.path === value);
+
+    // Governance layer still applies to desktop products.
+    expect(path('generated/PRODUCT_STANDARD.md')).toBeDefined();
+    expect(path('generated/DELIVERY_HANDOFF.md')!.content).not.toContain('not yet');
+
+    expect(path('src-tauri/tauri.conf.json')).toBeDefined();
+    expect(path('src-tauri/src/lib.rs')!.content).toContain('tauri::generate_handler![app_version]');
+    // The webview really calls the Rust command, so a broken IPC surface fails visibly.
+    expect(path('src/main.ts')!.content).toContain("invoke<string>('app_version')");
+
+    // `tauri::generate_context!` refuses to compile without bundle.icon on disk, and a text-only
+    // generator cannot emit a PNG — so the scaffold ships a script that writes a placeholder.
+    const conf = JSON.parse(path('src-tauri/tauri.conf.json')!.content);
+    expect(conf.bundle.icon).toEqual(['icons/icon.png']);
+    expect(path('scripts/ensure-icon.mjs')).toBeDefined();
+    const scripts = JSON.parse(path('package.json')!.content).scripts as Record<string, string>;
+    expect(scripts['rust-check']).toContain('node scripts/ensure-icon.mjs');
+
+    // Cargo package/crate names cannot contain hyphens where they are used as a Rust path.
+    expect(path('src-tauri/Cargo.toml')!.content).toContain('name = "soft_desk"');
+    expect(path('src-tauri/src/main.rs')!.content).toContain('soft_desk_lib::run()');
+
+    // cargo check needs the Rust toolchain and the Linux webview headers in CI.
+    const workflow = path('.github/workflows/quality.yml')!.content;
+    expect(workflow).toContain('dtolnay/rust-toolchain@stable');
+    expect(workflow).toContain('libwebkit2gtk-4.1-dev');
+
+    expect(path('.gitignore')!.content).toContain('src-tauri/target/');
+  });
+
+  it('does not pretend to generate mobile/api-tool; returns a guided handoff instead', () => {
+    for (const kind of ['mobile', 'api-tool'] as const) {
       const blueprint = createBlueprint('Other Desk', { productType: kind }, 1);
       expect(blueprint.spec.product.type).toBe(kind);
       expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);

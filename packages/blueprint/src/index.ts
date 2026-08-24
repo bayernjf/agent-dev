@@ -11,10 +11,10 @@ export {
   type ManualAction,
 } from './generate.js';
 
-// Web SaaS, landing page and browser extension ship generated templates. Desktop, mobile and
-// api-tool are enumerated so the Blueprint surface is honest about the upcoming multi-product
-// roadmap (multi-product-delivery-plan.md); for those unsupported types the generator returns a
-// guided task package instead of pretending to deliver.
+// Web SaaS, landing page, browser extension and desktop (Tauri v2) ship generated templates.
+// Mobile and api-tool are enumerated so the Blueprint surface is honest about the upcoming
+// multi-product roadmap (multi-product-delivery-plan.md); for those unsupported types the
+// generator returns a guided task package instead of pretending to deliver.
 export const productTypeSchema = z.enum([
   'web-saas',
   'landing-page',
@@ -99,7 +99,7 @@ export const productBlueprintSchema = z.object({
       secretChangesRequireApproval: z.literal(true),
     }),
     quality: z.object({
-      required: z.array(z.enum(['lint', 'typecheck', 'unit', 'build', 'smoke'])),
+      required: z.array(z.enum(['lint', 'typecheck', 'unit', 'build', 'smoke', 'rust-check'])),
     }),
   }),
 });
@@ -112,6 +112,15 @@ export type BlueprintDecision = {
   value: string;
   mode: 'auto' | 'ask' | 'manual';
   reason: string;
+};
+
+// Every check named here has to be a real script in that product type's generated package.json,
+// otherwise the generated `quality` gate dies mid-run and CI can never go green.
+const QUALITY_CHECKS_BY_PRODUCT_TYPE: Record<string, ProductBlueprint['spec']['quality']['required']> = {
+  'web-saas': ['lint', 'typecheck', 'unit', 'build', 'smoke'],
+  'landing-page': ['lint', 'build'],
+  'browser-extension': ['typecheck', 'build'],
+  desktop: ['typecheck', 'build', 'rust-check'],
 };
 
 export function createBlueprint(name: string, input: Partial<BlueprintAnswers> = {}, revision = 1): ProductBlueprint {
@@ -149,7 +158,7 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
         maxAutomaticFixAttempts: 2,
         secretChangesRequireApproval: true,
       },
-      quality: { required: ['lint', 'typecheck', 'unit', 'build', 'smoke'] },
+      quality: { required: QUALITY_CHECKS_BY_PRODUCT_TYPE[answers.productType] ?? QUALITY_CHECKS_BY_PRODUCT_TYPE['web-saas'] },
     },
   });
 }

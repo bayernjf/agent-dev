@@ -118,7 +118,7 @@ export const en = {
     googleAnalytics4: 'Google Analytics 4',
     microsoftClarity: 'Microsoft Clarity',
     productType: 'Product type',
-    productTypeNote: `Web SaaS, landing page and browser extension ship generated templates. Desktop, mobile and API tool are roadmap items; selecting them yields a guided handoff instead of auto-generated code.`,
+    productTypeNote: `Web SaaS, landing page, browser extension and desktop (Tauri v2) ship generated templates. Mobile and API tool are roadmap items; selecting them yields a guided handoff instead of auto-generated code.`,
     productTypeWebSaas: 'Web SaaS',
     productTypeLandingPage: 'Landing page',
     productTypeBrowserExtension: 'Browser extension',
