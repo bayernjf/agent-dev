@@ -43,21 +43,31 @@ export type BaselinePlan = {
   resources: BaselinePlanResource[];
 };
 
+type ProductType = ProductBlueprint['spec']['product']['type'];
+
+export type BaselineProviderId = 'github' | 'supabase' | 'vercel' | 'cloudflare';
+
 // Describes how the Governance layer (shared docs) should describe each product type's stack.
 // `hasBackend` gates whether backend/server-side env vars appear in the Environment Contract: static
 // types (landing page, extension, desktop, mobile) must not advertise Supabase/Vercel secrets.
-export const PRODUCT_TYPE_DESCRIPTORS: Record<string, { frontend: string; backend: string; deploySteps: string; hasBackend: boolean }> = {
+// `providers` is the single source of truth for which cloud resources a type's baseline needs, read
+// by the baseline plan, the manual authorization list and the daemon's provider specs. Types that
+// call Supabase "optional" are deliberately absent from it: optional must not gate approval.
+// Keyed on ProductType rather than string so a new product type cannot compile until it declares one.
+export const PRODUCT_TYPE_DESCRIPTORS: Record<ProductType, { frontend: string; backend: string; deploySteps: string; hasBackend: boolean; providers: readonly BaselineProviderId[] }> = {
   'web-saas': {
     frontend: 'React/Vite on Cloudflare Pages',
     backend: 'Hono on Vercel Functions',
     deploySteps: 'Deploy the Vercel API Preview, then the Cloudflare Pages Preview.',
     hasBackend: true,
+    providers: ['github', 'supabase', 'vercel', 'cloudflare'],
   },
   'landing-page': {
     frontend: 'Static site on Cloudflare Pages',
     backend: 'None (static, client-rendered)',
     deploySteps: 'Deploy the Cloudflare Pages Preview (static build).',
     hasBackend: false,
+    providers: ['github', 'cloudflare'],
   },
   'browser-extension': {
     frontend: 'Manifest V3 + Popup/Options (TypeScript) + Background service worker + Content scripts',
@@ -66,6 +76,7 @@ export const PRODUCT_TYPE_DESCRIPTORS: Record<string, { frontend: string; backen
       'Build with Vite + @crxjs/vite-plugin into `dist/`, load unpacked from `chrome://extensions`, '
       + 'then package `dist/` and submit to the Chrome Web Store / Firefox Add-ons (store review is manual, outside v0.1).',
     hasBackend: false,
+    providers: ['github'],
   },
   'desktop': {
     frontend: 'Vite/TypeScript UI inside a desktop shell — Tauri v2 by default, Electron in professional mode',
@@ -74,6 +85,7 @@ export const PRODUCT_TYPE_DESCRIPTORS: Record<string, { frontend: string; backen
       'Run `npm run quality`, then `npm run bundle` to produce the platform installer. Code signing, '
       + 'notarization and store/update distribution stay manual — see `generated/DISTRIBUTION.md`.',
     hasBackend: false,
+    providers: ['github'],
   },
   'mobile': {
     frontend: 'Expo (React Native) with expo-router, TypeScript',
@@ -82,6 +94,7 @@ export const PRODUCT_TYPE_DESCRIPTORS: Record<string, { frontend: string; backen
       'Run `npm run quality`, then `npx expo start` for a device/simulator smoke. Native binaries come '
       + 'from EAS Build (`eas build -p ios|android`); store accounts, signing credentials and review stay manual.',
     hasBackend: false,
+    providers: ['github'],
   },
   // An MCP server is the one API-first shape with its own delivery path: it is consumed as a local
   // process through a client's config file, so nothing is deployed to a URL and no cloud project
@@ -94,8 +107,13 @@ export const PRODUCT_TYPE_DESCRIPTORS: Record<string, { frontend: string; backen
       + 'config (Claude Desktop, Cursor). Publishing to npm and client distribution stay manual — '
       + 'see `generated/DISTRIBUTION.md`.',
     hasBackend: false,
+    providers: ['github'],
   },
 };
+
+export function baselineProvidersFor(productType: ProductType): readonly BaselineProviderId[] {
+  return PRODUCT_TYPE_DESCRIPTORS[productType].providers;
+}
 
 function markdown(value: string) {
   return value.replaceAll('```', "'''");
@@ -208,36 +226,37 @@ function environmentContract(blueprint: ProductBlueprint) {
 }
 
 export function getManualActions(blueprint: ProductBlueprint): ManualAction[] {
-  const actions: ManualAction[] = [
-    {
+  const providers = baselineProvidersFor(blueprint.spec.product.type);
+  const actions: ManualAction[] = ([
+    ['github', {
       id: 'authorize-github',
       title: 'Authorize GitHub access',
       reason: 'Repository ownership and protected-branch permissions belong to you.',
       steps: ['Confirm the intended GitHub account or organization.', 'Grant only repository, pull request and checks permissions.', 'Return to Agent-Dev for a read-only capability check.'],
       verification: 'Agent-Dev can read the selected account and list its permitted repositories.',
-    },
-    {
+    }],
+    ['supabase', {
       id: 'authorize-supabase',
       title: 'Authorize Supabase and choose an organization',
       reason: 'Database region, plan and project ownership can affect cost and compliance.',
       steps: ['Sign in to Supabase.', 'Choose the organization and region.', 'Review the project plan before any project is created.'],
       verification: 'Agent-Dev can discover the chosen organization without reading database data.',
-    },
-    {
+    }],
+    ['cloudflare', {
       id: 'authorize-cloudflare',
       title: 'Authorize Cloudflare Pages',
       reason: 'Pages deployment remains in your Cloudflare account.',
       steps: ['Sign in to Cloudflare.', 'Choose the account that owns the Pages project.', 'Approve Pages-only access; do not grant DNS access unless a custom domain is planned.'],
       verification: 'Agent-Dev can list Pages capabilities for the selected account.',
-    },
-    {
+    }],
+    ['vercel', {
       id: 'authorize-vercel',
       title: 'Authorize Vercel Functions',
       reason: 'API deployment and server-side environment variables remain in your Vercel team.',
       steps: ['Sign in to Vercel.', 'Choose the team for the API project.', 'Review the required server-side environment variable targets.'],
       verification: 'Agent-Dev can discover the selected team and its deployment capabilities.',
-    },
-  ];
+    }],
+  ] as const).filter(([provider]) => providers.includes(provider)).map(([, action]) => ({ ...action, steps: [...action.steps] }));
 
   if (blueprint.spec.product.dataSensitivity === 'sensitive') {
     actions.unshift({
@@ -659,13 +678,18 @@ export function createDryRunPlan(blueprint: ProductBlueprint): DryRunPlan {
 }
 
 export function createBaselinePlan(blueprint: ProductBlueprint): BaselinePlan {
-  const selections = [
-    ['github-repository', 'GitHub repository', blueprint.spec.sourceControl.owner, 'Choose the GitHub owner or organization that will own the repository.'],
-    ['supabase-project', 'Supabase project', blueprint.spec.data.organization, 'Choose the Supabase organization and later confirm region and plan.'],
-    ['vercel-api', 'Vercel API project', blueprint.spec.deployment.api.team, 'Choose the Vercel team that will own the API project.'],
-    ['cloudflare-pages', 'Cloudflare Pages project', blueprint.spec.deployment.web.account, 'Choose the Cloudflare account that will own the Pages project.'],
-  ] as const;
-  const resources: BaselinePlanResource[] = selections.map(([id, title, owner, missingReason]) => ({
+  // Only the providers this product type actually uses may gate approval. An MCP server is run as a
+  // local stdio process and a browser extension ships to a store, so demanding a Supabase org and a
+  // Vercel team for them blocked approval forever — and worse, a user who filled the fields in to get
+  // past it would have had three cloud projects created that the product never touches.
+  const providers = baselineProvidersFor(blueprint.spec.product.type);
+  const selections = ([
+    ['github', 'github-repository', 'GitHub repository', blueprint.spec.sourceControl.owner, 'Choose the GitHub owner or organization that will own the repository.'],
+    ['supabase', 'supabase-project', 'Supabase project', blueprint.spec.data.organization, 'Choose the Supabase organization and later confirm region and plan.'],
+    ['vercel', 'vercel-api', 'Vercel API project', blueprint.spec.deployment.api.team, 'Choose the Vercel team that will own the API project.'],
+    ['cloudflare', 'cloudflare-pages', 'Cloudflare Pages project', blueprint.spec.deployment.web.account, 'Choose the Cloudflare account that will own the Pages project.'],
+  ] as const).filter(([provider]) => providers.includes(provider));
+  const resources: BaselinePlanResource[] = selections.map(([, id, title, owner, missingReason]) => ({
     id,
     title,
     owner: owner || null,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, getBlueprintDecisions, productBlueprintSchema } from '../src/index.js';
+import { createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, getBlueprintDecisions, getManualActions, productBlueprintSchema } from '../src/index.js';
 
 describe('ProductBlueprint', () => {
   it('creates the fixed v0.1 Web SaaS Golden Path', () => {
@@ -45,6 +45,38 @@ describe('ProductBlueprint', () => {
     expect(incomplete.readyForApproval).toBe(false);
     expect(incomplete.resources).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'blocked' })]));
     expect(complete.readyForApproval).toBe(true);
+    expect(complete.resources.map(resource => resource.id)).toEqual(['github-repository', 'supabase-project', 'vercel-api', 'cloudflare-pages']);
+  });
+
+  // An MCP server runs as a local stdio process and an extension ships to a store: they provision
+  // nothing outside GitHub. Demanding a Supabase org and a Vercel team made their baseline
+  // unapprovable forever, and filling the fields in to escape that would have created three cloud
+  // projects the product never touches.
+  it('asks only for the ownership targets a product type actually provisions', () => {
+    const apiTool = createBaselinePlan(createBlueprint('MCP Word Tools', { productType: 'api-tool', githubOwner: 'acme' }));
+    expect(apiTool.resources.map(resource => resource.id)).toEqual(['github-repository']);
+    expect(apiTool.readyForApproval).toBe(true);
+
+    for (const productType of ['browser-extension', 'desktop', 'mobile'] as const) {
+      const plan = createBaselinePlan(createBlueprint('Local Product', { productType, githubOwner: 'acme' }));
+      expect(plan.resources.map(resource => resource.id)).toEqual(['github-repository']);
+      expect(plan.readyForApproval).toBe(true);
+    }
+
+    // A landing page really is deployed to Pages, so Cloudflare stays required for it.
+    const landing = createBaselinePlan(createBlueprint('Launch Site', { productType: 'landing-page', githubOwner: 'acme' }));
+    expect(landing.resources.map(resource => resource.id)).toEqual(['github-repository', 'cloudflare-pages']);
+    expect(landing.readyForApproval).toBe(false);
+    expect(createBaselinePlan(createBlueprint('Launch Site', { productType: 'landing-page', githubOwner: 'acme', cloudflareAccount: 'acme' })).readyForApproval).toBe(true);
+  });
+
+  it('only asks the user to authorize the providers the product type uses', () => {
+    const ids = (productType: 'web-saas' | 'api-tool' | 'landing-page') =>
+      getManualActions(createBlueprint('Authorization Desk', { productType })).map(action => action.id);
+
+    expect(ids('web-saas')).toEqual(['authorize-github', 'authorize-supabase', 'authorize-cloudflare', 'authorize-vercel']);
+    expect(ids('api-tool')).toEqual(['authorize-github']);
+    expect(ids('landing-page')).toEqual(['authorize-github', 'authorize-cloudflare']);
   });
 
   it('preserves professional answers and surfaces their approval boundaries', () => {

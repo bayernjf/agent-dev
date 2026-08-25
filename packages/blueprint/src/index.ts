@@ -1,11 +1,13 @@
 import { z } from 'zod';
 export {
+  baselineProvidersFor,
   createBaselinePlan,
   createDryRunPlan,
   generateArtifacts,
   getManualActions,
   type BaselinePlan,
   type BaselinePlanResource,
+  type BaselineProviderId,
   type DryRunPlan,
   type GeneratedArtifact,
   type ManualAction,
