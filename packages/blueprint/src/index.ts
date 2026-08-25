@@ -11,16 +11,43 @@ export {
   type ManualAction,
 } from './generate.js';
 
-export const productTypeSchema = z.literal('web-saas');
+// Every product type now ships a generated template: web-saas, landing-page, browser-extension,
+// desktop (Tauri v2 by default, Electron in professional mode), mobile (Expo) and api-tool.
+// See multi-product-delivery-plan.md for what stays a manual step per type (signing, store review).
+export const productTypeSchema = z.enum([
+  'web-saas',
+  'landing-page',
+  'browser-extension',
+  'desktop',
+  'mobile',
+  'api-tool',
+]);
 export const blueprintModeSchema = z.enum(['beginner', 'professional']);
+// Tauri is the default desktop shell (small bundles, Rust core). Electron is offered in
+// professional mode for teams that need Node APIs in the main process or already ship Electron.
+export const desktopShellSchema = z.enum(['tauri', 'electron']);
 export const analyticsProviderSchema = z.enum(['ga4', 'clarity']);
+
+// Runtime provider ids must match keys in the agent-runtime AGENT_ADAPTERS registry. `local-` is a
+// namespace prefix so Blueprint stays explicit about which local Agent is chosen.
+export const runtimeProviderSchema = z.enum([
+  'local-codex',
+  'local-opencode',
+  'local-claude',
+  'local-aider',
+  'local-openclaw',
+  'local-codebuddy',
+]);
 
 export const blueprintAnswersSchema = z.object({
   mode: blueprintModeSchema.default('beginner'),
+  productType: productTypeSchema.default('web-saas'),
   productIntent: z.string().trim().max(500).default(''),
   dataSensitivity: z.enum(['standard', 'sensitive']).default('standard'),
   previewStrategy: z.enum(['per-pull-request', 'stable-dev-api']).default('per-pull-request'),
   analyticsProviders: z.array(analyticsProviderSchema).default([]),
+  runtimeProvider: runtimeProviderSchema.default('local-codex'),
+  desktopShell: desktopShellSchema.default('tauri'),
   customInstructions: z.string().trim().max(1000).default(''),
   githubOwner: z.string().trim().max(120).default(''),
   vercelTeam: z.string().trim().max(120).default(''),
@@ -44,6 +71,7 @@ export const productBlueprintSchema = z.object({
     product: z.object({
       type: productTypeSchema,
       dataSensitivity: z.enum(['standard', 'sensitive']),
+      desktopShell: desktopShellSchema,
     }),
     stack: z.object({
       frontend: z.literal('react-vite'),
@@ -68,14 +96,14 @@ export const productBlueprintSchema = z.object({
       previewStrategy: z.enum(['per-pull-request', 'stable-dev-api']),
     }),
     analytics: z.object({ providers: z.array(analyticsProviderSchema) }),
-    runtime: z.object({ provider: z.literal('local-codex') }),
+    runtime: z.object({ provider: runtimeProviderSchema }),
     policy: z.object({
       productionApproval: z.literal('required'),
       maxAutomaticFixAttempts: z.literal(2),
       secretChangesRequireApproval: z.literal(true),
     }),
     quality: z.object({
-      required: z.array(z.enum(['lint', 'typecheck', 'unit', 'build', 'smoke'])),
+      required: z.array(z.enum(['lint', 'typecheck', 'unit', 'build', 'smoke', 'rust-check'])),
     }),
   }),
 });
@@ -90,6 +118,23 @@ export type BlueprintDecision = {
   reason: string;
 };
 
+// Every check named here has to be a real script in that product type's generated package.json,
+// otherwise the generated `quality` gate dies mid-run and CI can never go green.
+const QUALITY_CHECKS: Record<string, ProductBlueprint['spec']['quality']['required']> = {
+  'web-saas': ['lint', 'typecheck', 'unit', 'build', 'smoke'],
+  'landing-page': ['lint', 'build'],
+  'browser-extension': ['typecheck', 'build'],
+  'desktop:tauri': ['typecheck', 'build', 'rust-check'],
+  'desktop:electron': ['typecheck', 'build'],
+  mobile: ['typecheck'],
+  'api-tool': ['lint', 'typecheck', 'unit', 'build'],
+};
+
+export function qualityChecksFor(productType: string, desktopShell = 'tauri'): ProductBlueprint['spec']['quality']['required'] {
+  const key = productType === 'desktop' ? `desktop:${desktopShell}` : productType;
+  return QUALITY_CHECKS[key] ?? QUALITY_CHECKS['web-saas']!;
+}
+
 export function createBlueprint(name: string, input: Partial<BlueprintAnswers> = {}, revision = 1): ProductBlueprint {
   const answers = blueprintAnswersSchema.parse(input);
   return productBlueprintSchema.parse({
@@ -103,7 +148,11 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
       customInstructions: answers.customInstructions,
     },
     spec: {
-      product: { type: 'web-saas', dataSensitivity: answers.dataSensitivity },
+      product: {
+        type: productTypeSchema.parse(answers.productType),
+        dataSensitivity: answers.dataSensitivity,
+        desktopShell: desktopShellSchema.parse(answers.desktopShell),
+      },
       stack: { frontend: 'react-vite', api: 'hono', packageManager: 'npm' },
       sourceControl: {
         provider: 'github',
@@ -119,13 +168,13 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
         previewStrategy: answers.previewStrategy,
       },
       analytics: { providers: answers.analyticsProviders },
-      runtime: { provider: 'local-codex' },
+      runtime: { provider: runtimeProviderSchema.parse(answers.runtimeProvider) },
       policy: {
         productionApproval: 'required',
         maxAutomaticFixAttempts: 2,
         secretChangesRequireApproval: true,
       },
-      quality: { required: ['lint', 'typecheck', 'unit', 'build', 'smoke'] },
+      quality: { required: qualityChecksFor(answers.productType, answers.desktopShell) },
     },
   });
 }
@@ -195,6 +244,20 @@ export function getBlueprintDecisions(blueprint: ProductBlueprint): BlueprintDec
     reason: analytics.length === 0
       ? 'No tracking setup is required.'
       : 'Analytics affects privacy notices, account authorization and environment variables.',
+  });
+
+  const runtimeProvider = blueprint.spec.runtime.provider;
+  decisions.push({
+    id: 'runtime',
+    title: 'Local agent runtime',
+    value: runtimeProvider,
+    // In beginner mode the verified default is chosen automatically. In professional mode the caller
+    // passes an explicit runtimeProvider (ask), so we surface it as a confirmed choice.
+    mode: blueprint.metadata.mode === 'beginner' ? 'auto' : 'ask',
+    reason:
+      blueprint.metadata.mode === 'beginner'
+        ? 'Beginner mode uses the verified default local agent (local-codex).'
+        : 'Professional mode selects which local agent runtime implements the feature tasks.',
   });
 
   if (blueprint.metadata.customInstructions) {
