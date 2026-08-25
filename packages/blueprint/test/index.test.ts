@@ -7,7 +7,25 @@ describe('ProductBlueprint', () => {
 
     expect(blueprint.spec.deployment.web.provider).toBe('cloudflare-pages');
     expect(blueprint.spec.deployment.api.provider).toBe('vercel-functions');
+    expect(blueprint.spec.data.provider).toBe('supabase');
     expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
+  });
+
+  // The blueprint is the record of what the delivery actually has. Naming a Pages project and a
+  // Vercel deployment for an MCP server is a false claim, and it stayed false even after the
+  // baseline plan stopped asking for those providers, because these fields were hardcoded literals.
+  it('records no deployment target for a product type that provisions none', () => {
+    const apiTool = createBlueprint('MCP Word Tools', { productType: 'api-tool', cloudflareAccount: 'bayernjf', vercelTeam: 'bayernjf', supabaseOrganization: 'acme' });
+
+    expect(apiTool.spec.deployment.web).toEqual({ provider: 'none', account: '' });
+    expect(apiTool.spec.deployment.api).toEqual({ provider: 'none', team: '' });
+    expect(apiTool.spec.data).toEqual({ provider: 'none', auth: 'none', organization: '' });
+
+    const landing = createBlueprint('Launch Page', { productType: 'landing-page', cloudflareAccount: 'bayernjf', vercelTeam: 'bayernjf', supabaseOrganization: 'acme' });
+
+    expect(landing.spec.deployment.web).toEqual({ provider: 'cloudflare-pages', account: 'bayernjf' });
+    expect(landing.spec.deployment.api).toEqual({ provider: 'none', team: '' });
+    expect(landing.spec.data.provider).toBe('none');
   });
 
   // Fields added to the persisted spec without a default made every blueprint written before them
