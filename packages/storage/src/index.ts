@@ -964,6 +964,11 @@ export class AgentDevStore {
     const carriesAccepted = await execFileAsync('git', ['merge-base', '--is-ancestor', acceptance.gitEvidence.head, git.head], { cwd: run.workspacePath }).then(() => true).catch(() => false);
     // Not equality: the platform commits its own reports after acceptance, so HEAD moves on.
     if (!carriesAccepted) throw new Error(`The accepted commit ${acceptance.gitEvidence.head} is not part of ${git.branch}, so the pull request would not carry the accepted delivery.`);
+    // The generated workflow runs `npm ci` and caches on the lock file hash, so a branch pushed
+    // without a committed `package-lock.json` fails CI before it runs a single check. The install
+    // step commits the lock file; this refuses to push a branch where that never happened.
+    const lockCommitted = await execFileAsync('git', ['ls-files', '--error-unmatch', 'package-lock.json'], { cwd: run.workspacePath }).then(() => true).catch(() => false);
+    if (!lockCommitted) throw new Error('Install dependencies before opening a pull request: the generated workflow runs `npm ci`, which needs a committed package-lock.json.');
 
     const quality = await this.getQualityGateResult(projectId, blueprintRevision);
     const published = await publisher({
