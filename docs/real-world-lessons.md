@@ -1,12 +1,12 @@
 # Agent-Dev 真实链路经验沉淀
 
-> 来源：三个真实项目（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3）从 Blueprint 到 Preview/Production 的完整周期验证。
+> 来源：三个真实项目（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3）从 Blueprint 到 Preview/Production 的完整周期验证，以及六种产品类型生成物的真跑与非 web-saas 类型的端到端交付尝试。
 > 用途：记录只有真实云端链路才能暴露的缺陷、由缺陷沉淀的架构规则、以及环境前提——避免把环境问题误判为产品缺陷。
-> 更新时间：2026-08-24
+> 更新时间：2026-08-26
 
 ## 1. 真实缺陷清单
 
-以下缺陷**没有一个是既有单元测试能发现的**，全部由真实链路或真跑一次生成物暴露。每条含：表现 → 根因 → 修复（提交）。
+以下缺陷**没有一个是既有单元测试能发现的**，全部由真实链路、真跑一次生成物、或在界面上真走一遍暴露。每条含：表现 → 根因 → 修复（提交）。
 
 ### 1.1 项目 1（`Receipt Test`）暴露的 6 个
 
@@ -55,6 +55,12 @@
 | 21 | **质量契约按类型硬编码，落地页 gate 中途死掉** | `spec.quality.required` 对所有产品类型都写死 `lint/typecheck/unit/build/smoke`，但落地页模板只定义了 `build` 和 `lint`——真跑 `npm run quality` 到第二步就 `npm error Missing script: "typecheck"`，CI 永远无法转绿（与缺陷 8/18 同类）。修复：`QUALITY_CHECKS` + `qualityChecksFor()` 让契约按类型只声明模板真实定义了脚本的检查项，回归测试对**每个**已实现类型都校验「声明的每一项都有真脚本、且都在 `quality` 链里」。 |
 | 22 | **Tauri 不给图标就编不过，而生成器只能产文本** | `tauri::generate_context!` 在编译期读 `bundle.icon`，缺 `src-tauri/icons/icon.png` 直接 `proc macro panicked`；跟缺陷 19 同样撞上「文本生成器产不出 PNG」，但这次不能靠删配置绕过——桌面应用没有图标就无法编译。修复：模板附带 `scripts/ensure-icon.mjs`（用 `node:zlib` 现场写一张占位 PNG）并挂在 `rust-check` 前面，真实图标仍是发布前的人工步骤。 |
 | 23 | **`declare global` 写在非模块文件里，Electron 渲染进程 typecheck 直接红** | 渲染进程入口 `src/main.ts` 没有任何 import/export，因此不是模块，里面的 `declare global { interface Window { desktop … } }` 被 TS 判为 `TS2669`，连带 `window.desktop` 报未定义——真跑生成物的 `npm run quality` 第一步就暴露。修复：桥接类型移到独立的 ambient 文件 `src/desktop.d.ts`。同一次真跑还发现主进程必须是 CommonJS（package.json 不能写 `type: module`），于是 Vite 配置改名 `vite.config.mts` 才不走已废弃的 CJS 配置加载路径。 |
+| 24 | **云资源清单对所有产品类型写死四家，MCP server 永远过不了审批**（`25b3d9e`） | 生成物早就按类型分叉（api-tool 不产 `wrangler.toml`/`vercel.json`），供给层却没有：`createBaselinePlan` / `getManualActions` / `providerSpecsFromBlueprint` / Studio 归属表单**四处各自硬编码同一份清单**，于是一个 stdio MCP server 也要填 Supabase 组织和 Vercel team 才能过闸门——而填了就会真被建出三个产品永不接触的云项目。修复：清单收进 `PRODUCT_TYPE_DESCRIPTORS[type].providers` 当唯一事实源，映射类型收紧为 `Record<ProductType, …>`，第七种类型不填这一行就编译不过。两处细节：把 Supabase 称作"可选"的类型故意不列入（**可选项不该卡审批**）；不用的 provider 键是**缺席**而非空数组，因为 registry 对每个存在的键取 `resources[0]`，空数组会把 `undefined` 递给适配器、在下游某处才炸。 |
+| 25 | **持久化 schema 加字段没给默认值，把所有历史数据读死**（`0a51cca`） | 任何 pre-existing 项目的路由都返回 HTTP 500。根因是往 `productBlueprintSchema` 加 `desktopShell` 时没给 `.default()`——`createBlueprint` 总会写它，但**它存在之前写下的行没有**，于是 `AgentDevStore.getProject` 里的 `parse` 对每行老数据抛 `ZodError`。字段清单不靠猜：写探针遍历 `blueprint_revisions` 全部 safeParse 并按 issue path 汇总，实测 23 行里 20 行读不出来。修复是补上与旧实现语义一致的默认值——这是**读迁移**，不是放宽输入校验（`blueprintAnswersSchema` 早就有这四个默认值，缺的只有持久化那份）。教训：**持久化 schema 的必填字段是一次数据迁移**，加字段前先问"已经写下的行长什么样"。 |
+| 26 | **blueprint 声明了自己没有的部署目标**（`ec1de1a`） | 缺陷 24 只修了"要不要问用户"，没修"记下来的是什么"：`deployment.web.provider` / `api.provider` / `data.provider` 是写死的 `z.literal`，所以一个 MCP server 的 blueprint 仍然声明着 `cloudflare-pages` + `vercel-functions` + `supabase`。这些字段是交付记录本身，写着不存在的目标就是假声明。修复：字面量放宽为含 `'none'` 的枚举，取值由 `baselineProvidersFor` 决定（与基线计划同源）。**枚举放宽不会读死老数据**——旧值仍在枚举里，23 行持久化数据复验全部通过（与缺陷 25 相反方向的验证）。 |
+| 27 | **交付状态少了 8 个标签，界面渲染出原始 key**（`2358b9d`） | 项目列表显示 `projectState.NEEDS_INPUT`：字典只覆盖状态机 15 个状态里的 7 个。**与缺陷 20 同类且是其复发**，说明"改成显式 key 映射表"这个修法治不住根——真正的根因是 `as KeyPath` 断言把缺失从编译器眼前藏了起来，而它后面那个 `?? project.state.replaceAll(…)` 兜底**是死代码**（`t()` 查不到时返回 key 本身，永远不是 `undefined`）。修复：`Project.state` 从 `string` 收紧为 `DeliveryState`，字典 `satisfies Record<DeliveryState, string>`，断言与死兜底一并删除。已实测有效：删掉任一标签会同时在字典、译文、调用点报三处编译错误。 |
+| 28 | **错误横幅长在首页组件里，成了唯一的错误出口**（`2358b9d`） | 横幅写在 `Dashboard` 内部，而全应用约 40 处 `setError` 共用一个全局 state——于是凭证加载失败的消息**串到首页展示**，而项目详情页里发布失败的消息**在用户回到首页之前根本看不见**。修复：横幅上移到 shell（每个视图都可见），并在视图切换时清空；清空键为 `view.kind` 而非整个 view，这样项目内切 tab 不会抹掉用户还没读的消息。 |
+| 29 | **探测超不过时限就谎报 Agent 未安装**（`f2e4278`） | `which` 退出码非 0 是"确实不在 PATH 上"的证据，`which` **跑不起来**不是——但两者走同一分支，于是 300ms 超时（或进程表满时的 EAGAIN）会报 `Command not found on local PATH.` **并缓存**，让 Studio 把装好的 Agent 标成 missing、daemon 用 409 拒绝启动它，且在进程剩余生命周期里一直如此。这与函数自己下一分支的注释直接矛盾（"版本探测失败不得隐藏已安装的 Agent"）。本会话全量测试**两次自发复现**这个 flake，才定位到它。修复：不确定的探测改用更长预算重试且**永不缓存**，让下一次调用有机会给出结论。回归测试把 PATH 清空使 `which` 自身不可解析——与超时同一失败形态，但没有时序依赖（已验证该测试在修复前必红）。 |
 
 ## 2. 由缺陷沉淀的架构规则
 
@@ -66,6 +72,10 @@
 4. **Agent 运行成功后由平台提交 Agent 的改动**（`874fd3c` 修复后）。提交前拦截 `.env` 与 workspace 外部符号链接。
 5. **每个闸门/步骤必须能证明自己**：外部写操作先 Dry Run；未取得真实 Evidence 的步骤不能标记完成；自动修复最多两次。
 6. **幂等性优先**：Provider 建项目、部署、发布都带幂等键；重试不能发出上一次残留的位（发布每次尝试都 reset）。
+7. **按产品类型分叉的事实只允许有一个来源**（缺陷 24/26）。"这个类型用哪几家云"写在 `PRODUCT_TYPE_DESCRIPTORS[type].providers`，审批清单、人工授权项、daemon 的 provider specs、Studio 表单、blueprint 里记的部署目标全部读它。判据：加第七种产品类型时只需填一行，而不是记住四个调用点；映射用 `Record<ProductType, …>` 保证漏填即编译失败。
+8. **"探测不出来"与"不存在"必须分开表达**（缺陷 29）。探测完成并给出否定结论才可缓存为否定；探测本身没跑完只能报"未知"且不得缓存。同理，能力探测失败不得隐藏已发现的对象。
+9. **持久化 schema 加必填字段等于一次数据迁移**（缺陷 25）。加字段前先回答"已经写下的行长什么样"；给出与旧实现语义一致的 `.default()` 属于读迁移，与放宽输入校验是两件事——输入校验仍可严格。放宽枚举安全（旧值仍合法），收紧或新增必填不安全。
+10. **界面上"不可能出现"的分支不要用断言绕过类型检查**（缺陷 20/27）。`as SomeKey` 会把缺失藏到运行时，写在它后面的兜底往往是死代码。把来源类型收紧到真实枚举，让缺失在编译期暴露。
 
 ## 3. 免费模型选型（Runtime 实测结论）
 

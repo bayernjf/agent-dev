@@ -61,12 +61,29 @@ const NON_INTERACTIVE_FLAGS: Record<string, string[]> = {
 
 type DetectionResult = { detected: boolean; version: string | null; detail: string };
 
+// `which` exiting non-zero is real evidence of absence. `which` failing to *run* is not: a timeout
+// under load, or EAGAIN when the process table is full, used to take the same branch and report
+// 'Command not found on local PATH.' — which disabled a genuinely installed Agent in Studio and made
+// the daemon refuse to launch it with a 409, on a machine where the Agent was right there on PATH.
+// An inconclusive lookup is retried on a longer budget, and is never cached, so load that passes
+// leaves the next call free to settle it instead of pinning a false negative for the whole process.
+function lookupOnPath(executable: string): { completed: boolean; found: boolean } {
+  for (const timeout of [1_000, 3_000]) {
+    const lookup = spawnSync('which', [executable], { encoding: 'utf8', timeout });
+    if (!lookup.error) return { completed: true, found: lookup.status === 0 };
+  }
+  return { completed: false, found: false };
+}
+
 function detect(command: string): DetectionResult {
   const cached = detectionCache.get(command);
   if (cached) return cached;
   const executable = command.trim().split(/\s+/)[0];
-  const lookup = spawnSync('which', [executable], { encoding: 'utf8', timeout: 300 });
-  if (lookup.status !== 0 || lookup.error) {
+  const onPath = lookupOnPath(executable!);
+  if (!onPath.completed) {
+    return { detected: false, version: null, detail: 'PATH lookup did not complete, so availability is unknown; retry.' };
+  }
+  if (!onPath.found) {
     const result = { detected: false, version: null, detail: 'Command not found on local PATH.' };
     detectionCache.set(command, result);
     return result;
