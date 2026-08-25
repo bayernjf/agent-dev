@@ -398,7 +398,10 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const task = await store.getFeatureTask(project.id, project.blueprint.metadata.revision);
     if (!task || task.status !== 'approved') return context.json({ error: 'Approve a Feature Task before preparing a Runtime plan.' }, 409);
     const run = await store.getRuntimeRun(project.id, project.blueprint.metadata.revision);
-    const agentId = run?.agentId ?? 'codex';
+    // Prefer the Blueprint-selected runtime when no explicit run exists yet. Falls back to codex only
+    // when the Blueprint did not specify a runtime (legacy Blueprints).
+    const blueprintAgent = project.blueprint.spec.runtime?.provider;
+    const agentId = run?.agentId ?? blueprintAgent ?? 'codex';
     const plan = isAgentExecutable(agentId) ? buildAgentExecutionPlan(task, task.workspacePath, agentId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
     return context.json({ probe: probeCodexRuntime(), plan, run });
   });
@@ -416,7 +419,9 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       if (!isAgentExecutable(agent.id)) return context.json({ error: `Agent "${agent.name}" is detected, but does not have a verified non-interactive execution adapter.` }, 409);
     }
     try {
-      const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision, body.agentId ?? 'codex');
+      // A request may override the runtime; otherwise use the Blueprint-selected provider.
+      const blueprintAgent = project.blueprint.spec.runtime?.provider;
+      const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision, body.agentId ?? blueprintAgent ?? 'codex');
       return context.json({ run, probe: probeCodexRuntime() }, 201);
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to prepare the Runtime run.' }, 409);
