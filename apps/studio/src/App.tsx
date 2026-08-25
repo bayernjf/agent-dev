@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Activity, ArrowLeft, ArrowRight, CheckCircle2, CircleDot, FolderKanban, KeyRound, Moon, PlugZap, RefreshCw, ShieldCheck, Sparkles, Sun,
 } from 'lucide-react';
 import { useI18n, type KeyPath } from './i18n/i18n';
 import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
-import { getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
+import { baselineProvidersFor, getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
 import type {
   Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyStep, ApplyRun, DependencyReadiness,
@@ -1130,6 +1130,16 @@ export function App() {
     setAnswers(current => ({ ...current, [key]: value }));
   };
 
+  const ownershipFields = useMemo(() => {
+    const providers = baselineProvidersFor(answers.productType);
+    return ([
+      ['github', { id: 'github-owner', labelKey: 'blueprint.githubOwner', answerKey: 'githubOwner' }],
+      ['supabase', { id: 'supabase-organization', labelKey: 'blueprint.supabaseOrganization', answerKey: 'supabaseOrganization' }],
+      ['vercel', { id: 'vercel-team', labelKey: 'blueprint.vercelTeam', answerKey: 'vercelTeam' }],
+      ['cloudflare', { id: 'cloudflare-account', labelKey: 'blueprint.cloudflareAccount', answerKey: 'cloudflareAccount' }],
+    ] as const).filter(([provider]) => providers.includes(provider)).map(([, field]) => field);
+  }, [answers.productType]);
+
   const toggleAnalytics = (provider: 'ga4' | 'clarity') => {
     setAnswers(current => ({
       ...current,
@@ -1524,14 +1534,13 @@ export function App() {
 
               {isProfessional && <>
                 <fieldset className="choice-group ownership-group"><legend>{t('blueprint.resourceOwnership')}</legend><p>{t('blueprint.ownershipNote')}</p>
-                  <label htmlFor="github-owner">{t('blueprint.githubOwner')}</label>
-                  <input id="github-owner" value={answers.githubOwner} onChange={event => setAnswer('githubOwner', event.target.value)} placeholder={t('common.egAcme')} maxLength={120} />
-                  <label htmlFor="supabase-organization">{t('blueprint.supabaseOrganization')}</label>
-                  <input id="supabase-organization" value={answers.supabaseOrganization} onChange={event => setAnswer('supabaseOrganization', event.target.value)} placeholder={t('common.egAcme')} maxLength={120} />
-                  <label htmlFor="vercel-team">{t('blueprint.vercelTeam')}</label>
-                  <input id="vercel-team" value={answers.vercelTeam} onChange={event => setAnswer('vercelTeam', event.target.value)} placeholder={t('common.egAcme')} maxLength={120} />
-                  <label htmlFor="cloudflare-account">{t('blueprint.cloudflareAccount')}</label>
-                  <input id="cloudflare-account" value={answers.cloudflareAccount} onChange={event => setAnswer('cloudflareAccount', event.target.value)} placeholder={t('common.egAcme')} maxLength={120} />
+                  {/* Only the providers this product type provisions are asked for: an MCP server or a
+                      browser extension creates nothing on Vercel or Supabase, and asking anyway invited
+                      the user to name owners for cloud projects the product would never use. */}
+                  {ownershipFields.map(field => <Fragment key={field.id}>
+                    <label htmlFor={field.id}>{t(field.labelKey)}</label>
+                    <input id={field.id} value={answers[field.answerKey]} onChange={event => setAnswer(field.answerKey, event.target.value)} placeholder={t('common.egAcme')} maxLength={120} />
+                  </Fragment>)}
                 </fieldset>
                 <fieldset className="choice-group"><legend>{t('blueprint.previewWorkflow')}</legend><div className="choice-stack">
                   <label><input type="radio" name="preview" checked={answers.previewStrategy === 'per-pull-request'} onChange={() => setAnswer('previewStrategy', 'per-pull-request')} />{t('blueprint.perPullRequest')}</label>
