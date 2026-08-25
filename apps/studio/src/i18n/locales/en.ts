@@ -318,6 +318,8 @@ export const en = {
     eyebrow: 'Recent events',
     panelTitle: 'Activity',
     localDaemonConnected: 'Local daemon connected',
+    localDaemonChecking: 'Checking local daemon…',
+    localDaemonDisconnected: 'Local daemon not reachable',
     localReady: 'Local delivery control plane ready',
     now: 'Now',
     blueprintRevised: 'Blueprint revised',
