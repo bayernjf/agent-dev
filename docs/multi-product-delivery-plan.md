@@ -80,11 +80,11 @@ Product Type
 
 > **实现进度（2026-08-24，桌面端）**：技术栈决策为**先 Tauri v2**，Electron 留作后续专业模式可选项（`soft-desk` 用的是 Electron，可作为迁移参考）。`buildDesktop` 产出 Vite/TypeScript webview（`index.html` / `src/main.ts` 通过 `invoke('app_version')` 真实走一次 IPC）、Rust 核心（`src-tauri/src/lib.rs` + `main.rs` + `build.rs` + `Cargo.toml`）、`tauri.conf.json`、占位图标生成脚本、`.gitignore`、以及带 Rust toolchain 和 Linux webview 依赖的 quality 工作流。
 >
-> 证据：生成物在 `/tmp/gen-check-desktop` 冷启动真跑一次 `npm install && npm run quality`（`typecheck` → `vite build` → `rust-check` = `cargo check`）全绿；并真跑 `npm run bundle` 产出 macOS `Gen Check.app` 与 `Gen Check_0.1.0_aarch64.dmg`（未签名、未公证）。生成的 GitHub 工作流**未**在真实 CI 执行过。签名、公证、Windows 代码签名、自动更新分发与商店提交仍是人工步骤。
+> 证据：生成物在 `/tmp/gen-check-desktop` 冷启动真跑一次 `npm install && npm run quality`（`typecheck` → `vite build` → `rust-check` = `cargo check`）全绿；并真跑 `npm run bundle` 产出 macOS `Gen Check.app` 与 `Gen Check_0.1.0_aarch64.dmg`（未签名、未公证）。生成的 GitHub 工作流已在真实 CI 执行过（见下方 2026-08-25 的记录）。签名、公证、Windows 代码签名、自动更新分发与商店提交仍是人工步骤。
 >
 > **实现进度（2026-08-24，补齐 Electron / 移动端 / api-tool）**：`desktop` 新增 `desktopShell: 'tauri' | 'electron'`（默认 tauri，Electron 面向需要 Node API 或已有 Electron 存量的团队）；Electron 分支产出 `electron/main.ts` + `electron/preload.ts` + Vite 渲染进程 + `electron-builder.yml`，渲染进程 `contextIsolation: true` / `nodeIntegration: false`，只能通过 preload 桥调用主进程。`mobile` 产出 Expo SDK 52 + expo-router 模板（`app/_layout.tsx` / `app/index.tsx` / `app.json` / `eas.json` / `babel.config.js`）。`api-tool` 产出 Hono on Vercel 的 API-first 单包（`/api/health` + `/api/echo`，`ALLOWED_ORIGIN` 显式白名单，无前端、不建 Cloudflare Pages）。
 >
-> 证据：三份生成物分别冷启动 `npm install` 后真跑自己的 `npm run quality` 全绿——api-tool `lint → typecheck → unit → build`、electron `typecheck(渲染+主进程两份 tsconfig) → build`、mobile `typecheck`（另用一行故意的类型错误确认它不是空跑）。**未做**：未启动 Electron 窗口、未跑 Expo 模拟器或 EAS Build、未在真实 CI 执行生成的工作流。真跑暴露缺陷 23（渲染进程入口不是模块，`declare global` 触发 `TS2669`），修复为把桥接类型移入 `src/desktop.d.ts`。签名/公证/商店提交改为每个需打包类型产出 `generated/DISTRIBUTION.md`。
+> 证据：三份生成物分别冷启动 `npm install` 后真跑自己的 `npm run quality` 全绿——api-tool `lint → typecheck → unit → build`、electron `typecheck(渲染+主进程两份 tsconfig) → build`、mobile `typecheck`（另用一行故意的类型错误确认它不是空跑）。**未做**：未启动 Electron 窗口、未跑 Expo 模拟器或 EAS Build。真跑暴露缺陷 23（渲染进程入口不是模块，`declare global` 触发 `TS2669`），修复为把桥接类型移入 `src/desktop.d.ts`。签名/公证/商店提交改为每个需打包类型产出 `generated/DISTRIBUTION.md`。
 >
 > **实现进度（2026-08-25，api-tool 由空壳改为 MCP server）**：原模板只有 `/api/health` + `/api/echo`，是 web-saas 去掉前端的子集，既没有真实内容也没有形态区分度。改为 MCP server 后它才有独立交付链路：`src/server.ts` 用 `registerTool` + zod `inputSchema` 注册工具，`src/index.ts` 带 shebang 走 `StdioServerTransport`，`package.json` 声明 `bin`，消费方是 MCP 客户端的配置文件而不是 URL。SDK API 形状不靠记忆——联网检索被拒（403）后改为从 registry 装 `@modelcontextprotocol/sdk@1.30.0` 实测其类型定义确认（`registerTool` 为当前 API，旧的 `tool()` 已 deprecated）。
 >
@@ -95,6 +95,12 @@ Product Type
 > 证据：七种全绿——`web-saas`、`landing-page`、`browser-extension`、`desktop-electron`、`mobile`、`api-tool` 于 linux/amd64（Node v22.23.2，`x86_64`）；`desktop-tauri` 于 linux/arm64（cargo 1.98.0，`cargo check` 冷编译 10m30s）。另单独用 `ubuntu:24.04` 容器验证 tauri 工作流的 apt 依赖清单在 `ubuntu-latest` 上仍然存在（`libwebkit2gtk-4.1-dev` / `libappindicator3-dev` / `librsvg2-dev` / `patchelf` 全部可安装——原先凭记忆以为 24.04 移除了 `libappindicator3-dev`，实测证伪）。**仍未做**：工作流本身没被 GitHub Actions 执行过，`actions/checkout@v5` / `actions/setup-node@v5` 的版本可用性、触发条件与权限仍未验证。
 >
 > 由此暴露两个尚未修的 CI 质量问题（非阻塞，待决策）：(1) 模板不产出 lockfile，工作流用 `npm install`，CI 的依赖版本是浮动的、不可复现；(2) tauri 工作流没有 Rust 缓存，实测冷编译 10m30s，每个 PR 都要重复付这个代价。
+>
+> **实现进度（2026-08-25，生成的工作流进真实 GitHub Actions）**：此前文档里"生成的工作流未在真实 CI 执行过"这句话是**陈旧的**——web-saas 早在 2026-08-23 的 `bayernjf/receipt-test` PR #1 就已经绿过，而且它的基线推送还真实失败过两次，错误正是 `Dependencies lock file is not found`（即缺陷 8），当时的修复是把 `setup-node` 的 cache 探测关掉（`cache: ''`）。其余六类从未进过 CI，现已补齐：把六份生成物逐个推入 `receipt-test` 的 `verify/generated-ci-*` 分支并开 PR（仅验证，不合并）。
+>
+> 证据：PR #2–#7 的 `quality` 全绿——landing-page 13s、browser-extension 23s、api-tool 42s、desktop-electron 46s、mobile 1m8s、desktop-tauri 3m45s（GitHub 的 x64 runner 比本地 arm64 容器的 10m30s 快得多）。至此 `actions/checkout@v5` / `actions/setup-node@v5` 的可用性、`pull_request` 触发与权限全部得到真实验证，七类生成物的工作流无一例外。
+>
+> 由此确认 lockfile 那条不是理论风险而是**已经真实咬过一次的缺陷**：`cache: ''` 压住的是症状（缓存探测要 lockfile），不是根因（模板不产出 lockfile）。方向定为交付时真跑一次 `npm install` 产出并提交 lockfile、工作流改 `npm ci`，缓存也随之可以开回来。
 
 ## 5. 选择规则
 
