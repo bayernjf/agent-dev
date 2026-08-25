@@ -6,6 +6,10 @@
 
 ## 最近进度
 
+- **两个阻塞性缺陷从根因修掉（2026-08-25，提交 `25b3d9e` / `0a51cca`）**：都是"真跑一次非 web-saas 的端到端交付"暴露出来的，单测一个都测不到。
+  - **缺陷 24：云资源清单按产品类型收敛**。生成物早就按类型分叉（api-tool 不产 `wrangler.toml`/`vercel.json`），供给层却没有：`createBaselinePlan` / `getManualActions` / `providerSpecsFromBlueprint` / Studio 归属表单四处各自硬编码同一份四家云清单，于是一个 MCP server 也要填 Supabase 组织和 Vercel team 才能过审批——而填了就会真被建出三个产品永不接触的云项目。清单收进 `PRODUCT_TYPE_DESCRIPTORS[type].providers` 当唯一事实源（web-saas 四家 / landing-page github+cloudflare / 其余四类仅 github），映射类型收紧为 `Record<ProductType, …>` 使第七种类型不填这行就编译不过。不用的 provider 键是**缺席**而非空数组（registry 对每个存在的键取 `resources[0]`，空数组会把 `undefined` 递给适配器）。`preview/deploy` / `preview/plan` / `preview/cleanup` / `resolveReleaseContext` 加 409 守卫：composer 的流水线固定跑 `apps/api`/`apps/web`，无托管目标的类型走进去会去部署从不生成的目录，且是在它已记下 `vercelProjectMayExist = true` 之后。证据见 [多产品交付计划](docs/multi-product-delivery-plan.md)。**未做**：`deployment.web`/`deployment.api` 的 `z.literal` 未放宽到 `'none'`，那会波及 composer 与已持久化 blueprint。
+  - **缺陷 25：持久化 schema 缺默认值把老数据读死**。任何 pre-existing 项目的路由都返回 HTTP 500——`9e693c8` 往 `productBlueprintSchema` 加 `desktopShell` 时没给 `.default()`，`createBlueprint` 总会写它，但它存在之前写下的行没有，于是 `getProject` 里的 `parse` 对每行老数据抛 `ZodError`。字段清单不靠猜：探针遍历 `blueprint_revisions` 全部 safeParse，实测 23 行里 20 行读不出来。补上与旧实现语义一致的默认值（beginner / 空串 / tauri）——这是**读迁移**，不是放宽输入校验。修后同一探针 `rows: 23, failing: 0`，10 个项目全部恢复 200，含持有线上预览的 `Receipt Test` 与 `Workspace Verify Fresh`（它们的 cleanup 路由此前已不可达）。
+
 - **Studio 交互与视觉打磨（i18n + 双主题 + 交互重构，2026-08-24）**：
   - **i18n + 双主题已实施**（提交 `90696d4`）：`apps/studio/src/i18n/`（en/zh 字典，默认英文，技术术语保留英文）+ `apps/studio/src/theme/`（ThemeProvider/useTheme + CSS token 双主题，`index.html` 防 FOUC 脚本，favicon 暗色描边 `#7A8695`）。设计文档 `docs/studio-i18n-design.md`、`docs/studio-theme-design.md` 状态已从「待实施」更新为「已实施」。
   - **视图状态系统**：`View` 类型（dashboard / project / credentials / agents / activity）+ `App.tsx` 按视图拆分；Dashboard 独立为 `views/Dashboard.tsx`，工具函数抽到 `lib/`；Credentials / Agents / Activity 独立视图复用右侧栏真实面板，替换 "Coming soon" 占位；项目详情页移除重复的项目列表。
@@ -260,6 +264,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
    - 生产发布必须由用户本人批准，不能由 Agent 代按；Daemon 必须带代理变量与 `NODE_USE_ENV_PROXY=1` 启动，否则云端验证会假失败。
    - Daemon 的 PATH 需同时含 node22 运行时、homebrew（codex 0.142.3，避免解析到有兼容 bug 的 0.147.0）和 fnm node20 全局 bin（`vercel`/`wrangler`）。
 8. 多产品形态六种类型全部生成真实模板（web-saas / landing-page / browser-extension / desktop 双 shell / mobile / api-tool），每一类的生成物都在本地真跑过自己的 quality gate，desktop-tauri 还真产出了未签名的 .app/.dmg。签名、公证与商店提交按设计仍是人工步骤，模板内附 `generated/DISTRIBUTION.md`。七种生成物的 quality gate 已按工作流声明的步骤在真实 Linux 容器里复现全绿（六类于 linux/amd64，与 `ubuntu-latest` 同架构；desktop-tauri 于 linux/arm64，`cargo check` 冷编译 10m30s），tauri 工作流的 apt 依赖清单也在 `ubuntu:24.04` 上验证过仍可安装。生成的工作流也已在**真实 GitHub Actions** 上执行：`bayernjf/receipt-test` 的 PR #2–#7 分别推入六类生成物，`quality` 全绿（landing-page 13s / browser-extension 23s / api-tool 42s / desktop-electron 46s / mobile 1m8s / desktop-tauri 3m45s）；web-saas 早在 2026-08-23 的 PR #1 就已绿。未做：Electron 窗口/Expo 模拟器/EAS Build 未真跑、部署平台可组合（M2）。tauri 工作流已加 `Swatinem/rust-cache@v2`（`workspaces: src-tauri`），同分支两次真跑量出 `quality` 96s → 6s、整个 job 3m12s → 1m23s。
+9. **非 web-saas 类型的端到端真实交付（进行中）**。选 `api-tool`（项目 `397d8de0-06f6-4773-bf7b-9c26c13ff009`「MCP Word Tools」）因为它只需要 GitHub、不碰云端供给。两个阻塞缺陷（24 / 25）已修掉，项目现在停在 `NEEDS_INPUT`。**下一步需要用户两项明确授权**才能继续：(a) 按 `APPROVE_BASELINE` 闸门；(b) 授权在 `bayernjf` 下**新建一个 GitHub 仓库**——此前授权的范围只覆盖「向已存在的 `bayernjf/receipt-test` 推 `verify/*` 分支并开 PR」，建新仓库在范围之外。api-tool 生成物本身的 quality gate 无需再验：本地与真实 GitHub Actions（`receipt-test` PR #8，42s）都已全绿。
 
 ## 9. 用户决策
 
