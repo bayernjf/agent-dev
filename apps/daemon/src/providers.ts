@@ -1,13 +1,17 @@
-import type { ProductBlueprint } from '@agent-dev/blueprint';
+import { baselineProvidersFor, type ProductBlueprint } from '@agent-dev/blueprint';
 import type { ProviderResourceSpecs } from '@agent-dev/provider-core';
 
+// Keys are omitted, not emptied, for providers this product type does not use: the registry reads
+// `resources[0]` for each key it finds, so an empty array would hand `undefined` to an adapter and
+// fail somewhere downstream instead of simply not being planned.
 export function providerSpecsFromBlueprint(blueprint: ProductBlueprint): ProviderResourceSpecs {
-  return {
-    github: [{ id: 'github-repository', kind: 'repository', owner: blueprint.spec.sourceControl.owner }],
-    supabase: [{ id: 'supabase-project', kind: 'database-auth-project', owner: blueprint.spec.data.organization }],
-    vercel: [{ id: 'vercel-api', kind: 'functions-project', owner: blueprint.spec.deployment.api.team }],
-    cloudflare: [{ id: 'cloudflare-pages', kind: 'pages-project', owner: blueprint.spec.deployment.web.account }],
-  };
+  const providers = baselineProvidersFor(blueprint.spec.product.type);
+  const specs: ProviderResourceSpecs = {};
+  if (providers.includes('github')) specs.github = [{ id: 'github-repository', kind: 'repository', owner: blueprint.spec.sourceControl.owner }];
+  if (providers.includes('supabase')) specs.supabase = [{ id: 'supabase-project', kind: 'database-auth-project', owner: blueprint.spec.data.organization }];
+  if (providers.includes('vercel')) specs.vercel = [{ id: 'vercel-api', kind: 'functions-project', owner: blueprint.spec.deployment.api.team }];
+  if (providers.includes('cloudflare')) specs.cloudflare = [{ id: 'cloudflare-pages', kind: 'pages-project', owner: blueprint.spec.deployment.web.account }];
+  return specs;
 }
 
 export function buildProviderSimulationReport(projectName: string, plans: { providerId: string; idempotencyKey: string; resources: { spec: { id: string; owner: string }; action: string }[] }[], verification: { providerId: string; verified: boolean; missing: string[]; mismatched: string[] }[]) {
