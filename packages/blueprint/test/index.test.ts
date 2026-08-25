@@ -82,13 +82,12 @@ describe('ProductBlueprint', () => {
       expect.objectContaining({ path: 'apps/api/src/index.ts', content: expect.stringContaining("import { handle } from 'hono/vercel';") }),
       expect.objectContaining({ path: 'apps/api/vercel.json', content: expect.stringContaining('"@vercel/node"') }),
       expect.objectContaining({ path: 'apps/api/vercel.json', content: expect.not.stringContaining('nodejs22.x') }),
-      expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('npm install') }),
+      expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('npm ci') }),
       expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('actions/checkout@v5') }),
       expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('actions/setup-node@v5') }),
-      // setup-node defaults to dependency caching and hard-fails before `npm install` when no
-      // lock file exists yet; the scaffold generates the lock file on first install, so CI must
-      // disable the cache probe to let the first PR pass.
-      expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining("cache: ''") }),
+      // Both the locked install and the setup-node cache need a committed lock file; the install
+      // step commits one and publishPullRequest refuses to push a branch without it.
+      expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('cache: npm') }),
     ]));
   });
 
