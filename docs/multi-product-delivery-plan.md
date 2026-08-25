@@ -104,7 +104,11 @@ Product Type
 
 > **实现进度（2026-08-25，缺陷 8 从根因修掉：锁定安装）**：交付流程本来就有一步真跑 `npm install` 并把 `package-lock.json` 提交进去（`installDependencies`），但没有任何环节要求它先跑过，工作流也没利用它——所以 `cache: ''` 一直挂在那里。这次把两头接上：七类模板的 `quality.yml` 收敛成同一个 `qualityWorkflow()`（此前是七份逐字重复的 YAML，每改一次就是六次漏改机会），`npm install` → `npm ci`、`cache: ''` → `cache: npm`；`publishPullRequest` 加一条前置断言——`package-lock.json` 未被提交就拒绝推分支，理由写在错误信息里。这不是兜底而是不变量：走到开 PR 这一步的交付必然已经跑过 quality gate，也就必然装过依赖。
 >
-> 证据：`receipt-test` PR #8（api-tool）与 #9（landing-page）在真实 GitHub Actions 上全绿，日志确认 `cache: npm` 真的按 lockfile 哈希建了缓存（`Cache saved with the key: node-cache-Linux-x64-npm-4a59af…`）、`npm ci` 真的装了 245 个包，而不是被跳过。存储层测试新增「未提交 lockfile 时拒绝开 PR」的断言。**未做**：tauri 工作流仍无 Rust 缓存（实测本地冷编译 10m30s / GitHub runner 3m45s）。
+> 证据：`receipt-test` PR #8（api-tool）与 #9（landing-page）在真实 GitHub Actions 上全绿，日志确认 `cache: npm` 真的按 lockfile 哈希建了缓存（`Cache saved with the key: node-cache-Linux-x64-npm-4a59af…`）、`npm ci` 真的装了 245 个包，而不是被跳过。存储层测试新增「未提交 lockfile 时拒绝开 PR」的断言。**未做**：无。
+
+> **实现进度（2026-08-25，tauri 工作流加 Rust 缓存）**：`desktop-tauri` 是唯一每个 PR 都要冷编译 Rust 的类型。工作流在 `dtolnay/rust-toolchain` 之后插入 `Swatinem/rust-cache@v2`，并显式给 `workspaces: src-tauri`——Cargo workspace 不在仓库根，用默认值它会去根目录找不存在的清单、什么都不缓存（这类"配了但没生效"的缓存比不配更危险，因为它看起来是绿的）。
+>
+> 证据：同一分支（`receipt-test` PR #10）推两次真实量出前后差。冷跑 `quality` 96s、结束时 `... Saving cache ...`；热跑 `Cache hit ... full match: true`，`quality` 降到 **6s**，整个 job 从 3m12s 降到 1m23s（缓存恢复本身花 9s）。回归测试断言模板同时含 `Swatinem/rust-cache@v2` 与 `workspaces: src-tauri`。
 
 ## 5. 选择规则
 
