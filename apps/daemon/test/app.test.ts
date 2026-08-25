@@ -369,6 +369,36 @@ describe('daemon API', () => {
     expect(planPayload.idempotencyKey).toBe('preview:receipt-desk-2026:preview');
     await store.close();
   }, 30_000);
+
+  // The composer's pipeline is Vercel-then-Cloudflare over `apps/api` and `apps/web`. An api-tool
+  // scaffold generates neither, so without a guard the route would try to deploy directories that
+  // are not there, after already recording a Vercel project as possibly created.
+  it('refuses a hosted preview for a product type that deploys nowhere', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const { app } = createDaemonApp(store);
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'MCP Word Tools', answers: { mode: 'professional', productType: 'api-tool', githubOwner: 'acme' } }),
+    });
+    const { project } = await created.json() as { project: { id: string } };
+
+    const baseline = await app.request(`http://localhost/api/projects/${project.id}/baseline-plan`);
+    const baselinePayload = await baseline.json() as { plan: { readyForApproval: boolean; resources: { id: string }[] } };
+    expect(baselinePayload.plan.resources.map(resource => resource.id)).toEqual(['github-repository']);
+    expect(baselinePayload.plan.readyForApproval).toBe(true);
+
+    const plan = await app.request(`http://localhost/api/projects/${project.id}/preview/plan`);
+    expect(plan.status).toBe(409);
+    expect((await plan.json() as { error: string }).error).toContain('no hosted deployment target');
+
+    const release = await app.request(`http://localhost/api/projects/${project.id}/release/plan`);
+    expect(release.status).toBe(409);
+    await store.close();
+  }, 30_000);
+
   it('recovers a stale workspace into a clean one and leaves the old one on disk', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
     directories.push(directory);

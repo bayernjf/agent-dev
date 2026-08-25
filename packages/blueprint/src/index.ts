@@ -1,11 +1,13 @@
 import { z } from 'zod';
 export {
+  baselineProvidersFor,
   createBaselinePlan,
   createDryRunPlan,
   generateArtifacts,
   getManualActions,
   type BaselinePlan,
   type BaselinePlanResource,
+  type BaselineProviderId,
   type DryRunPlan,
   type GeneratedArtifact,
   type ManualAction,
@@ -60,18 +62,24 @@ export type BlueprintAnswers = z.infer<typeof blueprintAnswersSchema>;
 export const productBlueprintSchema = z.object({
   apiVersion: z.literal('agent-dev.io/v1alpha1'),
   kind: z.literal('ProductBlueprint'),
+  // Defaults on the persisted schema are a read migration, not input leniency: `createBlueprint`
+  // always writes these fields, but rows written before a field existed do not carry it, and a
+  // required field made every one of them fail validation inside `getProject` — a 500 on every route
+  // that loads the project, which bricked all pre-existing deliveries. Each default is the value the
+  // older blueprint implied: beginner mode, no stated intent, no custom instructions, and Tauri,
+  // which was the only desktop shell when the field was introduced.
   metadata: z.object({
     name: z.string().min(2).max(80),
     revision: z.number().int().positive(),
-    mode: blueprintModeSchema,
-    productIntent: z.string().max(500),
-    customInstructions: z.string().max(1000),
+    mode: blueprintModeSchema.default('beginner'),
+    productIntent: z.string().max(500).default(''),
+    customInstructions: z.string().max(1000).default(''),
   }),
   spec: z.object({
     product: z.object({
       type: productTypeSchema,
       dataSensitivity: z.enum(['standard', 'sensitive']),
-      desktopShell: desktopShellSchema,
+      desktopShell: desktopShellSchema.default('tauri'),
     }),
     stack: z.object({
       frontend: z.literal('react-vite'),
