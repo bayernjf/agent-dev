@@ -110,6 +110,14 @@ Product Type
 >
 > 证据：同一分支（`receipt-test` PR #10）推两次真实量出前后差。冷跑 `quality` 96s、结束时 `... Saving cache ...`；热跑 `Cache hit ... full match: true`，`quality` 降到 **6s**，整个 job 从 3m12s 降到 1m23s（缓存恢复本身花 9s）。回归测试断言模板同时含 `Swatinem/rust-cache@v2` 与 `workspaces: src-tauri`。
 
+> **实现进度（2026-08-25，缺陷 24：云资源清单按类型收敛）**：生成物早就是按类型分叉的（api-tool 不产 `wrangler.toml`/`vercel.json`），但**供给层不是**——`createBaselinePlan` / `getManualActions` / 守护进程的 `providerSpecsFromBlueprint` / Studio 的归属表单四处各自硬编码同一份四家云清单，于是一个 MCP server 也被要求填 Supabase 组织和 Vercel team 才能通过审批。这不只是多问几个问题：填了才能过闸门的用户会真的被建出三个产品永不接触的云项目。修法是把清单收进 `PRODUCT_TYPE_DESCRIPTORS[type].providers` 当唯一事实源（web-saas 四家、landing-page github+cloudflare、其余四类仅 github），四处调用改成读它；映射类型收紧为 `Record<ProductType, …>`，第七种类型不填这一行就编译不过。两处细节：把 Supabase 称作"可选"的类型故意不列入——可选项不该卡审批；不用的 provider 键是**缺席**而非空数组，因为 registry 对每个存在的键取 `resources[0]`，空数组会把 `undefined` 递给适配器、在下游某处才炸。同时给 `preview/deploy`、`preview/plan`、`preview/cleanup`、`resolveReleaseContext` 加 409 守卫：composer 的流水线固定是 Vercel→Cloudflare 跑 `apps/api`/`apps/web`，无托管目标的类型走进去会去部署脚手架从不生成的目录，而且是在它已经记下 `vercelProjectMayExist = true` 之后——那会为一个从未存在的项目登广告式的清理入口。
+>
+> 证据：三类真实起项目验证——api-tool 只剩 `github-repository` 且 `readyForApproval: true`、`preview/plan` 返回 409 带 "no hosted deployment target"；新建 web-saas 四家资源齐全且 ready；新建 landing-page 为 github（待授权）+ cloudflare（blocked）、`readyForApproval: false`。Studio 在浏览器里逐类型确认归属输入框数量（Web SaaS 4 / API tool 1 / Landing page 2 / Desktop 1），无 console 报错，且已填的值在类型来回切换后仍在。**未做**：`deployment.web`/`deployment.api` 的 `z.literal` 没有放宽到 `'none'`——那会波及 composer、发布链路与已持久化的 blueprint，另立一项。
+
+> **实现进度（2026-08-25，缺陷 25：持久化 schema 缺默认值把老数据读死）**：任何一个 pre-existing 项目的路由都返回 HTTP 500。根因是 `9e693c8` 往 `productBlueprintSchema` 加 `desktopShell` 时没给 `.default()`——`createBlueprint` 总会写这个字段，但**它存在之前写下的行没有**，于是 `AgentDevStore.getProject` 里的 `parse` 对每一行老数据抛 `ZodError`。字段清单不靠猜：写了个探针遍历 `blueprint_revisions` 全部 safeParse 并按 issue path 汇总，实测 23 行里 20 行读不出来（`20x spec.product.desktopShell`、`2x metadata.mode` / `productIntent` / `customInstructions`）。修法是给持久化 schema 补上与旧实现语义一致的默认值（beginner / 空串 / tauri）——这是**读迁移**，不是放宽输入校验，`blueprintAnswersSchema` 早就有这四个默认值，缺的只有持久化那份。
+>
+> 证据：修复后重跑同一探针 `rows: 23, failing: 0`，10 个项目全部恢复 200，其中包括持有线上 Vercel/Cloudflare 预览的 `Receipt Test` 与 `Workspace Verify Fresh`——它们的 cleanup 路由此前已经不可达。回归测试删掉一份当前 blueprint 的这四个字段再 parse，断言默认值补齐。
+
 ## 5. 选择规则
 
 新手模式只展示产品类型和 3–5 个产品级问题，自动采用已验证模板。专业模式允许替换技术栈，但必须经过兼容性、能力和迁移校验。
