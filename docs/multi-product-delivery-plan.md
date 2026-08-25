@@ -89,6 +89,12 @@ Product Type
 > **实现进度（2026-08-25，api-tool 由空壳改为 MCP server）**：原模板只有 `/api/health` + `/api/echo`，是 web-saas 去掉前端的子集，既没有真实内容也没有形态区分度。改为 MCP server 后它才有独立交付链路：`src/server.ts` 用 `registerTool` + zod `inputSchema` 注册工具，`src/index.ts` 带 shebang 走 `StdioServerTransport`，`package.json` 声明 `bin`，消费方是 MCP 客户端的配置文件而不是 URL。SDK API 形状不靠记忆——联网检索被拒（403）后改为从 registry 装 `@modelcontextprotocol/sdk@1.30.0` 实测其类型定义确认（`registerTool` 为当前 API，旧的 `tool()` 已 deprecated）。
 >
 > 证据：生成物冷启动 `npm install` 后 `npm run quality`（`lint → typecheck → unit(3 tests) → build`）全绿，其中单测用 `InMemoryTransport.createLinkedPair()` 连真实 `Client` 覆盖工具发现、真实调用与坏参数拒绝；再用 `StdioClientTransport` **真 spawn 一次 `node dist/index.js`**，确认 shebang 保留、`inputSchema` 正确暴露给客户端（`text,topWords`）、真实调用返回 `words: 5 / sentences: 2 / frequent: three (2), two (2)`、空 `text` 被判 `isError`，且诊断信息走 stderr 未污染 stdout 的 JSON-RPC 通道。**未做**：未在 Claude Desktop / Cursor 真实客户端里注册运行，未 `npm publish`。
+>
+> **实现进度（2026-08-25，七种生成物的 quality gate 在真实 Linux 上复现）**：此前所有验证都在 macOS/arm64 上做，而生成的工作流跑在 `ubuntu-latest`——这是唯一没被碰过的一条轴。改为按工作流声明的步骤（Node 22 → `npm install` → `npm run quality`）在容器里逐个复现：六类跑 `node:22-bookworm` on **linux/amd64**（与 `ubuntu-latest` 同架构），desktop-tauri 因需 Rust 工具链与 webview 依赖、amd64 模拟下 `cargo check` 代价过高，改在 linux/arm64 原生跑。
+>
+> 证据：七种全绿——`web-saas`、`landing-page`、`browser-extension`、`desktop-electron`、`mobile`、`api-tool` 于 linux/amd64（Node v22.23.2，`x86_64`）；`desktop-tauri` 于 linux/arm64（cargo 1.98.0，`cargo check` 冷编译 10m30s）。另单独用 `ubuntu:24.04` 容器验证 tauri 工作流的 apt 依赖清单在 `ubuntu-latest` 上仍然存在（`libwebkit2gtk-4.1-dev` / `libappindicator3-dev` / `librsvg2-dev` / `patchelf` 全部可安装——原先凭记忆以为 24.04 移除了 `libappindicator3-dev`，实测证伪）。**仍未做**：工作流本身没被 GitHub Actions 执行过，`actions/checkout@v5` / `actions/setup-node@v5` 的版本可用性、触发条件与权限仍未验证。
+>
+> 由此暴露两个尚未修的 CI 质量问题（非阻塞，待决策）：(1) 模板不产出 lockfile，工作流用 `npm install`，CI 的依赖版本是浮动的、不可复现；(2) tauri 工作流没有 Rust 缓存，实测冷编译 10m30s，每个 PR 都要重复付这个代价。
 
 ## 5. 选择规则
 

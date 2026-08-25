@@ -259,7 +259,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
    - `release/approve` 只校验「被验收提交是生产分支祖先」，不会自动把 `dev` 提升到 `main`；若 PR 目标是 `dev`，发布前需显式补开 dev→main PR。
    - 生产发布必须由用户本人批准，不能由 Agent 代按；Daemon 必须带代理变量与 `NODE_USE_ENV_PROXY=1` 启动，否则云端验证会假失败。
    - Daemon 的 PATH 需同时含 node22 运行时、homebrew（codex 0.142.3，避免解析到有兼容 bug 的 0.147.0）和 fnm node20 全局 bin（`vercel`/`wrangler`）。
-8. 多产品形态六种类型全部生成真实模板（web-saas / landing-page / browser-extension / desktop 双 shell / mobile / api-tool），每一类的生成物都在本地真跑过自己的 quality gate，desktop-tauri 还真产出了未签名的 .app/.dmg。签名、公证与商店提交按设计仍是人工步骤，模板内附 `generated/DISTRIBUTION.md`。未做：Electron 窗口/Expo 模拟器/EAS Build 未真跑、生成的工作流未在真实 CI 执行、部署平台可组合（M2）。
+8. 多产品形态六种类型全部生成真实模板（web-saas / landing-page / browser-extension / desktop 双 shell / mobile / api-tool），每一类的生成物都在本地真跑过自己的 quality gate，desktop-tauri 还真产出了未签名的 .app/.dmg。签名、公证与商店提交按设计仍是人工步骤，模板内附 `generated/DISTRIBUTION.md`。七种生成物的 quality gate 已按工作流声明的步骤在真实 Linux 容器里复现全绿（六类于 linux/amd64，与 `ubuntu-latest` 同架构；desktop-tauri 于 linux/arm64，`cargo check` 冷编译 10m30s），tauri 工作流的 apt 依赖清单也在 `ubuntu:24.04` 上验证过仍可安装。未做：Electron 窗口/Expo 模拟器/EAS Build 未真跑、工作流本身未被 GitHub Actions 执行过（`actions/checkout@v5` / `setup-node@v5` 与触发条件、权限未验证）、部署平台可组合（M2）。已知未修：模板不产出 lockfile 使 CI 依赖浮动；tauri 工作流无 Rust 缓存。
 
 ## 9. 用户决策
 
