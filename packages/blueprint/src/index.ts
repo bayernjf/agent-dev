@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { baselineProvidersFor } from './generate.js';
 export {
   baselineProvidersFor,
   createBaselinePlan,
@@ -93,14 +94,18 @@ export const productBlueprintSchema = z.object({
       productionBranch: z.string().min(1),
       requirePullRequest: z.boolean(),
     }),
+    // `'none'` is a real state, not a placeholder: an MCP server has no Pages project and no Vercel
+    // deployment, and a blueprint that names one anyway is a false claim about the delivery — the
+    // field is what the final report and any future consumer reads to decide what exists. Which
+    // providers a type actually gets is `baselineProvidersFor`, the same source the baseline plan uses.
     data: z.object({
-      provider: z.literal('supabase'),
-      auth: z.literal('supabase-auth'),
+      provider: z.enum(['supabase', 'none']),
+      auth: z.enum(['supabase-auth', 'none']),
       organization: z.string().max(120).default(''),
     }),
     deployment: z.object({
-      web: z.object({ provider: z.literal('cloudflare-pages'), account: z.string().max(120).default('') }),
-      api: z.object({ provider: z.literal('vercel-functions'), team: z.string().max(120).default('') }),
+      web: z.object({ provider: z.enum(['cloudflare-pages', 'none']), account: z.string().max(120).default('') }),
+      api: z.object({ provider: z.enum(['vercel-functions', 'none']), team: z.string().max(120).default('') }),
       previewStrategy: z.enum(['per-pull-request', 'stable-dev-api']),
     }),
     analytics: z.object({ providers: z.array(analyticsProviderSchema) }),
@@ -145,6 +150,7 @@ export function qualityChecksFor(productType: string, desktopShell = 'tauri'): P
 
 export function createBlueprint(name: string, input: Partial<BlueprintAnswers> = {}, revision = 1): ProductBlueprint {
   const answers = blueprintAnswersSchema.parse(input);
+  const providers = baselineProvidersFor(productTypeSchema.parse(answers.productType));
   return productBlueprintSchema.parse({
     apiVersion: 'agent-dev.io/v1alpha1',
     kind: 'ProductBlueprint',
@@ -169,10 +175,16 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
         productionBranch: 'main',
         requirePullRequest: true,
       },
-      data: { provider: 'supabase', auth: 'supabase-auth', organization: answers.supabaseOrganization },
+      data: providers.includes('supabase')
+        ? { provider: 'supabase', auth: 'supabase-auth', organization: answers.supabaseOrganization }
+        : { provider: 'none', auth: 'none', organization: '' },
       deployment: {
-        web: { provider: 'cloudflare-pages', account: answers.cloudflareAccount },
-        api: { provider: 'vercel-functions', team: answers.vercelTeam },
+        web: providers.includes('cloudflare')
+          ? { provider: 'cloudflare-pages', account: answers.cloudflareAccount }
+          : { provider: 'none', account: '' },
+        api: providers.includes('vercel')
+          ? { provider: 'vercel-functions', team: answers.vercelTeam }
+          : { provider: 'none', team: '' },
         previewStrategy: answers.previewStrategy,
       },
       analytics: { providers: answers.analyticsProviders },

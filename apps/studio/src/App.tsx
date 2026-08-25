@@ -77,6 +77,10 @@ export function App() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [daemonOnline, setDaemonOnline] = useState<boolean | null>(null);
+
+  // Keyed on `kind` rather than the whole view so switching tabs inside a project keeps a message
+  // the user has not read yet, while leaving a view drops an error that no longer has any context.
+  useEffect(() => { setError(''); }, [view.kind]);
   const [featureTitle, setFeatureTitle] = useState('');
   const [featureObjective, setFeatureObjective] = useState('');
   const [featureCriteria, setFeatureCriteria] = useState('');
@@ -1412,12 +1416,19 @@ export function App() {
           </div>
         </header>
 
+        {/* The banner used to live inside Dashboard, which made it the only place any error could
+            appear: a credentials failure surfaced on the home page, and a release failure was
+            invisible until the user navigated back to it. Rendering it in the shell puts every
+            message in the view that produced it. */}
+        {(daemonOnline === false || error) && (
+          <p className="error" role="alert">{daemonOnline === false ? t('errors.daemonUnavailable') : error}</p>
+        )}
+
         {view.kind === 'dashboard' && (
           <Dashboard
             projects={projects}
             selected={selected}
             loading={loading}
-            error={daemonOnline === false ? t('errors.daemonUnavailable') : error}
             onSelectProject={selectProject}
           />
         )}

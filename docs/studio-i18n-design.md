@@ -55,6 +55,17 @@ apps/studio/src/i18n/
 - 模板插值：`t('project.summary', { name })` 支持 `{var}` 占位。
 - 日期/时间：`formatDate` 已用 `Intl.DateTimeFormat(undefined, ...)`，locale 随当前语言。
 
+### 6.1 枚举驱动的 key 必须由类型保证覆盖（2026-08-26 补充）
+
+用 `t(\`前缀.${某个枚举值}\`)` 拼出来的 key 是 i18n 的高危区：字典漏一个成员，界面就把原始 key 显示给用户。此类缺陷已经发生两次（缺陷 20、27），且第一次的修法（改成显式 key 映射表）没有治住根。规则：
+
+- **枚举来源要收紧到真实联合类型**，不要停在 `string`。例：`Project.state` 由 `string` 改为 `@agent-dev/workflow` 的 `DeliveryState`。
+- **字典用 `satisfies Record<该联合类型, string>` 声明**，漏成员即编译失败。
+- **禁止用 `as KeyPath` 断言把拼出来的 key 塞进 `t()`**——那正是把缺失藏到运行时的手段。类型对了断言自然不需要。
+- **不要写"查不到就兜底"的代码**：`t()` 查不到时返回 key 本身，永远不是 `undefined`，所以 `t(k) ?? fallback` 是死代码，只会让人误以为有保护。
+
+判据：删掉字典里任一枚举成员，`npm run typecheck` 必须报错（已实测：会在字典、译文、调用点同时报三处）。
+
 ## 7. 实施步骤
 
 1. 建 i18n 基础设施（`i18n.tsx` + `locales/en.ts` + `locales/zh.ts`）。
@@ -71,6 +82,7 @@ apps/studio/src/i18n/
 - [ ] 技术术语（Blueprint / Preview / Quality Gate / Runtime / Provider 等）保持英文原文。
 - [ ] 数据/产物类文本（活动历史、gate 输出、runtime 输出、报告、commit 证据）未被误翻译。
 - [ ] 动态插值（`{var}`）在两种语言下均正常渲染。
+- [ ] 枚举拼接出来的 key 全部由 `satisfies Record<联合类型, string>` 覆盖；删掉任一成员会编译失败（见 6.1）。
 - [ ] 语言切换与主题切换并存互不干扰（同一侧边栏/顶部区域）。
 - [ ] `npm run typecheck` + `npm run build` 通过。
 

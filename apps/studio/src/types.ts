@@ -1,11 +1,12 @@
 import type { BaselinePlan, BlueprintAnswers, DryRunPlan, ProductBlueprint } from '@agent-dev/blueprint';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
+import type { DeliveryState } from '@agent-dev/workflow';
 
 export type Project = {
   id: string;
   name: string;
   productType: string;
-  state: string;
+  state: DeliveryState;
   createdAt: string;
   updatedAt: string;
 };
