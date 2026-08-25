@@ -1,5 +1,5 @@
 import { FolderKanban } from 'lucide-react';
-import { useI18n, type KeyPath } from '../i18n/i18n';
+import { useI18n } from '../i18n/i18n';
 import type { Project, ProjectDetail } from '../types';
 import { formatDate } from '../lib/utils';
 
@@ -7,17 +7,14 @@ export type DashboardProps = {
   projects: Project[];
   selected: ProjectDetail | null;
   loading: boolean;
-  error: string;
   onSelectProject: (projectId: string) => void;
 };
 
-export function Dashboard({ projects, selected, loading, error, onSelectProject }: DashboardProps) {
+export function Dashboard({ projects, selected, loading, onSelectProject }: DashboardProps) {
   const { t, locale } = useI18n();
 
   return (
     <section className="dashboard-view" aria-label={t('projects.title')}>
-      {error && <p className="error" role="alert">{error}</p>}
-
       <div className="dashboard-content">
         <div className="section-heading">
           <div>
@@ -48,7 +45,7 @@ export function Dashboard({ projects, selected, loading, error, onSelectProject 
               >
                 <strong>{project.name}</strong>
                 <span>{project.productType}</span>
-                <span className="state">{t(`projectState.${project.state}` as KeyPath) ?? project.state.replaceAll('_', ' ')}</span>
+                <span className="state">{t(`projectState.${project.state}`)}</span>
                 <time dateTime={project.updatedAt}>{formatDate(project.updatedAt, locale)}</time>
               </button>
             ))
