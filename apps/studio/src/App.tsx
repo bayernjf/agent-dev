@@ -76,6 +76,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [daemonOnline, setDaemonOnline] = useState<boolean | null>(null);
   const [featureTitle, setFeatureTitle] = useState('');
   const [featureObjective, setFeatureObjective] = useState('');
   const [featureCriteria, setFeatureCriteria] = useState('');
@@ -532,6 +533,19 @@ export function App() {
       setError(cause instanceof Error ? cause.message : t('errors.registerCustomAgent'));
     } finally {
       setSavingAgent(false);
+    }
+  };
+
+  // An unreachable daemon fails every loader at once, and they all write the same `error` state, so
+  // whichever settles last decides the message. Probing /api/health separately keeps the real cause
+  // from being overwritten by a narrower one, and gives the sidebar indicator a fact to report.
+  const checkDaemon = async () => {
+    try {
+      const response = await fetch('/api/health');
+      const payload = response.ok ? await response.json() as { status?: string } : null;
+      setDaemonOnline(payload?.status === 'ok');
+    } catch {
+      setDaemonOnline(false);
     }
   };
 
@@ -1090,6 +1104,7 @@ export function App() {
   };
 
   useEffect(() => {
+    void checkDaemon();
     void loadProjects();
     void loadAgents();
     void loadCredentials();
@@ -1344,7 +1359,7 @@ export function App() {
           <button className={`nav-item ${view.kind === 'agents' ? 'active' : ''}`} type="button" onClick={() => setView({ kind: 'agents' })}><CircleDot size={18} aria-hidden="true" />{t('nav.agents')}</button>
           <button className={`nav-item ${view.kind === 'activity' ? 'active' : ''}`} type="button" onClick={() => setView({ kind: 'activity' })}><Activity size={18} aria-hidden="true" />{t('nav.activity')}</button>
         </nav>
-        <div className="sidebar-note"><CircleDot size={14} aria-hidden="true" />{t('activity.localDaemonConnected')}</div>
+        <div className={`sidebar-note ${daemonOnline === false ? 'offline' : ''}`}><CircleDot size={14} aria-hidden="true" />{daemonOnline === null ? t('activity.localDaemonChecking') : daemonOnline ? t('activity.localDaemonConnected') : t('activity.localDaemonDisconnected')}</div>
       </aside>
 
       <section className="workspace" id="projects">
@@ -1392,7 +1407,7 @@ export function App() {
             projects={projects}
             selected={selected}
             loading={loading}
-            error={error}
+            error={daemonOnline === false ? t('errors.daemonUnavailable') : error}
             onSelectProject={selectProject}
           />
         )}

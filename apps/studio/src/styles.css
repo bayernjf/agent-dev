@@ -119,6 +119,10 @@ nav { display: grid; gap: 6px; margin-top: 46px; }
   font-size: 12px;
 }
 
+.sidebar-note.offline {
+  color: var(--status-fail);
+}
+
 .workspace { padding: 38px clamp(24px, 4vw, 64px); max-width: 1580px; width: 100%; margin: 0 auto; }
 
 .topbar {
