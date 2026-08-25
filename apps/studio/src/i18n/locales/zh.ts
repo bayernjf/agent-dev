@@ -320,6 +320,8 @@ export const zh = {
     eyebrow: '最近事件',
     panelTitle: '活动',
     localDaemonConnected: '本地 Daemon 已连接',
+    localDaemonChecking: '正在检查本地 Daemon…',
+    localDaemonDisconnected: '本地 Daemon 无法连接',
     localReady: '本地交付控制平面已就绪',
     now: '现在',
     blueprintRevised: 'Blueprint 已修订',
