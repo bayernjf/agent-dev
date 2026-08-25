@@ -219,6 +219,10 @@ describe('ProductBlueprint', () => {
     const workflow = path('.github/workflows/quality.yml')!.content;
     expect(workflow).toContain('dtolnay/rust-toolchain@stable');
     expect(workflow).toContain('libwebkit2gtk-4.1-dev');
+    // Without `workspaces` the cache action looks for a manifest at the repository root and caches
+    // nothing, so cargo check pays the full cold compile on every pull request.
+    expect(workflow).toContain('Swatinem/rust-cache@v2');
+    expect(workflow).toContain('workspaces: src-tauri');
 
     expect(path('.gitignore')!.content).toContain('src-tauri/target/');
   });
