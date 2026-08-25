@@ -1,3 +1,5 @@
+import type { DeliveryState } from '@agent-dev/workflow';
+
 export const en = {
   common: {
     appName: 'Agent-Dev Studio',
@@ -79,15 +81,26 @@ export const en = {
       release: 'Release',
     },
   },
+  // Typed against the delivery state machine, not written by hand: the dashboard renders
+  // `projectState.${project.state}`, and the eight states missing from here showed the user the raw
+  // key `projectState.NEEDS_INPUT` instead of a label. A new state now fails to compile without one.
   projectState: {
+    DRAFT: 'Draft',
+    NEEDS_INPUT: 'Needs input',
+    PLAN_READY: 'Plan ready',
+    PROVISIONING: 'Provisioning',
+    BASELINE_READY: 'Baseline ready',
+    IMPLEMENTING: 'Implementing',
+    VERIFYING: 'Verifying',
     LOCAL_ACCEPTED: 'Local accepted',
     PR_OPEN: 'PR open',
     PREVIEW_READY: 'Preview ready',
     AWAITING_APPROVAL: 'Awaiting approval',
     RELEASING: 'Releasing',
     DELIVERED: 'Delivered',
-    DRAFT: 'Draft',
-  },
+    PAUSED: 'Paused',
+    FAILED: 'Failed',
+  } satisfies Record<DeliveryState, string>,
   stepStatus: {
     pending: 'Pending',
     running: 'Running',
