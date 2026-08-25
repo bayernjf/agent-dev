@@ -413,6 +413,13 @@ describe('AgentDevStore', () => {
       await execFileAsync('git', ['add', '-A'], { cwd: run.workspacePath });
       await execFileAsync('git', ['-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-qm', 'chore: quality command'], { cwd: run.workspacePath });
 
+      // The generated workflow runs `npm ci`, so a branch without a committed lock file would fail
+      // CI before running a check. The real install step commits one; this stands in for it.
+      await expect(store.publishPullRequest(created.id, 1, publisher)).rejects.toThrow('needs a committed package-lock.json');
+      await writeFile(join(run.workspacePath, 'package-lock.json'), JSON.stringify({ name: 'publish-pr', lockfileVersion: 3, packages: {} }, null, 2) + '\n', 'utf8');
+      await execFileAsync('git', ['add', 'package-lock.json'], { cwd: run.workspacePath });
+      await execFileAsync('git', ['-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-qm', 'chore: record dependency installation'], { cwd: run.workspacePath });
+
       const evidence = await store.publishPullRequest(created.id, 1, publisher);
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({ branch: 'feature/agent-dev/revision-1', base: 'dev', title: 'Add receipt list' });
