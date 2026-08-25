@@ -94,13 +94,17 @@ Product Type
 >
 > 证据：七种全绿——`web-saas`、`landing-page`、`browser-extension`、`desktop-electron`、`mobile`、`api-tool` 于 linux/amd64（Node v22.23.2，`x86_64`）；`desktop-tauri` 于 linux/arm64（cargo 1.98.0，`cargo check` 冷编译 10m30s）。另单独用 `ubuntu:24.04` 容器验证 tauri 工作流的 apt 依赖清单在 `ubuntu-latest` 上仍然存在（`libwebkit2gtk-4.1-dev` / `libappindicator3-dev` / `librsvg2-dev` / `patchelf` 全部可安装——原先凭记忆以为 24.04 移除了 `libappindicator3-dev`，实测证伪）。**仍未做**：工作流本身没被 GitHub Actions 执行过，`actions/checkout@v5` / `actions/setup-node@v5` 的版本可用性、触发条件与权限仍未验证。
 >
-> 由此暴露两个尚未修的 CI 质量问题（非阻塞，待决策）：(1) 模板不产出 lockfile，工作流用 `npm install`，CI 的依赖版本是浮动的、不可复现；(2) tauri 工作流没有 Rust 缓存，实测冷编译 10m30s，每个 PR 都要重复付这个代价。
+> 由此暴露两个 CI 质量问题：(1) 模板不产出 lockfile，工作流用 `npm install`，CI 的依赖版本是浮动的、不可复现（已于本日修掉，见下方「锁定安装」）；(2) tauri 工作流没有 Rust 缓存，实测冷编译 10m30s，每个 PR 都要重复付这个代价。
 >
 > **实现进度（2026-08-25，生成的工作流进真实 GitHub Actions）**：此前文档里"生成的工作流未在真实 CI 执行过"这句话是**陈旧的**——web-saas 早在 2026-08-23 的 `bayernjf/receipt-test` PR #1 就已经绿过，而且它的基线推送还真实失败过两次，错误正是 `Dependencies lock file is not found`（即缺陷 8），当时的修复是把 `setup-node` 的 cache 探测关掉（`cache: ''`）。其余六类从未进过 CI，现已补齐：把六份生成物逐个推入 `receipt-test` 的 `verify/generated-ci-*` 分支并开 PR（仅验证，不合并）。
 >
 > 证据：PR #2–#7 的 `quality` 全绿——landing-page 13s、browser-extension 23s、api-tool 42s、desktop-electron 46s、mobile 1m8s、desktop-tauri 3m45s（GitHub 的 x64 runner 比本地 arm64 容器的 10m30s 快得多）。至此 `actions/checkout@v5` / `actions/setup-node@v5` 的可用性、`pull_request` 触发与权限全部得到真实验证，七类生成物的工作流无一例外。
 >
 > 由此确认 lockfile 那条不是理论风险而是**已经真实咬过一次的缺陷**：`cache: ''` 压住的是症状（缓存探测要 lockfile），不是根因（模板不产出 lockfile）。方向定为交付时真跑一次 `npm install` 产出并提交 lockfile、工作流改 `npm ci`，缓存也随之可以开回来。
+
+> **实现进度（2026-08-25，缺陷 8 从根因修掉：锁定安装）**：交付流程本来就有一步真跑 `npm install` 并把 `package-lock.json` 提交进去（`installDependencies`），但没有任何环节要求它先跑过，工作流也没利用它——所以 `cache: ''` 一直挂在那里。这次把两头接上：七类模板的 `quality.yml` 收敛成同一个 `qualityWorkflow()`（此前是七份逐字重复的 YAML，每改一次就是六次漏改机会），`npm install` → `npm ci`、`cache: ''` → `cache: npm`；`publishPullRequest` 加一条前置断言——`package-lock.json` 未被提交就拒绝推分支，理由写在错误信息里。这不是兜底而是不变量：走到开 PR 这一步的交付必然已经跑过 quality gate，也就必然装过依赖。
+>
+> 证据：`receipt-test` PR #8（api-tool）与 #9（landing-page）在真实 GitHub Actions 上全绿，日志确认 `cache: npm` 真的按 lockfile 哈希建了缓存（`Cache saved with the key: node-cache-Linux-x64-npm-4a59af…`）、`npm ci` 真的装了 245 个包，而不是被跳过。存储层测试新增「未提交 lockfile 时拒绝开 PR」的断言。**未做**：tauri 工作流仍无 Rust 缓存（实测本地冷编译 10m30s / GitHub runner 3m45s）。
 
 ## 5. 选择规则
 
