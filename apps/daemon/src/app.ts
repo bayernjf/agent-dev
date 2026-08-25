@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryRunPlan, getBlueprintDecisions } from '@agent-dev/blueprint';
+import { baselineProvidersFor, blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryRunPlan, getBlueprintDecisions, type ProductBlueprint } from '@agent-dev/blueprint';
 import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
@@ -700,6 +700,16 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   // --- Preview Deployment Composer ---
 
+  // The composer runs a fixed Vercel-then-Cloudflare pipeline over `apps/api` and `apps/web`. A
+  // product type that deploys to neither has nothing for it to do, and letting it run would try to
+  // deploy directories the scaffold never generates — after it has already recorded a Vercel project
+  // as possibly created, which would then advertise cleanup for a project that never existed.
+  const noHostedDeploymentReason = (blueprint: ProductBlueprint) => {
+    const providers = baselineProvidersFor(blueprint.spec.product.type);
+    if (providers.includes('cloudflare') || providers.includes('vercel')) return null;
+    return `The ${blueprint.spec.product.type} product type has no hosted deployment target, so there is no preview or production URL to deploy. Distribution is manual — see generated/DISTRIBUTION.md in the workspace.`;
+  };
+
   const previewSchema = z.object({
     confirmation: z.literal('DEPLOY_PREVIEW'),
     previewBranch: z.string().trim().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Branch name must be lowercase alphanumeric with hyphens.').optional(),
@@ -712,6 +722,8 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!parsed.success) return context.json({ error: 'Preview deployment requires confirmation DEPLOY_PREVIEW and a valid previewBranch.' }, 400);
     const project = store.getProject(projectId);
     if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const unsupported = noHostedDeploymentReason(project.blueprint);
+    if (unsupported) return context.json({ error: unsupported }, 409);
     const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
     if (!run || run.status !== 'completed') return context.json({ error: 'Complete the baseline Apply before deploying a preview.' }, 409);
     const workspace = await verifyWorkspaceArtifacts(run.workspacePath, project.blueprint);
@@ -740,6 +752,8 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.get('/api/projects/:projectId/preview/plan', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const unsupported = noHostedDeploymentReason(project.blueprint);
+    if (unsupported) return context.json({ error: unsupported }, 409);
     const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
     if (!run || run.status !== 'completed') return context.json({ error: 'Complete the baseline Apply before planning a preview.' }, 409);
     const workspace = await verifyWorkspaceArtifacts(run.workspacePath, project.blueprint);
@@ -761,6 +775,8 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!parsed.success) return context.json({ error: 'Preview cleanup requires confirmation CLEANUP_PREVIEW.' }, 400);
     const project = store.getProject(projectId);
     if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const unsupported = noHostedDeploymentReason(project.blueprint);
+    if (unsupported) return context.json({ error: unsupported }, 409);
     const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
     if (!run) return context.json({ error: 'No workspace found.' }, 404);
 
@@ -784,6 +800,8 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   const resolveReleaseContext = async (projectId: string) => {
     const project = store.getProject(projectId);
     if (!project) return { error: 'Project not found.' as const, statusCode: 404 as const };
+    const unsupported = noHostedDeploymentReason(project.blueprint);
+    if (unsupported) return { error: unsupported, statusCode: 409 as const };
     const revision = project.blueprint.metadata.revision;
     const run = store.getLatestApplyRun(projectId, revision);
     if (!run || run.status !== 'completed') return { error: 'Complete the baseline Apply before releasing to production.' as const, statusCode: 409 as const };
