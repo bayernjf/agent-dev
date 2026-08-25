@@ -4,10 +4,13 @@ export const APPROVER_STORAGE_KEY = 'agent-dev.approver';
 
 export const defaultAnswers: BlueprintAnswers = {
   mode: 'beginner',
+  productType: 'web-saas',
+  desktopShell: 'tauri',
   productIntent: '',
   dataSensitivity: 'standard',
   previewStrategy: 'per-pull-request',
   analyticsProviders: [],
+  runtimeProvider: 'local-codex',
   customInstructions: '',
   githubOwner: '',
   vercelTeam: '',
@@ -28,9 +31,12 @@ export function answersFromBlueprint(blueprint: ProductBlueprint): BlueprintAnsw
   return {
     mode: blueprint.metadata.mode,
     productIntent: blueprint.metadata.productIntent,
+    productType: blueprint.spec.product.type,
+    desktopShell: blueprint.spec.product.desktopShell,
     dataSensitivity: blueprint.spec.product.dataSensitivity,
     previewStrategy: blueprint.spec.deployment.previewStrategy,
     analyticsProviders: blueprint.spec.analytics.providers,
+    runtimeProvider: blueprint.spec.runtime.provider,
     customInstructions: blueprint.metadata.customInstructions,
     githubOwner: blueprint.spec.sourceControl.owner,
     vercelTeam: blueprint.spec.deployment.api.team,
