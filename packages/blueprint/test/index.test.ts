@@ -10,6 +10,22 @@ describe('ProductBlueprint', () => {
     expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
   });
 
+  // Fields added to the persisted spec without a default made every blueprint written before them
+  // fail validation inside getProject, which turned into a 500 on every route that loads the project.
+  // 20 of 23 revisions in the local database were unreadable this way.
+  it('still reads a blueprint persisted before the newer spec fields existed', () => {
+    const current = createDefaultBlueprint('Receipt Desk') as unknown as Record<string, Record<string, unknown>>;
+    const legacy = structuredClone(current);
+    delete legacy.metadata.mode;
+    delete legacy.metadata.productIntent;
+    delete legacy.metadata.customInstructions;
+    delete (legacy.spec.product as Record<string, unknown>).desktopShell;
+
+    const parsed = productBlueprintSchema.parse(legacy);
+    expect(parsed.metadata).toMatchObject({ mode: 'beginner', productIntent: '', customInstructions: '' });
+    expect(parsed.spec.product.desktopShell).toBe('tauri');
+  });
+
   it('defaults the runtime to local-codex for the Golden Path', () => {
     const blueprint = createDefaultBlueprint('Receipt Desk');
     expect(blueprint.spec.runtime.provider).toBe('local-codex');
