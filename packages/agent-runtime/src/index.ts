@@ -79,9 +79,13 @@ type AgentAdapter = {
 };
 
 const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
-  // Codex is the only adapter with a locally exercised execution contract.
+  // Adapters with status 'verified' have passed a locally exercised execution contract.
+  // Candidate adapters are present but not yet verified end-to-end.
   codex: { status: 'verified', buildCommand: (prompt, cwd) => ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', cwd, prompt] },
-  'claude-code': { status: 'candidate', buildCommand: (prompt, cwd) => ['claude', '-p', prompt, '--allowedTools', 'Read,Write,Edit,Bash', '--cwd', cwd] },
+  // Claude Code has no `--cwd` flag; the working directory is set by the spawn cwd option.
+  // `--dangerously-skip-permissions` avoids interactive approval prompts in the isolated task workspace.
+  // `--output-format json` gives structured output parseable by the same runner as Codex.
+  'claude-code': { status: 'candidate', buildCommand: (prompt, cwd) => ['claude', '-p', prompt, '--allowedTools', 'Read,Write,Edit,Bash', '--dangerously-skip-permissions', '--output-format', 'json'] },
   aider: { status: 'candidate', buildCommand: (prompt, cwd) => ['aider', '--message', prompt, '--yes', '--cwd', cwd] },
   // OpenCode 2.0 (`lildax`) dropped the v1 `-p --print` interface, so tasks run through the
   // session-based driver script. The default model is the free `nemotron-3-ultra-free` from the
@@ -103,6 +107,11 @@ const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
   // Execution contract exercised locally: `codebuddy -p ... "READY"` returned the response and
   // exited 0, and the child is captured through the same stdout/stderr runner as Codex.
   codebuddy: { status: 'verified', buildCommand: (prompt, cwd) => ['codebuddy', '-p', '--permission-mode', 'bypassPermissions', '--no-session-persistence', prompt] },
+  // Hermes one-shot mode: `-z PROMPT` prints only the final response to stdout.
+  // `--in DIR` sets the working directory, `--yolo` bypasses dangerous command approvals.
+  // Execution contract exercised locally: `hermes -z "Create hello.txt" --in /tmp --yolo`
+  // created the file with correct content and exited 0.
+  hermes: { status: 'verified', buildCommand: (prompt, cwd) => ['hermes', '-z', prompt, '--in', cwd, '--yolo'] },
 };
 
 export function buildAgentExecutionPlan(task: ApprovedTask, workspacePath: string, agentId: string, options: { execute?: boolean } = {}): CodexExecutionPlan {
