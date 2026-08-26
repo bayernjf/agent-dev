@@ -68,6 +68,11 @@ v0.1 验证的是「作者本人能跑通整条流水线」。v0.2 验证的是*
 7. **P2-1 GA4 / Clarity 自动接入 + 隐私 Gate**
 8. **P2-2 自动更新机制**（P0-2 安装包之上的更新通道）
 9. **P2-3 Agent Catalog 外部用户引导文案**
+10. **P2-4 无托管部署类型的交付状态机闭环**（2026-08-27 项目 4「MCP Word Tools」验证发现）
+    - 问题：api-tool / landing-page 等无托管部署类型的项目，状态机无法通过正常 API 推进到 DELIVERED。`preview/deploy` 和 `release/request` / `release/approve` 都会因 `noHostedDeploymentReason` 返回 409。
+    - 当前 workaround：直接调用 store 的 `advanceDelivery` 方法手动发送 `REQUEST_RELEASE` → `APPROVE_RELEASE` → `RELEASE_COMPLETE` 事件。
+    - 建议方案：为无部署类型添加 "manual distribution complete" API（确认 DISTRIBUTION.md 中的人工分发步骤已完成），或在状态机中检测无部署类型并自动跳过 preview/release 步骤直接到 DELIVERED。
+    - 依赖：无。
 
 ## 4. 里程碑与节奏（建议）
 
