@@ -839,6 +839,26 @@ export class AgentDevStore {
     return approved;
   }
 
+  async updateFeatureTaskPipeline(projectId: string, blueprintRevision: number, steps: { id: string; name: string; profileId: string; prompt: string }[]): Promise<FeatureTask> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task) throw new Error('Feature task not found.');
+    if (task.status !== 'draft') throw new Error('Pipeline can only be edited while the task is in draft status.');
+    const pipeline = task.pipeline ?? { steps: [], currentStepIndex: 0, results: [], status: 'idle' as const };
+    const updated: FeatureTask = {
+      ...task,
+      pipeline: {
+        ...pipeline,
+        steps: steps.map((step, index) => ({ ...step, id: step.id || `step-${index + 1}` })),
+        status: 'idle' as const,
+        currentStepIndex: 0,
+        results: [],
+      },
+    };
+    await writeFile(join(task.workspacePath, 'feature-task.json'), JSON.stringify(updated, null, 2) + '\n', 'utf8');
+    await writeFile(join(task.workspacePath, 'FEATURE_TASK.md'), this.buildFeatureTask(updated), 'utf8');
+    return updated;
+  }
+
   async prepareRuntimeRun(projectId: string, blueprintRevision: number, agentId = 'codex'): Promise<RuntimeRun> {
     const task = await this.getFeatureTask(projectId, blueprintRevision);
     if (!task || task.status !== 'approved') throw new Error('Approve a Feature Task before preparing a Runtime run.');

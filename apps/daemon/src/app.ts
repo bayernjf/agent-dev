@@ -969,6 +969,27 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
+  app.put('/api/projects/:projectId/pipeline', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({
+      steps: z.array(z.object({
+        id: z.string().min(1),
+        name: z.string().min(1).max(120),
+        profileId: z.string().min(1),
+        prompt: z.string().max(4000).default(''),
+      })).min(1),
+    }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Pipeline steps are required (at least one step with name and profileId).' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const task = await store.updateFeatureTaskPipeline(projectId, project.blueprint.metadata.revision, parsed.data.steps);
+      return context.json({ task });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to update the pipeline.' }, 409);
+    }
+  });
+
   app.post('/api/projects/:projectId/pipeline/resume', async context => {
     const projectId = context.req.param('projectId');
     const parsed = z.object({ blueprintRevision: z.number().int().positive() }).safeParse(await context.req.json().catch(() => null));
