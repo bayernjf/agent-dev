@@ -20,6 +20,19 @@ export {
   validateProfileEnv,
   filterSafeEnv,
 } from './profiles.js';
+export {
+  type PipelineStep,
+  type PipelineStepStatus,
+  type PipelineStepResult,
+  type FeatureTaskPipeline,
+  pipelineStepSchema,
+  featureTaskPipelineSchema,
+  createPipelineStepSchema,
+  resolvePipelinePrompt,
+  getNextPipelineStep,
+  isPipelineComplete,
+  isPipelineBlocked,
+} from './pipeline.js';
 import type { AgentProfile } from './profiles.js';
 
 const SAFE_ENV_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'TMP', 'TEMP', 'NO_COLOR'];
