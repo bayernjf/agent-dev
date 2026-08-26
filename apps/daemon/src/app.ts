@@ -200,6 +200,54 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
+  // Secret Backend management
+  app.get('/api/secret-backend/status', async context => {
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const status = await backend.isAvailable();
+      return context.json({ type: backend.type, ...status });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Secret backend status check failed' }, 500);
+    }
+  });
+
+  app.get('/api/secret-backend/keys', async context => {
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const keys = await backend.listKeys();
+      return context.json({ type: backend.type, keys });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to list secret keys' }, 500);
+    }
+  });
+
+  app.post('/api/secret-backend/set', async context => {
+    const parsed = z.object({ key: z.string().min(1).max(100), value: z.string().min(1) }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Secret key and value are required.' }, 400);
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      await backend.set(parsed.data.key, parsed.data.value);
+      return context.json({ ok: true, key: parsed.data.key });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to set secret' }, 500);
+    }
+  });
+
+  app.delete('/api/secret-backend/:key', async context => {
+    const key = context.req.param('key');
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      await backend.delete(key);
+      return context.json({ ok: true, key });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to delete secret' }, 500);
+    }
+  });
+
   app.get('/api/connectors/preflight', async context =>
     context.json(await (dependencies.runPreflight ?? runConnectorPreflight)()),
   );
