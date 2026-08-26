@@ -13,6 +13,7 @@ import { buildAgentExecutionPlan, executeCodexPlan, isAgentExecutable, type Code
 import { createNeedsInputRun, restoreDeliveryActor, type DeliveryEvent, type DeliverySnapshot, type DeliveryState } from '@agent-dev/workflow';
 import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects, releaseRuns } from './schema.js';
 import { migrations } from './migrations.js';
+import { ProfileStore, type CreateProfileInput, type UpdateProfileInput, type ProfileValidationResult } from './profiles-store.js';
 
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
@@ -238,12 +239,14 @@ export type AcceptanceRecord = {
 
 export class AgentDevStore {
   private readonly orm: ReturnType<typeof createOrm>;
+  readonly profiles: ProfileStore;
 
   private constructor(
     private readonly sqlite: Database,
     private readonly databasePath: string,
   ) {
     this.orm = createOrm(sqlite);
+    this.profiles = new ProfileStore(dirname(databasePath));
   }
 
   /** Where the platform keeps its own state and the workspaces it creates. */
@@ -786,8 +789,15 @@ export class AgentDevStore {
     const now = new Date().toISOString();
     // Blueprint runtime providers use a `local-` namespace prefix (e.g. `local-codebuddy`), but the
     // adapter registry keys are bare (e.g. `codebuddy`). Strip the prefix before looking up the adapter.
-    const adapterId = agentId.startsWith('local-') ? agentId.slice(6) : agentId;
-    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId, status: 'planned', plan: isAgentExecutable(adapterId) ? buildAgentExecutionPlan(task, task.workspacePath, adapterId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex'), attempts: 0, history: [], createdAt: now, updatedAt: now };
+    const rawAdapterId = agentId.startsWith('local-') ? agentId.slice(6) : agentId;
+    // Check if the agentId refers to an Agent Profile. If so, resolve the base agent and pass the profile.
+    const profile = await this.profiles.getProfile(rawAdapterId);
+    const adapterId = profile ? profile.baseAgentId : rawAdapterId;
+    const executable = isAgentExecutable(adapterId);
+    const plan = executable
+      ? buildAgentExecutionPlan(task, task.workspacePath, adapterId, { profile: profile ?? undefined })
+      : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
+    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId, status: 'planned', plan, attempts: 0, history: [], createdAt: now, updatedAt: now };
     await writeFile(join(task.workspacePath, 'runtime-run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8');
     await writeFile(join(task.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(run, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
     await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: task.workspacePath });
@@ -819,8 +829,12 @@ export class AgentDevStore {
 
   private async executeRuntimeAttempt(task: FeatureTask, existing: RuntimeRun, runner?: CodexProcessRunner): Promise<RuntimeRun> {
     const attemptNumber = existing.attempts + 1;
-    const existingAdapterId = existing.agentId?.startsWith('local-') ? existing.agentId.slice(6) : existing.agentId;
-    const plan = buildAgentExecutionPlan(task, task.workspacePath, existingAdapterId && isAgentExecutable(existingAdapterId) ? existingAdapterId : 'codex', { execute: true });
+    const rawAdapterId = existing.agentId?.startsWith('local-') ? existing.agentId.slice(6) : existing.agentId;
+    // Resolve profile if the agentId refers to one.
+    const profile = rawAdapterId ? await this.profiles.getProfile(rawAdapterId) : null;
+    const adapterId = profile ? profile.baseAgentId : rawAdapterId;
+    const executable = adapterId && isAgentExecutable(adapterId);
+    const plan = buildAgentExecutionPlan(task, task.workspacePath, executable ? adapterId : 'codex', { execute: true, profile: profile ?? undefined });
     const startedAt = new Date().toISOString();
     const attempt: RuntimeAttempt = { attempt: attemptNumber, status: 'running', plan, startedAt };
 
@@ -1327,3 +1341,5 @@ export class AgentDevStore {
     await writeFile(this.databasePath, this.sqlite.export());
   }
 }
+
+export { ProfileStore, type CreateProfileInput, type UpdateProfileInput, type ProfileValidationResult };
