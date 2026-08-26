@@ -6,11 +6,12 @@ import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
 import { baselineProvidersFor, getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
+import { FailureDisplay } from './components/FailureDisplay';
 import type {
   Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyStep, ApplyRun, DependencyReadiness,
   QualityGateResult, DependencyInstallResult, FeatureTask, RuntimeAttempt, RuntimeRun, GitEvidence,
   PrEvidence, PreviewEvidence, AcceptanceRecord, ProviderPlan, ProviderVerification, AgentDescriptor,
-  AgentCapabilityProbe, CredentialMeta, ProjectResources, CredentialVerifyResult, PreviewStep,
+  AgentCapabilityProbe, AgentProfile, CredentialMeta, ProjectResources, CredentialVerifyResult, PreviewStep,
   PreviewDeploymentResult, WorkspaceVerification, ReleaseStep, ReleaseRun, ReleaseEvidence,
   ReleaseSource, ReleasePlan, View,
 } from './types';
@@ -98,6 +99,27 @@ export function App() {
   const [customAgentName, setCustomAgentName] = useState('');
   const [customAgentCommand, setCustomAgentCommand] = useState('');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    description: '',
+    baseAgentId: '',
+    icon: '',
+    systemPrompt: '',
+    model: '',
+    temperature: '',
+    allowedTools: '',
+    envKey: '',
+    envValue: '',
+    envPairs: [] as { key: string; value: string }[],
+  });
+  const [testingProfileId, setTestingProfileId] = useState<string | null>(null);
+  const [testPrompt, setTestPrompt] = useState('');
+  const [testResult, setTestResult] = useState<{ output: string; exitCode: number | null; status: 'idle' | 'running' | 'done' | 'error' }>({ output: '', exitCode: null, status: 'idle' });
+  const [importError, setImportError] = useState('');
   const [agentProbes, setAgentProbes] = useState<Record<string, AgentCapabilityProbe>>({});
   const [probingAgentId, setProbingAgentId] = useState<string | null>(null);
   const [credentialMeta, setCredentialMeta] = useState<CredentialMeta | null>(null);
@@ -124,6 +146,14 @@ export function App() {
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [recoveringWorkspace, setRecoveringWorkspace] = useState(false);
   const [deployingPreview, setDeployingPreview] = useState(false);
+  const [blueprintDiff, setBlueprintDiff] = useState<{ added: string[]; removed: string[]; modified: string[] } | null>(null);
+  const [loadingDiff, setLoadingDiff] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
+  const [importingBlueprint, setImportingBlueprint] = useState(false);
+  const [blueprintImportResult, setBlueprintImportResult] = useState<string | null>(null);
+  const [editingPipeline, setEditingPipeline] = useState(false);
+  const [pipelineDraft, setPipelineDraft] = useState<{ id: string; name: string; profileId: string; prompt: string }[]>([]);
+  const [savingPipeline, setSavingPipeline] = useState(false);
 
   const decisions = useMemo(() => selected ? getBlueprintDecisions(selected.blueprint) : [], [selected]);
   const selectedArtifact = useMemo(
@@ -494,6 +524,215 @@ export function App() {
       setError(cause instanceof Error ? cause.message : t('errors.loadAgentCatalog'));
     } finally {
       setLoadingAgents(false);
+    }
+  };
+
+  const loadProfiles = async () => {
+    setLoadingProfiles(true);
+    try {
+      const response = await fetch('/api/runtime/profiles');
+      if (!response.ok) throw new Error('Failed to load agent profiles.');
+      const payload = await response.json() as { profiles: AgentProfile[] };
+      setProfiles(payload.profiles);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to load agent profiles.');
+    } finally {
+      setLoadingProfiles(false);
+    }
+  };
+
+  const resetProfileForm = () => {
+    setProfileForm({
+      name: '', description: '', baseAgentId: '', icon: '',
+      systemPrompt: '', model: '', temperature: '', allowedTools: '',
+      envKey: '', envValue: '', envPairs: [],
+    });
+    setEditingProfileId(null);
+  };
+
+  const buildProfileOverrides = () => {
+    const overrides: AgentProfile['overrides'] = {};
+    if (profileForm.systemPrompt.trim()) overrides.systemPrompt = profileForm.systemPrompt.trim();
+    if (profileForm.model.trim()) overrides.model = profileForm.model.trim();
+    if (profileForm.temperature.trim()) {
+      const t = parseFloat(profileForm.temperature);
+      if (!isNaN(t)) overrides.temperature = t;
+    }
+    if (profileForm.allowedTools.trim()) {
+      overrides.allowedTools = profileForm.allowedTools.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (profileForm.envPairs.length > 0) {
+      const env: Record<string, string> = {};
+      for (const pair of profileForm.envPairs) {
+        if (pair.key.trim()) env[pair.key.trim()] = pair.value;
+      }
+      if (Object.keys(env).length > 0) overrides.env = env;
+    }
+    return overrides;
+  };
+
+  const createProfile = async () => {
+    if (!profileForm.name.trim() || !profileForm.baseAgentId) return;
+    setSavingProfile(true);
+    try {
+      const response = await fetch('/api/runtime/profiles', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: profileForm.name.trim(),
+          description: profileForm.description.trim() || undefined,
+          baseAgentId: profileForm.baseAgentId,
+          icon: profileForm.icon.trim() || undefined,
+          overrides: buildProfileOverrides(),
+        }),
+      });
+      const payload = await response.json() as { profile?: AgentProfile; error?: string; details?: string[] };
+      if (!response.ok || !payload.profile) throw new Error(payload.error ?? payload.details?.join('; ') ?? 'Failed to create profile.');
+      setProfiles(current => [...current, payload.profile!]);
+      resetProfileForm();
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to create profile.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const updateProfile = async () => {
+    if (!editingProfileId || !profileForm.name.trim()) return;
+    setSavingProfile(true);
+    try {
+      const response = await fetch(`/api/runtime/profiles/${encodeURIComponent(editingProfileId)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: profileForm.name.trim(),
+          description: profileForm.description.trim(),
+          icon: profileForm.icon.trim() || undefined,
+          overrides: buildProfileOverrides(),
+        }),
+      });
+      const payload = await response.json() as { profile?: AgentProfile; error?: string; details?: string[] };
+      if (!response.ok || !payload.profile) throw new Error(payload.error ?? payload.details?.join('; ') ?? 'Failed to update profile.');
+      setProfiles(current => current.map(p => p.id === editingProfileId ? payload.profile! : p));
+      resetProfileForm();
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to update profile.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const openEditProfile = (profile: AgentProfile) => {
+    setEditingProfileId(profile.id);
+    setProfileForm({
+      name: profile.name,
+      description: profile.description ?? '',
+      baseAgentId: profile.baseAgentId,
+      icon: profile.icon ?? '',
+      systemPrompt: profile.overrides.systemPrompt ?? '',
+      model: profile.overrides.model ?? '',
+      temperature: profile.overrides.temperature?.toString() ?? '',
+      allowedTools: profile.overrides.allowedTools?.join(', ') ?? '',
+      envKey: '',
+      envValue: '',
+      envPairs: Object.entries(profile.overrides.env ?? {}).map(([key, value]) => ({ key, value })),
+    });
+  };
+
+  const deleteProfile = async (profileId: string) => {
+    if (!window.confirm('Delete this agent profile?')) return;
+    try {
+      const response = await fetch(`/api/runtime/profiles/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Failed to delete profile.');
+      setProfiles(current => current.filter(p => p.id !== profileId));
+      if (selectedAgentId === profileId) setSelectedAgentId(null);
+      if (editingProfileId === profileId) resetProfileForm();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to delete profile.');
+    }
+  };
+
+  const exportProfile = (profile: AgentProfile) => {
+    const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `profile-${profile.id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAllProfiles = () => {
+    if (profiles.length === 0) return;
+    const blob = new Blob([JSON.stringify(profiles, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `agent-profiles-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importProfiles = async (file: File) => {
+    setImportError('');
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const toImport: AgentProfile[] = Array.isArray(data) ? data : [data];
+      let imported = 0;
+      for (const p of toImport) {
+        if (!p.name || !p.baseAgentId) continue;
+        // Skip if profile with same id already exists
+        if (profiles.some(existing => existing.id === p.id)) continue;
+        const response = await fetch('/api/runtime/profiles', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: p.name,
+            description: p.description,
+            baseAgentId: p.baseAgentId,
+            icon: p.icon,
+            overrides: p.overrides ?? {},
+          }),
+        });
+        if (response.ok) {
+          const payload = await response.json() as { profile?: AgentProfile };
+          if (payload.profile) {
+            setProfiles(current => [...current, payload.profile!]);
+            imported++;
+          }
+        }
+      }
+      if (imported === 0) setImportError('No new profiles were imported (they may already exist or be invalid).');
+    } catch (cause) {
+      setImportError(cause instanceof Error ? cause.message : 'Failed to import profiles.');
+    }
+  };
+
+  const testProfile = async (profile: AgentProfile) => {
+    if (!testPrompt.trim()) return;
+    setTestingProfileId(profile.id);
+    setTestResult({ output: '', exitCode: null, status: 'running' });
+    try {
+      // Use the profile's base agent to execute a simple test in a temp workspace
+      const response = await fetch(`/api/runtime/probe/${encodeURIComponent(profile.baseAgentId)}`);
+      const payload = await response.json() as { probe?: Record<string, unknown>; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? 'Failed to test profile.');
+      setTestResult({
+        output: JSON.stringify(payload.probe, null, 2),
+        exitCode: 0,
+        status: 'done',
+      });
+    } catch (cause) {
+      setTestResult({
+        output: cause instanceof Error ? cause.message : 'Test failed.',
+        exitCode: null,
+        status: 'error',
+      });
+    } finally {
+      setTestingProfileId(null);
     }
   };
 
@@ -945,6 +1184,69 @@ export function App() {
     }
   };
 
+  const executePipeline = async () => {
+    if (!selected || !featureTask || !featureTask.pipeline || featureTask.status !== 'approved' || savingFeatureTask) return;
+    if (!window.confirm('Execute the pipeline? This will run all steps sequentially.')) return;
+    setSavingFeatureTask(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/pipeline/execute`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ blueprintRevision: featureTask.blueprintRevision }),
+      });
+      const payload = await response.json() as { task?: FeatureTask; error?: string };
+      if (!response.ok || !payload.task) throw new Error(payload.error ?? 'Unable to execute pipeline.');
+      setFeatureTask(payload.task);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to execute pipeline.');
+    } finally {
+      setSavingFeatureTask(false);
+    }
+  };
+
+  const startEditPipeline = () => {
+    if (!featureTask?.pipeline) {
+      setPipelineDraft([{ id: crypto.randomUUID(), name: 'Step 1', profileId: '', prompt: '' }]);
+    } else {
+      setPipelineDraft(featureTask.pipeline.steps.map(s => ({ id: s.id, name: s.name, profileId: s.profileId, prompt: s.prompt })));
+    }
+    setEditingPipeline(true);
+  };
+
+  const addPipelineStep = () => {
+    setPipelineDraft(draft => [...draft, { id: crypto.randomUUID(), name: `Step ${draft.length + 1}`, profileId: '', prompt: '' }]);
+  };
+
+  const removePipelineStep = (id: string) => {
+    setPipelineDraft(draft => draft.filter(s => s.id !== id));
+  };
+
+  const updatePipelineStep = (id: string, field: 'name' | 'profileId' | 'prompt', value: string) => {
+    setPipelineDraft(draft => draft.map(s => s.id === id ? { ...s, [field]: value } : s));
+  };
+
+  const savePipeline = async () => {
+    if (!selected || !featureTask) return;
+    if (pipelineDraft.length === 0) { setError('Pipeline must have at least one step.'); return; }
+    if (pipelineDraft.some(s => !s.name.trim() || !s.profileId)) { setError('All steps must have a name and selected profile.'); return; }
+    setSavingPipeline(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/pipeline`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ steps: pipelineDraft.map(s => ({ id: s.id, name: s.name, profileId: s.profileId, prompt: s.prompt })) }),
+      });
+      const payload = await response.json() as { task?: FeatureTask; error?: string };
+      if (!response.ok || !payload.task) throw new Error(payload.error ?? 'Unable to save pipeline.');
+      setFeatureTask(payload.task);
+      setEditingPipeline(false);
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to save pipeline.');
+    } finally {
+      setSavingPipeline(false);
+    }
+  };
+
   const prepareRuntime = async () => {
     if (!selected || !featureTask || featureTask.status !== 'approved' || preparingRuntime) return;
     if (!window.confirm(t('confirmations.prepareRuntimeDryRun'))) return;
@@ -1111,6 +1413,7 @@ export function App() {
     void checkDaemon();
     void loadProjects();
     void loadAgents();
+    void loadProfiles();
     void loadCredentials();
     const source = new EventSource('/events');
     const onEvent = (event: Event) => {
@@ -1181,6 +1484,71 @@ export function App() {
       setError(cause instanceof Error ? cause.message : t('errors.saveBlueprint'));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function exportBlueprint() {
+    if (!selected) return;
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/blueprint/export`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? 'Export failed');
+      // Download as JSON file
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selected.name.replace(/\s+/g, '-').toLowerCase()}-blueprint-r${selected.blueprint.metadata.revision}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Export failed');
+    }
+  }
+
+  async function importBlueprint(file: File) {
+    if (!selected) return;
+    setImportingBlueprint(true);
+    setBlueprintImportResult(null);
+    try {
+      const text = await file.text();
+      const blueprint = JSON.parse(text);
+      const response = await fetch(`/api/projects/${selected.id}/blueprint/import`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ blueprint }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? 'Import failed');
+      setBlueprintImportResult(`Imported as revision ${payload.revision ?? 'new'}. Reloading...`);
+      await loadProjects();
+      if (selected) {
+        await selectProject(selected.id);
+      }
+      setTimeout(() => setBlueprintImportResult(null), 5000);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Import failed');
+    } finally {
+      setImportingBlueprint(false);
+    }
+  }
+
+  async function loadBlueprintDiff() {
+    if (!selected) return;
+    setLoadingDiff(true);
+    setShowDiff(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/blueprint/diff`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? 'Diff failed');
+      setBlueprintDiff({ added: payload.added ?? [], removed: payload.removed ?? [], modified: payload.modified ?? [] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Diff failed');
+      setBlueprintDiff(null);
+    } finally {
+      setLoadingDiff(false);
     }
   }
 
@@ -1336,7 +1704,7 @@ export function App() {
 
   const agentsPanel = (
     <section className="agent-catalog-panel" id="agents">
-      <div className="panel-title"><div><p className="eyebrow">{t('agents.eyebrow')}</p><h2>{t('agents.title')}</h2></div><button className="icon-button" type="button" onClick={() => void loadAgents()} disabled={loadingAgents} aria-label={t('agents.refresh')} title={t('agents.refresh')}><RefreshCw size={17} /></button></div>
+      <div className="panel-title"><div><p className="eyebrow">{t('agents.eyebrow')}</p><h2>{t('agents.title')}</h2></div><button className="icon-button" type="button" onClick={() => { void loadAgents(); void loadProfiles(); }} disabled={loadingAgents || loadingProfiles} aria-label={t('agents.refresh')} title={t('agents.refresh')}><RefreshCw size={17} /></button></div>
       <p className="form-note">{t('agents.formNote')}</p>
       {loadingAgents && agents.length === 0 ? <p className="empty-state">{t('agents.detecting')}</p> : agents.length === 0 ? <p className="empty-state">{t('agents.notFound')}</p> : <div className="agent-list">{agents.map(agent => (
         <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => void probeAgent(agent)} disabled={!agent.detected || probingAgentId !== null}>
@@ -1344,6 +1712,145 @@ export function App() {
           <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? t('agents.detected') : t('agents.notDetected')}</span>
         </button>
       ))}</div>}
+
+      {/* Agent Profiles */}
+      {profiles.length > 0 && (
+        <div className="agent-profiles-section">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem' }}>
+            <p className="form-note" style={{ fontWeight: 600, margin: 0 }}>Agent Profiles ({profiles.length})</p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" className="icon-button" onClick={exportAllProfiles} title="Export all profiles" style={{ fontSize: '12px', padding: '4px 8px' }}>Export All</button>
+              <label className="icon-button" style={{ fontSize: '12px', padding: '4px 8px', cursor: 'pointer' }} title="Import profiles from JSON">
+                Import
+                <input type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importProfiles(f); e.target.value = ''; }} />
+              </label>
+            </div>
+          </div>
+          {importError && <p style={{ color: 'var(--error, #dc2626)', fontSize: '12px', marginTop: '4px' }}>{importError}</p>}
+          <div className="agent-list">
+            {profiles.map(profile => {
+              const baseAgent = agents.find(a => a.id === profile.baseAgentId);
+              const isSelected = selectedAgentId === profile.id;
+              const isEditing = editingProfileId === profile.id;
+              const isTesting = testingProfileId === profile.id;
+              return (
+                <div className={`agent-item ${isSelected ? 'selected' : ''}`} key={profile.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedAgentId(profile.id)}>
+                  <div className="agent-info">
+                    <div className="agent-header">
+                      <strong>{profile.icon ? `${profile.icon} ` : ''}{profile.name}</strong>
+                      <span className="agent-source profile">profile</span>
+                    </div>
+                    <small className="agent-version">based on {baseAgent?.name ?? profile.baseAgentId}</small>
+                    {profile.description && <small className="agent-detail">{profile.description}</small>}
+                    <div className="agent-caps">
+                      {profile.overrides.model && <span className="agent-cap">model: {profile.overrides.model}</span>}
+                      {profile.overrides.temperature !== undefined && <span className="agent-cap">temp: {profile.overrides.temperature}</span>}
+                      {profile.overrides.systemPrompt && <span className="agent-cap">custom prompt</span>}
+                      {profile.overrides.allowedTools && <span className="agent-cap">{profile.overrides.allowedTools.length} tools</span>}
+                      {profile.overrides.env && <span className="agent-cap">{Object.keys(profile.overrides.env).length} env</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                    <span className={`agent-status ${baseAgent?.detected ? 'detected' : 'missing'}`}>{baseAgent?.detected ? 'ready' : 'base missing'}</span>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button type="button" className="icon-button" onClick={(e) => { e.stopPropagation(); openEditProfile(profile); }} title="Edit profile" style={{ padding: '2px 6px', fontSize: '12px' }}>✎</button>
+                      <button type="button" className="icon-button" onClick={(e) => { e.stopPropagation(); exportProfile(profile); }} title="Export profile" style={{ padding: '2px 6px', fontSize: '12px' }}>↓</button>
+                      <button type="button" className="icon-button" onClick={(e) => { e.stopPropagation(); setTestingProfileId(profile.id); setTestPrompt(''); setTestResult({ output: '', exitCode: null, status: 'idle' }); }} title="Test profile" style={{ padding: '2px 6px', fontSize: '12px' }}>▶</button>
+                      <button type="button" className="icon-button" onClick={(e) => { e.stopPropagation(); void deleteProfile(profile.id); }} title="Delete profile" style={{ padding: '2px 6px', fontSize: '12px' }}>✕</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Test Profile Modal */}
+      {testingProfileId && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => { setTestingProfileId(null); setTestResult({ output: '', exitCode: null, status: 'idle' }); }}>
+          <div style={{ background: 'var(--bg, #fff)', padding: '24px', borderRadius: '8px', maxWidth: '600px', width: '90%', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Test Profile: {profiles.find(p => p.id === testingProfileId)?.name}</h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary, #666)' }}>Runs a capability probe on the base agent to verify connectivity.</p>
+            <textarea value={testPrompt} onChange={e => setTestPrompt(e.target.value)} placeholder="Enter a test prompt (e.g. say hello)..." rows={3} style={{ width: '100%', marginBottom: '12px', padding: '8px' }} />
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+              <button className="primary-button" type="button" onClick={() => { const p = profiles.find(pr => pr.id === testingProfileId); if (p) void testProfile(p); }} disabled={testResult.status === 'running' || !testPrompt.trim()}>{testResult.status === 'running' ? 'Running...' : 'Run Test'}</button>
+              <button type="button" onClick={() => { setTestingProfileId(null); setTestResult({ output: '', exitCode: null, status: 'idle' }); }}>Close</button>
+            </div>
+            {testResult.status !== 'idle' && (
+              <div>
+                <p style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px' }}>
+                  Result: {testResult.status === 'done' ? '✓ Success' : testResult.status === 'error' ? '✗ Error' : '⏳ Running...'}
+                  {testResult.exitCode !== null && ` (exit: ${testResult.exitCode})`}
+                </p>
+                <pre style={{ background: 'var(--bg-secondary, #f5f5f5)', padding: '12px', borderRadius: '4px', fontSize: '12px', overflow: 'auto', maxHeight: '300px' }}>{testResult.output}</pre>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <details className="agent-form-toggle" open={editingProfileId !== null}>
+        <summary>{editingProfileId ? `Edit Profile: ${profiles.find(p => p.id === editingProfileId)?.name ?? ''}` : 'Create / Edit Agent Profile'}</summary>
+        <div className="agent-form">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div>
+              <label htmlFor="profile-name">Profile Name *</label>
+              <input id="profile-name" value={profileForm.name} onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Codex · Frontend Expert" maxLength={80} />
+            </div>
+            <div>
+              <label htmlFor="profile-icon">Icon (emoji)</label>
+              <input id="profile-icon" value={profileForm.icon} onChange={e => setProfileForm(f => ({ ...f, icon: e.target.value }))} placeholder="e.g. 🎨" maxLength={10} />
+            </div>
+          </div>
+          <label htmlFor="profile-description">Description</label>
+          <input id="profile-description" value={profileForm.description} onChange={e => setProfileForm(f => ({ ...f, description: e.target.value }))} placeholder="Short description of this profile" maxLength={200} />
+          <label htmlFor="profile-base-agent">Base Agent *</label>
+          <select id="profile-base-agent" value={profileForm.baseAgentId} onChange={e => setProfileForm(f => ({ ...f, baseAgentId: e.target.value }))} disabled={editingProfileId !== null}>
+            <option value="">Select a verified agent...</option>
+            {agents.filter(a => a.detected).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          {editingProfileId && <p style={{ fontSize: '12px', color: 'var(--text-secondary, #666)' }}>Base agent cannot be changed after creation.</p>}
+          <label htmlFor="profile-system-prompt">System Prompt (appended to task prompt)</label>
+          <textarea id="profile-system-prompt" value={profileForm.systemPrompt} onChange={e => setProfileForm(f => ({ ...f, systemPrompt: e.target.value }))} placeholder="e.g. You are a frontend expert specializing in React and TypeScript." rows={3} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div>
+              <label htmlFor="profile-model">Model ID</label>
+              <input id="profile-model" value={profileForm.model} onChange={e => setProfileForm(f => ({ ...f, model: e.target.value }))} placeholder="e.g. gpt-4o, claude-sonnet-4-20250514" maxLength={200} />
+            </div>
+            <div>
+              <label htmlFor="profile-temperature">Temperature (0-2)</label>
+              <input id="profile-temperature" type="number" min="0" max="2" step="0.1" value={profileForm.temperature} onChange={e => setProfileForm(f => ({ ...f, temperature: e.target.value }))} placeholder="e.g. 0.3" />
+            </div>
+          </div>
+          <label htmlFor="profile-allowed-tools">Allowed Tools (comma-separated)</label>
+          <input id="profile-allowed-tools" value={profileForm.allowedTools} onChange={e => setProfileForm(f => ({ ...f, allowedTools: e.target.value }))} placeholder="e.g. Read, Write, Edit, Bash" />
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary, #666)', marginTop: '-8px' }}>Leave empty to inherit all tools from base agent. Tools can only be narrowed, not expanded.</p>
+          <label>Environment Variables</label>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+            <input value={profileForm.envKey} onChange={e => setProfileForm(f => ({ ...f, envKey: e.target.value }))} placeholder="KEY" style={{ flex: 1 }} />
+            <input value={profileForm.envValue} onChange={e => setProfileForm(f => ({ ...f, envValue: e.target.value }))} placeholder="value" style={{ flex: 2 }} />
+            <button type="button" onClick={() => { if (profileForm.envKey.trim()) { setProfileForm(f => ({ ...f, envPairs: [...f.envPairs, { key: f.envKey.trim(), value: f.envValue }], envKey: '', envValue: '' })); } }}>Add</button>
+          </div>
+          {profileForm.envPairs.length > 0 && (
+            <div style={{ marginBottom: '12px' }}>
+              {profileForm.envPairs.map((pair, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <code style={{ fontSize: '12px' }}>{pair.key}={pair.value}</code>
+                  <button type="button" onClick={() => setProfileForm(f => ({ ...f, envPairs: f.envPairs.filter((_, j) => j !== i) }))} style={{ fontSize: '12px' }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="primary-button" type="button" onClick={() => editingProfileId ? void updateProfile() : void createProfile()} disabled={savingProfile || !profileForm.name.trim() || !profileForm.baseAgentId}>
+              {savingProfile ? 'Saving...' : editingProfileId ? 'Update Profile' : 'Create Profile'}
+              <ArrowRight size={15} aria-hidden="true" />
+            </button>
+            {editingProfileId && <button type="button" onClick={resetProfileForm}>Cancel</button>}
+          </div>
+        </div>
+      </details>
       <details className="agent-form-toggle">
         <summary>{t('agents.addCustomSummary')}</summary>
         <div className="agent-form">
@@ -1408,6 +1915,20 @@ export function App() {
               {theme === 'dark' ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
             </button>
             <button className="icon-button" type="button" onClick={() => void loadProjects()} aria-label={t('common.refresh')} title={t('common.refresh')}><RefreshCw size={18} /></button>
+            {view.kind === 'project' && selected && (
+              <>
+                <button className="quiet-button" type="button" onClick={() => void exportBlueprint()} title="Export Blueprint as JSON">
+                  Export
+                </button>
+                <label className="quiet-button" style={{ cursor: 'pointer' }} title="Import Blueprint from JSON">
+                  Import
+                  <input type="file" accept="application/json" style={{ display: 'none' }} onChange={e => { const file = e.target.files?.[0]; if (file) void importBlueprint(file); e.target.value = ''; }} disabled={importingBlueprint} />
+                </label>
+                <button className="quiet-button" type="button" onClick={() => { if (showDiff) { setShowDiff(false); setBlueprintDiff(null); } else void loadBlueprintDiff(); }} title="Show diff with previous revision">
+                  {showDiff ? 'Hide Diff' : 'Show Diff'}
+                </button>
+              </>
+            )}
             {view.kind === 'dashboard' && (
               <button className="quiet-button" type="button" onClick={startNewProject}>
                 {t('projects.newBlueprint')}
@@ -1421,7 +1942,13 @@ export function App() {
             invisible until the user navigated back to it. Rendering it in the shell puts every
             message in the view that produced it. */}
         {(daemonOnline === false || error) && (
-          <p className="error" role="alert">{daemonOnline === false ? t('errors.daemonUnavailable') : error}</p>
+          <div className="error-panel" role="alert">
+            {daemonOnline === false ? (
+              <p className="error">{t('errors.daemonUnavailable')}</p>
+            ) : (
+              <FailureDisplay error={error} />
+            )}
+          </div>
         )}
 
         {view.kind === 'dashboard' && (
@@ -1450,6 +1977,18 @@ export function App() {
             </nav>
 
             {view.kind === 'project' && view.tab === 'blueprint' && <>
+            {showDiff && selected && <section className="diff-section" id="blueprint-diff">
+              <div className="section-heading"><div><p className="eyebrow">Blueprint Diff</p><h2>Changes since previous revision</h2></div></div>
+              {loadingDiff ? <p>Loading diff...</p> : blueprintDiff ? (
+                <div className="diff-grid">
+                  {blueprintDiff.added.length > 0 && <article className="diff-card added"><h3>Added ({blueprintDiff.added.length})</h3><ul>{blueprintDiff.added.map(path => <li key={path}><code>{path}</code></li>)}</ul></article>}
+                  {blueprintDiff.removed.length > 0 && <article className="diff-card removed"><h3>Removed ({blueprintDiff.removed.length})</h3><ul>{blueprintDiff.removed.map(path => <li key={path}><code>{path}</code></li>)}</ul></article>}
+                  {blueprintDiff.modified.length > 0 && <article className="diff-card modified"><h3>Modified ({blueprintDiff.modified.length})</h3><ul>{blueprintDiff.modified.map(path => <li key={path}><code>{path}</code></li>)}</ul></article>}
+                  {blueprintDiff.added.length === 0 && blueprintDiff.removed.length === 0 && blueprintDiff.modified.length === 0 && <p>No changes since previous revision.</p>}
+                </div>
+              ) : <p>No diff available.</p>}
+            </section>}
+            {blueprintImportResult && <div className="import-result"><CheckCircle2 size={16} /> {blueprintImportResult}</div>}
             {selected && <section className="decision-section" id="decisions">
               <div className="section-heading"><div><p className="eyebrow">{t('decisions.eyebrowRevision', { revision: selected.blueprint.metadata.revision })}</p><h2>{t('decisions.title')}</h2></div><span className="mode-tag">{selected.blueprint.metadata.mode === 'beginner' ? t('blueprint.beginner') : t('blueprint.professional')}</span></div>
               <div className="decision-list">{decisions.map(decision => <article className="decision" key={decision.id}>
@@ -1501,7 +2040,7 @@ export function App() {
             </>}
 
             {view.kind === 'project' && view.tab === 'iteration' && <>
-              {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">{t('featureTask.eyebrow')}</p><h3>{featureTask ? featureTask.title : t('featureTask.defineNext')}</h3><p>{featureTask ? t('featureTask.taskIs', { status: featureTask.status }) : t('featureTask.createTaskDescription')}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{t(`status.${featureTask.status}` as KeyPath)}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">{t('featureTask.title')} <small>{t('featureTask.titleHint')}</small></label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder={t('featureTask.titlePlaceholder')} maxLength={120} /><label htmlFor="feature-objective">{t('featureTask.objective')} <small>{t('featureTask.objectiveHint')}</small></label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder={t('featureTask.objectivePlaceholder')} maxLength={2000} /><label htmlFor="feature-criteria">{t('featureTask.acceptanceCriteria')} <small>{t('featureTask.criteriaHint')}</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder={t('featureTask.criteriaPlaceholder')} maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? t('featureTask.creating') : t('featureTask.createTask')}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.status === 'draft' ? <>{approverField('feature-approver', t('featureTask.whoApproves'))}<button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? t('featureTask.approving') : t('featureTask.approveForAgent')}<ShieldCheck size={15} aria-hidden="true" /></button></> : <small>{t('featureTask.approvedBy', { approvedBy: featureTask.approvedBy ?? '', date: featureTask.approvedAt ? formatDate(featureTask.approvedAt, locale) : '' })}</small>}</div>}</div>}
+              {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">{t('featureTask.eyebrow')}</p><h3>{featureTask ? featureTask.title : t('featureTask.defineNext')}</h3><p>{featureTask ? t('featureTask.taskIs', { status: featureTask.status }) : t('featureTask.createTaskDescription')}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{t(`status.${featureTask.status}` as KeyPath)}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">{t('featureTask.title')} <small>{t('featureTask.titleHint')}</small></label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder={t('featureTask.titlePlaceholder')} maxLength={120} /><label htmlFor="feature-objective">{t('featureTask.objective')} <small>{t('featureTask.objectiveHint')}</small></label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder={t('featureTask.objectivePlaceholder')} maxLength={2000} /><label htmlFor="feature-criteria">{t('featureTask.acceptanceCriteria')} <small>{t('featureTask.criteriaHint')}</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder={t('featureTask.criteriaPlaceholder')} maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? t('featureTask.creating') : t('featureTask.createTask')}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.pipeline && <div className="pipeline-section"><div className="pipeline-heading"><div><p className="eyebrow">Pipeline</p><h4>{featureTask.pipeline.steps.length} steps · {featureTask.pipeline.status}</h4></div>{featureTask.status === 'draft' && <button className="secondary-button" type="button" onClick={() => editingPipeline ? setEditingPipeline(false) : startEditPipeline()}>{editingPipeline ? 'Cancel' : 'Edit Pipeline'}</button>}</div>{editingPipeline ? <div className="pipeline-editor">{pipelineDraft.map((step, i) => <div key={step.id} className="pipeline-edit-step"><div className="pipeline-edit-header"><strong>Step {i + 1}</strong>{pipelineDraft.length > 1 && <button className="icon-button" type="button" onClick={() => removePipelineStep(step.id)} title="Remove step">×</button>}</div><label>Name<input value={step.name} onChange={e => updatePipelineStep(step.id, 'name', e.target.value)} placeholder="Step name" maxLength={120} /></label><label>Profile<select value={step.profileId} onChange={e => updatePipelineStep(step.id, 'profileId', e.target.value)}><option value="">Select profile...</option>{profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>Prompt<textarea value={step.prompt} onChange={e => updatePipelineStep(step.id, 'prompt', e.target.value)} placeholder="Instructions for this step..." maxLength={4000} rows={3} /></label></div>)}<button className="secondary-button" type="button" onClick={addPipelineStep}>+ Add Step</button><button className="primary-button" type="button" onClick={() => void savePipeline()} disabled={savingPipeline}>{savingPipeline ? 'Saving...' : 'Save Pipeline'}</button></div> : <ol className="pipeline-steps">{featureTask.pipeline.steps.map((step, i) => { const result = featureTask.pipeline!.results.find(r => r.stepId === step.id); const status = result?.status ?? 'pending'; return <li key={step.id}><span className={`step-dot ${status}`} aria-hidden="true" /> <strong>{i + 1}. {step.name}</strong> <em>({step.profileId})</em> <span className="pipeline-step-status">{status}</span>{result?.error && <small className="pipeline-error">{result.error}</small>}</li>; })}</ol>}{!editingPipeline && featureTask.status === 'approved' && (featureTask.pipeline.status === 'idle' || featureTask.pipeline.status === 'failed' || featureTask.pipeline.status === 'paused') && <button className="primary-button" type="button" onClick={() => void executePipeline()} disabled={savingFeatureTask}>{savingFeatureTask ? 'Executing...' : featureTask.pipeline.status === 'paused' ? 'Resume Pipeline' : 'Execute Pipeline'}<ArrowRight size={15} aria-hidden="true" /></button>}</div>}{featureTask.status === 'draft' ? <>{approverField('feature-approver', t('featureTask.whoApproves'))}<button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? t('featureTask.approving') : t('featureTask.approveForAgent')}<ShieldCheck size={15} aria-hidden="true" /></button></> : <small>{t('featureTask.approvedBy', { approvedBy: featureTask.approvedBy ?? '', date: featureTask.approvedAt ? formatDate(featureTask.approvedAt, locale) : '' })}</small>}</div>}</div>}
               {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">{t('runtime.eyebrow')}{selectedAgentId && agents.find(a => a.id === selectedAgentId) ? ` · ${agents.find(a => a.id === selectedAgentId)!.name}` : ''}</p><h3>{runtimeRun ? t('runtime.status', { mode: runtimeRun.plan.mode === 'execute' ? 'Codex' : 'Dry-run', status: runtimeRun.status }) : t('runtime.runtimeNotPrepared')}</h3><p>{runtimeRun?.status === 'completed' ? t('runtime.completed') : runtimeRun?.status === 'failed' ? t('runtime.failed', { attempts: runtimeRun.attempts }) : runtimeRun?.status === 'running' ? t('runtime.running') : runtimeRun ? t('runtime.planned') : t('runtime.prepareDescription')}</p></div>{runtimeRun?.status === 'planned' ? <div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.cancelling') : t('runtime.cancelDryRun')}<RefreshCw size={15} aria-hidden="true" /></button><button className="primary-button" type="button" onClick={() => void executeRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.runningCodex') : t('runtime.runCodex')}<ArrowRight size={15} aria-hidden="true" /></button></div> : runtimeRun?.status === 'failed' ? <button className="primary-button" type="button" onClick={() => void retryRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.retryingCodex') : t('runtime.retryCodex')}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.preparing') : t('runtime.prepare')}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{gitEvidence && <div className="git-evidence"><span>{t('runtime.gitBranch')} <strong>{gitEvidence.branch}</strong></span><span>{t('runtime.gitHead')} <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>{t('runtime.gitWorkingTree')} <strong>{gitEvidence.status || t('runtime.gitClean')}</strong></span><span>{t('runtime.gitDiff')} <strong>{gitEvidence.diffStat || t('runtime.gitNoChanges')}</strong></span></div>}{runtimeRun?.result?.output && <pre className="provider-report">{runtimeRun.result.output}</pre>}{runtimeRun?.history.length ? <div className="runtime-history"><small>{runtimeRun.history.length} {runtimeRun.history.length === 1 ? t('runtime.attemptRecorded') : t('runtime.attemptsRecorded')}</small></div> : null}</div>}
               {featureTask?.status === 'approved' && runtimeRun && <div className={`acceptance-panel ${acceptance?.status ?? 'pending'}`}><div className="runtime-heading"><div><p className="eyebrow">{t('acceptance.eyebrow')}</p><h3>{acceptance ? t('acceptance.acceptanceStatus', { status: acceptance.status }) : t('acceptance.submitTitle')}</h3><p>{acceptance?.status === 'blocked' ? t('acceptance.blocked', { status: acceptance.qualityStatus }) : t('acceptance.confirmCriteria')}</p></div>{acceptance?.status === 'ready' && <div className="acceptance-approval">{approverField('acceptance-approver', t('acceptance.whoAccepts'))}<button className="secondary-button" type="button" onClick={() => void approveDelivery()} disabled={submittingAcceptance}>{submittingAcceptance ? t('acceptance.approving') : t('acceptance.approveDelivery')}<ShieldCheck size={15} aria-hidden="true" /></button></div>}</div>{acceptance?.status !== 'approved' && <div className="acceptance-form"><label htmlFor="acceptance-summary">{t('acceptance.summary')} <small>{t('acceptance.summaryHint')}</small></label><textarea id="acceptance-summary" value={acceptanceSummary} onChange={event => setAcceptanceSummary(event.target.value)} placeholder={t('acceptance.summaryPlaceholder')} maxLength={2000} /><label className="check-row"><input type="checkbox" checked={criteriaConfirmed} onChange={event => setCriteriaConfirmed(event.target.checked)} /> {t('acceptance.reviewedCriteria')}</label><button className="primary-button" type="button" onClick={() => void submitAcceptance()} disabled={submittingAcceptance}>{submittingAcceptance ? t('acceptance.submitting') : t('acceptance.submitEvidence')}<ArrowRight size={15} aria-hidden="true" /></button></div>}</div>}
             </>}
@@ -1543,6 +2082,11 @@ export function App() {
                 <button className={answers.dataSensitivity === 'sensitive' ? 'selected' : ''} type="button" onClick={() => setAnswer('dataSensitivity', 'sensitive')}><ShieldCheck size={15} />{t('blueprint.sensitive')}</button>
               </div></fieldset>
 
+              <fieldset className="choice-group"><legend>{t('blueprint.analytics')}</legend><p>{t('blueprint.analyticsNote')}</p><div className="choice-stack">
+                <label><input type="checkbox" checked={answers.analyticsProviders.includes('ga4')} onChange={() => toggleAnalytics('ga4')} />{t('blueprint.googleAnalytics4')}</label>
+                <label><input type="checkbox" checked={answers.analyticsProviders.includes('clarity')} onChange={() => toggleAnalytics('clarity')} />{t('blueprint.microsoftClarity')}</label>
+              </div></fieldset>
+
               {isProfessional && <>
                 <fieldset className="choice-group ownership-group"><legend>{t('blueprint.resourceOwnership')}</legend><p>{t('blueprint.ownershipNote')}</p>
                   {/* Only the providers this product type provisions are asked for: an MCP server or a
@@ -1557,22 +2101,62 @@ export function App() {
                   <label><input type="radio" name="preview" checked={answers.previewStrategy === 'per-pull-request'} onChange={() => setAnswer('previewStrategy', 'per-pull-request')} />{t('blueprint.perPullRequest')}</label>
                   <label><input type="radio" name="preview" checked={answers.previewStrategy === 'stable-dev-api'} onChange={() => setAnswer('previewStrategy', 'stable-dev-api')} />{t('blueprint.stableDevApi')}</label>
                 </div></fieldset>
-                <fieldset className="choice-group"><legend>{t('blueprint.analytics')}</legend><div className="choice-stack">
-                  <label><input type="checkbox" checked={answers.analyticsProviders.includes('ga4')} onChange={() => toggleAnalytics('ga4')} />{t('blueprint.googleAnalytics4')}</label>
-                  <label><input type="checkbox" checked={answers.analyticsProviders.includes('clarity')} onChange={() => toggleAnalytics('clarity')} />{t('blueprint.microsoftClarity')}</label>
-                </div></fieldset>
                 <fieldset className="choice-group"><legend>{t('blueprint.runtime')}</legend><p>{t('blueprint.runtimeNote')}</p><div className="choice-stack">
-                  {agents.length === 0 ? <small>{t('blueprint.runtimeCatalogLoading')}</small> : agents
-                    .flatMap(agent => {
-                      // Only ids the Blueprint schema accepts can be chosen; a custom Agent whose id
-                      // is outside the enum would fail validation on revision create.
-                      const provider = runtimeProviderSchema.safeParse(agent.id);
-                      return agent.detected && provider.success ? [{ agent, provider: provider.data }] : [];
-                    })
-                    .map(({ agent, provider }) => (
-                      <label key={agent.id}><input type="radio" name="runtime" checked={answers.runtimeProvider === provider} onChange={() => setAnswer('runtimeProvider', provider)} />{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</label>
-                    ))}
-                  {agents.filter(agent => agent.detected && runtimeProviderSchema.safeParse(agent.id).success).length === 0 && <small>{t('blueprint.runtimeNoneDetected')}</small>}
+                  {agents.length === 0 && profiles.length === 0 ? <small>{t('blueprint.runtimeCatalogLoading')}</small> : <>
+                    {agents
+                      .flatMap(agent => {
+                        const provider = runtimeProviderSchema.safeParse(`local-${agent.id}`);
+                        return agent.detected && provider.success ? [{ agent, provider: provider.data }] : [];
+                      })
+                      .map(({ agent, provider }) => {
+                        const descKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Desc` as keyof typeof t;
+                        const installKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Install` as keyof typeof t;
+                        const desc = t(descKey) || '';
+                        const install = t(installKey) || '';
+                        return (
+                          <label key={agent.id} className="agent-option">
+                            <div className="agent-option-header">
+                              <input type="radio" name="runtime" checked={answers.runtimeProvider === provider} onChange={() => setAnswer('runtimeProvider', provider)} />
+                              <span className="agent-name">{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</span>
+                              <span className="agent-badge verified">{t('blueprint.runtimeVerified')}</span>
+                            </div>
+                            {desc && <p className="agent-desc">{desc}</p>}
+                          </label>
+                        );
+                      })}
+                    {profiles.map(profile => {
+                      const baseAgent = agents.find(a => a.id === profile.baseAgentId);
+                      const ready = baseAgent?.detected ?? false;
+                      return (
+                        <label key={profile.id} className="agent-option" style={{ opacity: ready ? 1 : 0.5 }}>
+                          <div className="agent-option-header">
+                            <input type="radio" name="runtime" checked={answers.runtimeProvider === profile.id} onChange={() => setAnswer('runtimeProvider', profile.id)} disabled={!ready} />
+                            <span className="agent-name">{profile.icon ? `${profile.icon} ` : ''}{profile.name} · Profile</span>
+                            <span className="agent-badge profile">Profile</span>
+                          </div>
+                          <p className="agent-desc">Based on {baseAgent?.name ?? profile.baseAgentId}{!ready && ` — ${t('blueprint.runtimeNotDetected')}`}</p>
+                        </label>
+                      );
+                    })}
+                    {/* Show not-detected agents with install guide */}
+                    {agents.filter(a => !a.detected).map(agent => {
+                      const descKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Desc` as keyof typeof t;
+                      const installKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Install` as keyof typeof t;
+                      const desc = t(descKey) || '';
+                      const install = t(installKey) || '';
+                      return (
+                        <div key={agent.id} className="agent-option not-detected">
+                          <div className="agent-option-header">
+                            <span className="agent-name" style={{ opacity: 0.6 }}>{agent.name}</span>
+                            <span className="agent-badge not-detected">{t('blueprint.runtimeNotDetected')}</span>
+                          </div>
+                          {desc && <p className="agent-desc">{desc}</p>}
+                          {install && <p className="agent-install"><code>{install}</code></p>}
+                        </div>
+                      );
+                    })}
+                  </>}
+                  {agents.filter(agent => agent.detected).length === 0 && profiles.length === 0 && <small>{t('blueprint.runtimeNoneDetected')}</small>}
                 </div></fieldset>
                 <label htmlFor="custom-instructions">{t('blueprint.customImplementationNote')}</label>
                 <textarea id="custom-instructions" value={answers.customInstructions} onChange={event => setAnswer('customInstructions', event.target.value)} placeholder={t('blueprint.customInstructionsPlaceholder')} maxLength={1000} />

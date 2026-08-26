@@ -5,6 +5,50 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 export { discoverAgentRuntimes, probeAgentCapabilities, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource, type CapabilityProbe } from './catalog.js';
+export {
+  type AgentProfile,
+  type AgentProfileOverrides,
+  type ResolvedAgentConfig,
+  type BaseAgentDefaults,
+  agentProfileSchema,
+  agentProfileCreateSchema,
+  agentProfileUpdateSchema,
+  slugifyProfileName,
+  ensureUniqueProfileId,
+  mergeAgentConfig,
+  validateProfileTools,
+  validateProfileEnv,
+  filterSafeEnv,
+} from './profiles.js';
+export {
+  type PipelineStep,
+  type PipelineStepStatus,
+  type PipelineStepResult,
+  type FeatureTaskPipeline,
+  pipelineStepSchema,
+  featureTaskPipelineSchema,
+  createPipelineStepSchema,
+  resolvePipelinePrompt,
+  getNextPipelineStep,
+  isPipelineComplete,
+  isPipelineBlocked,
+} from './pipeline.js';
+export {
+  type FailureCategory,
+  type FailureSeverity,
+  type FailureClassification,
+  classifyFailure,
+  categoryLabel,
+  severityLabel,
+} from './failure-classification.js';
+export {
+  type DoctorCheck,
+  type DoctorCheckStatus,
+  type DoctorReport,
+  runDoctor,
+  formatDoctorSummary,
+} from './doctor.js';
+import type { AgentProfile } from './profiles.js';
 
 const SAFE_ENV_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'TMP', 'TEMP', 'NO_COLOR'];
 const MAX_OUTPUT_LENGTH = 2_000_000;
@@ -42,6 +86,12 @@ export type CodexExecutionPlan = {
   acceptanceCriteria: string[];
   noExternalChanges: boolean;
   executionAllowed: boolean;
+  /** When the run uses an Agent Profile, this is the profile ID. */
+  profileId?: string;
+  /** Base agent ID resolved from the profile (or the direct agentId). */
+  baseAgentId: string;
+  /** Additional environment variables from profile overrides, merged into execution env. */
+  profileEnv?: Record<string, string>;
 };
 
 export function probeCodexRuntime(): CodexRuntimeProbe {
@@ -68,6 +118,7 @@ export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: strin
     acceptanceCriteria: task.acceptanceCriteria,
     noExternalChanges: !execute,
     executionAllowed: execute,
+    baseAgentId: 'codex',
   };
 }
 
@@ -118,12 +169,24 @@ const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
   hermes: { status: 'verified', buildCommand: (prompt, cwd) => ['hermes', '-z', prompt, '--in', cwd, '--yolo'] },
 };
 
-export function buildAgentExecutionPlan(task: ApprovedTask, workspacePath: string, agentId: string, options: { execute?: boolean } = {}): CodexExecutionPlan {
+export function buildAgentExecutionPlan(
+  task: ApprovedTask,
+  workspacePath: string,
+  agentId: string,
+  options: { execute?: boolean; profile?: AgentProfile } = {},
+): CodexExecutionPlan {
   const execute = options.execute === true;
-  const prompt = buildTaskPrompt(task);
-  const adapter = AGENT_ADAPTERS[agentId];
-  if (!adapter) throw new Error(`Agent "${agentId}" does not have a candidate execution adapter.`);
-  if (execute && adapter.status !== 'verified') throw new Error(`Agent "${agentId}" has a candidate adapter but has not passed execution verification.`);
+  const profile = options.profile;
+  // When a profile is provided, resolve the base agent from the profile.
+  const resolvedAgentId = profile?.baseAgentId ?? agentId;
+  const basePrompt = buildTaskPrompt(task);
+  // Append profile system prompt after the task prompt.
+  const prompt = profile?.overrides.systemPrompt
+    ? `${basePrompt}\n\n---\n${profile.overrides.systemPrompt}`
+    : basePrompt;
+  const adapter = AGENT_ADAPTERS[resolvedAgentId];
+  if (!adapter) throw new Error(`Agent "${resolvedAgentId}" does not have a candidate execution adapter.`);
+  if (execute && adapter.status !== 'verified') throw new Error(`Agent "${resolvedAgentId}" has a candidate adapter but has not passed execution verification.`);
   return {
     mode: execute ? 'execute' : 'dry-run',
     taskId: task.id,
@@ -133,6 +196,9 @@ export function buildAgentExecutionPlan(task: ApprovedTask, workspacePath: strin
     acceptanceCriteria: task.acceptanceCriteria,
     noExternalChanges: !execute,
     executionAllowed: execute,
+    profileId: profile?.id,
+    baseAgentId: resolvedAgentId,
+    profileEnv: profile?.overrides.env,
   };
 }
 
@@ -209,5 +275,6 @@ export async function executeCodexPlan(plan: CodexExecutionPlan, runner: CodexPr
   if (!plan.executionAllowed || plan.mode !== 'execute' || plan.noExternalChanges) {
     throw new Error('Agent execution requires an explicitly approved execute plan.');
   }
-  return runner(plan.command[0], plan.command.slice(1), { cwd: plan.workspacePath, env: safeEnvironment(), timeoutMs });
+  const env = { ...safeEnvironment(), ...(plan.profileEnv ?? {}) };
+  return runner(plan.command[0], plan.command.slice(1), { cwd: plan.workspacePath, env, timeoutMs });
 }
