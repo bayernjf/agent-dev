@@ -33,6 +33,14 @@ export {
   isPipelineComplete,
   isPipelineBlocked,
 } from './pipeline.js';
+export {
+  type FailureCategory,
+  type FailureSeverity,
+  type FailureClassification,
+  classifyFailure,
+  categoryLabel,
+  severityLabel,
+} from './failure-classification.js';
 import type { AgentProfile } from './profiles.js';
 
 const SAFE_ENV_KEYS = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'TMP', 'TEMP', 'NO_COLOR'];
