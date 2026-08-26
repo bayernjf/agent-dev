@@ -13,10 +13,31 @@
 
 export type SecretBackendType = 'local-file' | 'infisical' | 'keychain' | 'doppler';
 
+export type SecretStatus = 'active' | 'pending' | 'rejected';
+
+export type SecretVersion = {
+  version: number;
+  value: string;
+  createdAt: string;
+  status: SecretStatus;
+  /** Who approved/rejected this version (optional). */
+  approver?: string;
+  /** Reason for rejection (optional). */
+  reason?: string;
+};
+
 export type Secret = {
   key: string;
   value: string;
-  /** Optional metadata: environment, project, last updated, etc. */
+  /** Current version number. */
+  version: number;
+  /** Current status. */
+  status: SecretStatus;
+  createdAt: string;
+  updatedAt: string;
+  /** Full version history (newest first). */
+  history?: SecretVersion[];
+  /** Optional metadata: environment, project, etc. */
   metadata?: Record<string, string>;
 };
 
@@ -32,10 +53,13 @@ export interface SecretBackend {
   /** Get a secret by key. Returns null if not found. */
   get(key: string): Promise<string | null>;
 
-  /** Set a secret value. Creates or updates. */
+  /** Get full secret with metadata and version history. */
+  getSecret(key: string): Promise<Secret | null>;
+
+  /** Set a secret value. Creates a new version. */
   set(key: string, value: string): Promise<void>;
 
-  /** Delete a secret. */
+  /** Delete a secret and all its versions. */
   delete(key: string): Promise<void>;
 
   /** List all secret keys (not values). */
@@ -46,6 +70,28 @@ export interface SecretBackend {
 
   /** Check if the backend is available and properly configured. */
   isAvailable(): Promise<{ available: boolean; reason?: string }>;
+
+  /**
+   * Rotate a secret: create a new version with a new value.
+   * If newValue is not provided, generates a random 32-char secret.
+   * Returns the new secret.
+   */
+  rotate(key: string, newValue?: string): Promise<Secret>;
+
+  /**
+   * Approve a pending version. Makes it the active version.
+   */
+  approve(key: string, version: number, approver?: string): Promise<Secret>;
+
+  /**
+   * Reject a pending version.
+   */
+  reject(key: string, version: number, reason?: string): Promise<Secret>;
+
+  /**
+   * Get version history for a secret (newest first).
+   */
+  getHistory(key: string): Promise<SecretVersion[]>;
 }
 
 // ---------------------------------------------------------------------------

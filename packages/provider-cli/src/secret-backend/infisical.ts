@@ -12,7 +12,8 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { SecretBackend, SecretBackendConfig } from './index.js';
+import { randomBytes } from 'node:crypto';
+import type { SecretBackend, SecretBackendConfig, Secret, SecretVersion } from './index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,7 +34,6 @@ export class InfisicalBackend implements SecretBackend {
       const args = this.buildArgs(['secrets', 'get', key, '--format', 'json']);
       const { stdout } = await execFileAsync('infisical', args, { timeout: 15_000 });
       const parsed = JSON.parse(stdout);
-      // Infisical CLI returns { secrets: [{ key, value, ... }] } or similar.
       const secret = Array.isArray(parsed.secrets)
         ? parsed.secrets.find((s: { key: string }) => s.key === key)
         : parsed;
@@ -41,6 +41,22 @@ export class InfisicalBackend implements SecretBackend {
     } catch {
       return null;
     }
+  }
+
+  async getSecret(key: string): Promise<Secret | null> {
+    const value = await this.get(key);
+    if (!value) return null;
+    const now = new Date().toISOString();
+    return {
+      key,
+      value,
+      version: 1,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+      history: [{ version: 1, value, createdAt: now, status: 'active' }],
+      metadata: { backend: 'infisical', environment: this.environment, projectId: this.projectId ?? '' },
+    };
   }
 
   async set(key: string, value: string): Promise<void> {
@@ -82,26 +98,51 @@ export class InfisicalBackend implements SecretBackend {
   }
 
   async isAvailable(): Promise<{ available: boolean; reason?: string }> {
-    // Check if Infisical CLI is installed.
     try {
       await execFileAsync('infisical', ['--version'], { timeout: 5_000 });
     } catch {
       return { available: false, reason: 'Infisical CLI is not installed. Run: npm install -g infisical' };
     }
-
-    // Check if authenticated.
     try {
       await execFileAsync('infisical', ['whoami'], { timeout: 5_000 });
     } catch {
       return { available: false, reason: 'Not authenticated with Infisical. Run: infisical login' };
     }
-
-    // Check if project is configured.
     if (!this.projectId) {
       return { available: false, reason: 'Infisical projectId not configured. Set INFISICAL_PROJECT_ID or pass in backend config.' };
     }
-
     return { available: true };
+  }
+
+  async rotate(key: string, newValue?: string): Promise<Secret> {
+    const value = newValue ?? randomBytes(24).toString('base64url');
+    await this.set(key, value);
+    const secret = await this.getSecret(key);
+    if (!secret) throw new Error(`Secret "${key}" not found after rotation.`);
+    return secret;
+  }
+
+  async approve(key: string, version: number, approver?: string): Promise<Secret> {
+    // Infisical has its own approval workflow via the dashboard.
+    // CLI-based approval is limited; we mark the secret as active locally.
+    const secret = await this.getSecret(key);
+    if (!secret) throw new Error(`Secret "${key}" not found.`);
+    secret.status = 'active';
+    if (approver) secret.metadata = { ...secret.metadata, approver };
+    return secret;
+  }
+
+  async reject(key: string, version: number, reason?: string): Promise<Secret> {
+    const secret = await this.getSecret(key);
+    if (!secret) throw new Error(`Secret "${key}" not found.`);
+    secret.status = 'rejected';
+    if (reason) secret.metadata = { ...secret.metadata, rejectReason: reason };
+    return secret;
+  }
+
+  async getHistory(key: string): Promise<SecretVersion[]> {
+    const secret = await this.getSecret(key);
+    return secret?.history ?? [];
   }
 
   private buildArgs(baseArgs: string[]): string[] {
