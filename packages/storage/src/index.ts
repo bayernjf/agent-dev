@@ -555,9 +555,19 @@ export class AgentDevStore {
     try {
       await this.executePendingStep(run, steps[0], attempts, options, async () => { productBlueprintSchema.parse(project.blueprint); });
       await this.executePendingStep(run, steps[1], attempts, options, async () => { await mkdir(run.workspacePath, { recursive: true }); });
+      // If the workspace already contains a .git directory (e.g. imported from an
+      // existing repository), treat it like a remote base: do not overwrite user files.
+      if (!useRemoteBase) {
+        try {
+          await access(join(run.workspacePath, '.git'));
+          useRemoteBase = true;
+        } catch {
+          // No .git directory — proceed with scaffold generation.
+        }
+      }
       await this.executePendingStep(run, steps[2], attempts, options, async () => {
-        // When basing on the remote `dev` branch, the scaffold already lives there and must not be
-        // overwritten by a fresh generation — that would wipe out previously shipped feature code.
+        // When basing on the remote `dev` branch or an imported repository, the scaffold
+        // already lives there and must not be overwritten — that would wipe out user code.
         if (useRemoteBase) return;
         for (const artifact of createDryRunPlan(project.blueprint).artifacts) {
           const target = join(run.workspacePath, artifact.path);
