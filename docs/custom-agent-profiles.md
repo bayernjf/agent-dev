@@ -337,3 +337,89 @@ curl -X POST http://localhost:3737/api/runtime/profiles \
 ```
 
 这是一个 JSON 数组文件，可手动编辑、备份或版本管理。
+
+## 13. 未来扩展：轻量串行流水线（v0.2/v0.3 候选）
+
+### 13.1 定位
+
+在一个 Feature Task 内定义多个执行步骤，每个步骤用不同的 Agent Profile，前一步的输出作为后一步的输入。实现"方案→实现→审查→修复"的自动闭环，而不需要用户手动拆分多个 Feature Task。
+
+**明确不做**：真正的多 agent 并行协作、agent 间实时通信、主 agent 动态拆分任务。这些属于另一个产品品类（multi-agent framework），会让 agent-dev 从"交付控制平面"偏离定位。
+
+### 13.2 典型场景
+
+```
+Task: "实现用户登录功能"
+  Step 1 (profile: codex-architect): 输出技术方案 → 写入 docs/login-design.md
+  Step 2 (profile: codex-frontend):  读取方案 → 实现前端登录页面
+  Step 3 (profile: codebuddy-backend): 读取方案 → 实现后端 API
+  Step 4 (profile: hermes-reviewer):  读取 git diff → 输出 code review 意见
+  Step 5 (profile: codex-frontend):  读取 review 意见 → 修复问题
+```
+
+### 13.3 数据模型
+
+```typescript
+type PipelineStep = {
+  id: string;
+  name: string;
+  profileId: string;           // 使用哪个 Profile
+  inputPrompt: string;         // 该步骤的 prompt 模板，可引用前一步输出
+  dependsOn?: string[];        // 依赖哪些步骤（默认依赖前一步）
+  outputArtifact?: string;     // 输出产物路径（如 docs/design.md）
+  continueOnFailure?: boolean;  // 失败后是否继续（默认 false）
+};
+
+type FeatureTaskPipeline = {
+  steps: PipelineStep[];
+  currentStepIndex: number;
+  results: Array<{
+    stepId: string;
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+    output?: string;            // 该步骤的输出摘要
+    runtimeRunId?: string;      // 关联的 RuntimeRun
+    startedAt?: string;
+    completedAt?: string;
+  }>;
+};
+```
+
+### 13.4 执行模型
+
+1. **串行执行**：步骤按顺序执行，前一步完成后才开始后一步。
+2. **上下文传递**：每一步的 prompt 可以引用前一步的输出（通过模板变量 `{{step:step-id.output}}`）。
+3. **产物传递**：步骤可以指定 `outputArtifact`（如写入某个文件），后续步骤可以读取该文件。
+4. **失败处理**：默认失败即停止，用户可以选择重试该步骤或跳过。`continueOnFailure: true` 的步骤失败后继续。
+5. **人工 Gate**：可以在步骤之间插入人工确认点（如"方案确认后再实现"）。
+
+### 13.5 与现有架构的关系
+
+- 复用现有 `RuntimeRun` 机制：每个步骤本质上是一次 `prepareRuntimeRun` + `executeRuntimeRun`。
+- 复用现有 Profile 机制：每个步骤指定一个 `profileId`，由 storage 层解析为 base agent + 配置合并。
+- 扩展 `FeatureTask`：增加可选的 `pipeline` 字段，没有 pipeline 的 Task 保持当前单步执行行为（向后兼容）。
+- 扩展 Studio UI：Task 详情页增加 Pipeline 编辑器（拖拽排序、选择 Profile、编辑 prompt 模板）和执行进度展示。
+
+### 13.6 不做的边界
+
+| 不做 | 原因 |
+| --- | --- |
+| 并行执行多个步骤 | 增加复杂度，且独立开发者通常不需要并行 |
+| agent 间实时通信 | 属于 multi-agent framework 范畴，偏离定位 |
+| 主 agent 动态拆分任务 | 任务拆分应由用户完成，保证可控性 |
+| 跨项目的 agent 协作 | 超出单项目交付范围 |
+| agent 投票/共识机制 | 增加复杂度，独立开发者不需要 |
+
+### 13.7 进入条件
+
+以下条件满足后再考虑实现：
+
+1. v0.1 三个真实项目交付完成，单 agent 执行模型稳定可靠；
+2. Agent Profile 功能经过真实使用验证，用户开始频繁创建多个 Profile；
+3. 有用户反馈"同一个任务需要多次切换 Profile 手动执行"的痛点；
+4. 外部 Pilot（v0.2）有至少 3 个用户表达了类似需求。
+
+### 13.8 产品定位判断
+
+**为什么不做重量多 agent 团队**：agent-dev 的核心价值是"交付控制平面"，不是"更聪明的 agent"。多 agent 并行协作是 Devin/Cognition 那类产品的赛道，做了就变成"又一个 AI 软件工程师"，失去差异化。
+
+**为什么可以做轻量串行流水线**：它仍然是"交付控制平面"在编排执行步骤，本质上是把用户手动做的"创建多个 Task、选不同 Profile、手动传递上下文"自动化了，不改变产品定位，不引入 agent 间通信的复杂度。
