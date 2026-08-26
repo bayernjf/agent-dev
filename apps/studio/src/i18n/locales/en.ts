@@ -128,6 +128,7 @@ export const en = {
     perPullRequest: 'Per pull request',
     stableDevApi: 'Stable dev API',
     analytics: 'Analytics',
+    analyticsNote: 'Optional. Analytics scripts only load after the user explicitly consents via a privacy banner. Measurement IDs are configured at deploy time, never committed.',
     googleAnalytics4: 'Google Analytics 4',
     microsoftClarity: 'Microsoft Clarity',
     productType: 'Product type',
