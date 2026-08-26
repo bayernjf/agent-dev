@@ -430,6 +430,37 @@ input:disabled {
 
 .choice-stack input { width: 15px; height: 15px; accent-color: var(--accent); }
 
+.agent-option {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.agent-option:hover { border-color: var(--accent); }
+.agent-option.not-detected { cursor: default; opacity: 0.7; }
+.agent-option-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-name { font-weight: 600; font-size: 14px; }
+.agent-desc { margin: 6px 0 0 23px; font-size: 12px; color: var(--text-2); line-height: 1.5; }
+.agent-install { margin: 4px 0 0 23px; font-size: 11px; color: var(--text-3); }
+.agent-install code { background: var(--bg-2); padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+.agent-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.agent-badge.verified { background: #e6f4ea; color: #1e7e34; }
+.agent-badge.profile { background: #e3f2fd; color: #1565c0; }
+.agent-badge.not-detected { background: #f5f5f5; color: #757575; }
+
 .form-note { margin: 17px 0; }
 
 .primary-button {
