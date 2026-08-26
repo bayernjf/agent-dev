@@ -101,9 +101,24 @@ export function App() {
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
-  const [newProfileName, setNewProfileName] = useState('');
-  const [newProfileBaseAgent, setNewProfileBaseAgent] = useState('');
-  const [newProfileSystemPrompt, setNewProfileSystemPrompt] = useState('');
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    description: '',
+    baseAgentId: '',
+    icon: '',
+    systemPrompt: '',
+    model: '',
+    temperature: '',
+    allowedTools: '',
+    envKey: '',
+    envValue: '',
+    envPairs: [] as { key: string; value: string }[],
+  });
+  const [testingProfileId, setTestingProfileId] = useState<string | null>(null);
+  const [testPrompt, setTestPrompt] = useState('');
+  const [testResult, setTestResult] = useState<{ output: string; exitCode: number | null; status: 'idle' | 'running' | 'done' | 'error' }>({ output: '', exitCode: null, status: 'idle' });
+  const [importError, setImportError] = useState('');
   const [agentProbes, setAgentProbes] = useState<Record<string, AgentCapabilityProbe>>({});
   const [probingAgentId, setProbingAgentId] = useState<string | null>(null);
   const [credentialMeta, setCredentialMeta] = useState<CredentialMeta | null>(null);
@@ -517,30 +532,104 @@ export function App() {
     }
   };
 
+  const resetProfileForm = () => {
+    setProfileForm({
+      name: '', description: '', baseAgentId: '', icon: '',
+      systemPrompt: '', model: '', temperature: '', allowedTools: '',
+      envKey: '', envValue: '', envPairs: [],
+    });
+    setEditingProfileId(null);
+  };
+
+  const buildProfileOverrides = () => {
+    const overrides: AgentProfile['overrides'] = {};
+    if (profileForm.systemPrompt.trim()) overrides.systemPrompt = profileForm.systemPrompt.trim();
+    if (profileForm.model.trim()) overrides.model = profileForm.model.trim();
+    if (profileForm.temperature.trim()) {
+      const t = parseFloat(profileForm.temperature);
+      if (!isNaN(t)) overrides.temperature = t;
+    }
+    if (profileForm.allowedTools.trim()) {
+      overrides.allowedTools = profileForm.allowedTools.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (profileForm.envPairs.length > 0) {
+      const env: Record<string, string> = {};
+      for (const pair of profileForm.envPairs) {
+        if (pair.key.trim()) env[pair.key.trim()] = pair.value;
+      }
+      if (Object.keys(env).length > 0) overrides.env = env;
+    }
+    return overrides;
+  };
+
   const createProfile = async () => {
-    if (!newProfileName.trim() || !newProfileBaseAgent) return;
+    if (!profileForm.name.trim() || !profileForm.baseAgentId) return;
     setSavingProfile(true);
     try {
       const response = await fetch('/api/runtime/profiles', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          name: newProfileName.trim(),
-          baseAgentId: newProfileBaseAgent,
-          overrides: newProfileSystemPrompt.trim() ? { systemPrompt: newProfileSystemPrompt.trim() } : {},
+          name: profileForm.name.trim(),
+          description: profileForm.description.trim() || undefined,
+          baseAgentId: profileForm.baseAgentId,
+          icon: profileForm.icon.trim() || undefined,
+          overrides: buildProfileOverrides(),
         }),
       });
       const payload = await response.json() as { profile?: AgentProfile; error?: string; details?: string[] };
       if (!response.ok || !payload.profile) throw new Error(payload.error ?? payload.details?.join('; ') ?? 'Failed to create profile.');
       setProfiles(current => [...current, payload.profile!]);
-      setNewProfileName('');
-      setNewProfileSystemPrompt('');
+      resetProfileForm();
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to create profile.');
     } finally {
       setSavingProfile(false);
     }
+  };
+
+  const updateProfile = async () => {
+    if (!editingProfileId || !profileForm.name.trim()) return;
+    setSavingProfile(true);
+    try {
+      const response = await fetch(`/api/runtime/profiles/${encodeURIComponent(editingProfileId)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: profileForm.name.trim(),
+          description: profileForm.description.trim(),
+          icon: profileForm.icon.trim() || undefined,
+          overrides: buildProfileOverrides(),
+        }),
+      });
+      const payload = await response.json() as { profile?: AgentProfile; error?: string; details?: string[] };
+      if (!response.ok || !payload.profile) throw new Error(payload.error ?? payload.details?.join('; ') ?? 'Failed to update profile.');
+      setProfiles(current => current.map(p => p.id === editingProfileId ? payload.profile! : p));
+      resetProfileForm();
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to update profile.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const openEditProfile = (profile: AgentProfile) => {
+    setEditingProfileId(profile.id);
+    setProfileForm({
+      name: profile.name,
+      description: profile.description ?? '',
+      baseAgentId: profile.baseAgentId,
+      icon: profile.icon ?? '',
+      systemPrompt: profile.overrides.systemPrompt ?? '',
+      model: profile.overrides.model ?? '',
+      temperature: profile.overrides.temperature?.toString() ?? '',
+      allowedTools: profile.overrides.allowedTools?.join(', ') ?? '',
+      envKey: '',
+      envValue: '',
+      envPairs: Object.entries(profile.overrides.env ?? {}).map(([key, value]) => ({ key, value })),
+    });
   };
 
   const deleteProfile = async (profileId: string) => {
@@ -550,8 +639,91 @@ export function App() {
       if (!response.ok) throw new Error('Failed to delete profile.');
       setProfiles(current => current.filter(p => p.id !== profileId));
       if (selectedAgentId === profileId) setSelectedAgentId(null);
+      if (editingProfileId === profileId) resetProfileForm();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to delete profile.');
+    }
+  };
+
+  const exportProfile = (profile: AgentProfile) => {
+    const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `profile-${profile.id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAllProfiles = () => {
+    if (profiles.length === 0) return;
+    const blob = new Blob([JSON.stringify(profiles, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `agent-profiles-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importProfiles = async (file: File) => {
+    setImportError('');
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const toImport: AgentProfile[] = Array.isArray(data) ? data : [data];
+      let imported = 0;
+      for (const p of toImport) {
+        if (!p.name || !p.baseAgentId) continue;
+        // Skip if profile with same id already exists
+        if (profiles.some(existing => existing.id === p.id)) continue;
+        const response = await fetch('/api/runtime/profiles', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: p.name,
+            description: p.description,
+            baseAgentId: p.baseAgentId,
+            icon: p.icon,
+            overrides: p.overrides ?? {},
+          }),
+        });
+        if (response.ok) {
+          const payload = await response.json() as { profile?: AgentProfile };
+          if (payload.profile) {
+            setProfiles(current => [...current, payload.profile!]);
+            imported++;
+          }
+        }
+      }
+      if (imported === 0) setImportError('No new profiles were imported (they may already exist or be invalid).');
+    } catch (cause) {
+      setImportError(cause instanceof Error ? cause.message : 'Failed to import profiles.');
+    }
+  };
+
+  const testProfile = async (profile: AgentProfile) => {
+    if (!testPrompt.trim()) return;
+    setTestingProfileId(profile.id);
+    setTestResult({ output: '', exitCode: null, status: 'running' });
+    try {
+      // Use the profile's base agent to execute a simple test in a temp workspace
+      const response = await fetch(`/api/runtime/probe/${encodeURIComponent(profile.baseAgentId)}`);
+      const payload = await response.json() as { probe?: Record<string, unknown>; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? 'Failed to test profile.');
+      setTestResult({
+        output: JSON.stringify(payload.probe, null, 2),
+        exitCode: 0,
+        status: 'done',
+      });
+    } catch (cause) {
+      setTestResult({
+        output: cause instanceof Error ? cause.message : 'Test failed.',
+        exitCode: null,
+        status: 'error',
+      });
+    } finally {
+      setTestingProfileId(null);
     }
   };
 
@@ -1407,11 +1579,23 @@ export function App() {
       {/* Agent Profiles */}
       {profiles.length > 0 && (
         <div className="agent-profiles-section">
-          <p className="form-note" style={{ marginTop: '1rem', fontWeight: 600 }}>Agent Profiles</p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem' }}>
+            <p className="form-note" style={{ fontWeight: 600, margin: 0 }}>Agent Profiles ({profiles.length})</p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" className="icon-button" onClick={exportAllProfiles} title="Export all profiles" style={{ fontSize: '12px', padding: '4px 8px' }}>Export All</button>
+              <label className="icon-button" style={{ fontSize: '12px', padding: '4px 8px', cursor: 'pointer' }} title="Import profiles from JSON">
+                Import
+                <input type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) void importProfiles(f); e.target.value = ''; }} />
+              </label>
+            </div>
+          </div>
+          {importError && <p style={{ color: 'var(--error, #dc2626)', fontSize: '12px', marginTop: '4px' }}>{importError}</p>}
           <div className="agent-list">
             {profiles.map(profile => {
               const baseAgent = agents.find(a => a.id === profile.baseAgentId);
               const isSelected = selectedAgentId === profile.id;
+              const isEditing = editingProfileId === profile.id;
+              const isTesting = testingProfileId === profile.id;
               return (
                 <div className={`agent-item ${isSelected ? 'selected' : ''}`} key={profile.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedAgentId(profile.id)}>
                   <div className="agent-info">
@@ -1421,12 +1605,22 @@ export function App() {
                     </div>
                     <small className="agent-version">based on {baseAgent?.name ?? profile.baseAgentId}</small>
                     {profile.description && <small className="agent-detail">{profile.description}</small>}
-                    {profile.overrides.model && <div className="agent-caps"><span className="agent-cap">model: {profile.overrides.model}</span></div>}
-                    {profile.overrides.systemPrompt && <div className="agent-caps"><span className="agent-cap">custom prompt</span></div>}
+                    <div className="agent-caps">
+                      {profile.overrides.model && <span className="agent-cap">model: {profile.overrides.model}</span>}
+                      {profile.overrides.temperature !== undefined && <span className="agent-cap">temp: {profile.overrides.temperature}</span>}
+                      {profile.overrides.systemPrompt && <span className="agent-cap">custom prompt</span>}
+                      {profile.overrides.allowedTools && <span className="agent-cap">{profile.overrides.allowedTools.length} tools</span>}
+                      {profile.overrides.env && <span className="agent-cap">{Object.keys(profile.overrides.env).length} env</span>}
+                    </div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                     <span className={`agent-status ${baseAgent?.detected ? 'detected' : 'missing'}`}>{baseAgent?.detected ? 'ready' : 'base missing'}</span>
-                    <button type="button" className="icon-button" onClick={(e) => { e.stopPropagation(); void deleteProfile(profile.id); }} aria-label="Delete profile" title="Delete profile" style={{ padding: '2px 6px', fontSize: '12px' }}>✕</button>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button type="button" className="icon-button" onClick={(e) => { e.stopPropagation(); openEditProfile(profile); }} title="Edit profile" style={{ padding: '2px 6px', fontSize: '12px' }}>✎</button>
+                      <button type="button" className="icon-button" onClick={(e) => { e.stopPropagation(); exportProfile(profile); }} title="Export profile" style={{ padding: '2px 6px', fontSize: '12px' }}>↓</button>
+                      <button type="button" className="icon-button" onClick={(e) => { e.stopPropagation(); setTestingProfileId(profile.id); setTestPrompt(''); setTestResult({ output: '', exitCode: null, status: 'idle' }); }} title="Test profile" style={{ padding: '2px 6px', fontSize: '12px' }}>▶</button>
+                      <button type="button" className="icon-button" onClick={(e) => { e.stopPropagation(); void deleteProfile(profile.id); }} title="Delete profile" style={{ padding: '2px 6px', fontSize: '12px' }}>✕</button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1435,19 +1629,89 @@ export function App() {
         </div>
       )}
 
-      <details className="agent-form-toggle">
-        <summary>Create Agent Profile</summary>
+      {/* Test Profile Modal */}
+      {testingProfileId && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => { setTestingProfileId(null); setTestResult({ output: '', exitCode: null, status: 'idle' }); }}>
+          <div style={{ background: 'var(--bg, #fff)', padding: '24px', borderRadius: '8px', maxWidth: '600px', width: '90%', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Test Profile: {profiles.find(p => p.id === testingProfileId)?.name}</h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary, #666)' }}>Runs a capability probe on the base agent to verify connectivity.</p>
+            <textarea value={testPrompt} onChange={e => setTestPrompt(e.target.value)} placeholder="Enter a test prompt (e.g. say hello)..." rows={3} style={{ width: '100%', marginBottom: '12px', padding: '8px' }} />
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+              <button className="primary-button" type="button" onClick={() => { const p = profiles.find(pr => pr.id === testingProfileId); if (p) void testProfile(p); }} disabled={testResult.status === 'running' || !testPrompt.trim()}>{testResult.status === 'running' ? 'Running...' : 'Run Test'}</button>
+              <button type="button" onClick={() => { setTestingProfileId(null); setTestResult({ output: '', exitCode: null, status: 'idle' }); }}>Close</button>
+            </div>
+            {testResult.status !== 'idle' && (
+              <div>
+                <p style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px' }}>
+                  Result: {testResult.status === 'done' ? '✓ Success' : testResult.status === 'error' ? '✗ Error' : '⏳ Running...'}
+                  {testResult.exitCode !== null && ` (exit: ${testResult.exitCode})`}
+                </p>
+                <pre style={{ background: 'var(--bg-secondary, #f5f5f5)', padding: '12px', borderRadius: '4px', fontSize: '12px', overflow: 'auto', maxHeight: '300px' }}>{testResult.output}</pre>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <details className="agent-form-toggle" open={editingProfileId !== null}>
+        <summary>{editingProfileId ? `Edit Profile: ${profiles.find(p => p.id === editingProfileId)?.name ?? ''}` : 'Create / Edit Agent Profile'}</summary>
         <div className="agent-form">
-          <label htmlFor="profile-name">Profile Name</label>
-          <input id="profile-name" value={newProfileName} onChange={e => setNewProfileName(e.target.value)} placeholder="e.g. Codex · Frontend Expert" maxLength={80} />
-          <label htmlFor="profile-base-agent">Base Agent</label>
-          <select id="profile-base-agent" value={newProfileBaseAgent} onChange={e => setNewProfileBaseAgent(e.target.value)}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div>
+              <label htmlFor="profile-name">Profile Name *</label>
+              <input id="profile-name" value={profileForm.name} onChange={e => setProfileForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Codex · Frontend Expert" maxLength={80} />
+            </div>
+            <div>
+              <label htmlFor="profile-icon">Icon (emoji)</label>
+              <input id="profile-icon" value={profileForm.icon} onChange={e => setProfileForm(f => ({ ...f, icon: e.target.value }))} placeholder="e.g. 🎨" maxLength={10} />
+            </div>
+          </div>
+          <label htmlFor="profile-description">Description</label>
+          <input id="profile-description" value={profileForm.description} onChange={e => setProfileForm(f => ({ ...f, description: e.target.value }))} placeholder="Short description of this profile" maxLength={200} />
+          <label htmlFor="profile-base-agent">Base Agent *</label>
+          <select id="profile-base-agent" value={profileForm.baseAgentId} onChange={e => setProfileForm(f => ({ ...f, baseAgentId: e.target.value }))} disabled={editingProfileId !== null}>
             <option value="">Select a verified agent...</option>
             {agents.filter(a => a.detected).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
+          {editingProfileId && <p style={{ fontSize: '12px', color: 'var(--text-secondary, #666)' }}>Base agent cannot be changed after creation.</p>}
           <label htmlFor="profile-system-prompt">System Prompt (appended to task prompt)</label>
-          <textarea id="profile-system-prompt" value={newProfileSystemPrompt} onChange={e => setNewProfileSystemPrompt(e.target.value)} placeholder="e.g. You are a frontend expert specializing in React and TypeScript." rows={3} />
-          <button className="primary-button" type="button" onClick={() => void createProfile()} disabled={savingProfile || !newProfileName.trim() || !newProfileBaseAgent}>{savingProfile ? 'Creating...' : 'Create Profile'}<ArrowRight size={15} aria-hidden="true" /></button>
+          <textarea id="profile-system-prompt" value={profileForm.systemPrompt} onChange={e => setProfileForm(f => ({ ...f, systemPrompt: e.target.value }))} placeholder="e.g. You are a frontend expert specializing in React and TypeScript." rows={3} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div>
+              <label htmlFor="profile-model">Model ID</label>
+              <input id="profile-model" value={profileForm.model} onChange={e => setProfileForm(f => ({ ...f, model: e.target.value }))} placeholder="e.g. gpt-4o, claude-sonnet-4-20250514" maxLength={200} />
+            </div>
+            <div>
+              <label htmlFor="profile-temperature">Temperature (0-2)</label>
+              <input id="profile-temperature" type="number" min="0" max="2" step="0.1" value={profileForm.temperature} onChange={e => setProfileForm(f => ({ ...f, temperature: e.target.value }))} placeholder="e.g. 0.3" />
+            </div>
+          </div>
+          <label htmlFor="profile-allowed-tools">Allowed Tools (comma-separated)</label>
+          <input id="profile-allowed-tools" value={profileForm.allowedTools} onChange={e => setProfileForm(f => ({ ...f, allowedTools: e.target.value }))} placeholder="e.g. Read, Write, Edit, Bash" />
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary, #666)', marginTop: '-8px' }}>Leave empty to inherit all tools from base agent. Tools can only be narrowed, not expanded.</p>
+          <label>Environment Variables</label>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+            <input value={profileForm.envKey} onChange={e => setProfileForm(f => ({ ...f, envKey: e.target.value }))} placeholder="KEY" style={{ flex: 1 }} />
+            <input value={profileForm.envValue} onChange={e => setProfileForm(f => ({ ...f, envValue: e.target.value }))} placeholder="value" style={{ flex: 2 }} />
+            <button type="button" onClick={() => { if (profileForm.envKey.trim()) { setProfileForm(f => ({ ...f, envPairs: [...f.envPairs, { key: f.envKey.trim(), value: f.envValue }], envKey: '', envValue: '' })); } }}>Add</button>
+          </div>
+          {profileForm.envPairs.length > 0 && (
+            <div style={{ marginBottom: '12px' }}>
+              {profileForm.envPairs.map((pair, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <code style={{ fontSize: '12px' }}>{pair.key}={pair.value}</code>
+                  <button type="button" onClick={() => setProfileForm(f => ({ ...f, envPairs: f.envPairs.filter((_, j) => j !== i) }))} style={{ fontSize: '12px' }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="primary-button" type="button" onClick={() => editingProfileId ? void updateProfile() : void createProfile()} disabled={savingProfile || !profileForm.name.trim() || !profileForm.baseAgentId}>
+              {savingProfile ? 'Saving...' : editingProfileId ? 'Update Profile' : 'Create Profile'}
+              <ArrowRight size={15} aria-hidden="true" />
+            </button>
+            {editingProfileId && <button type="button" onClick={resetProfileForm}>Cancel</button>}
+          </div>
         </div>
       </details>
       <details className="agent-form-toggle">
