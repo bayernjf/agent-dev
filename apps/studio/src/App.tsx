@@ -1932,17 +1932,28 @@ export function App() {
                   <label><input type="checkbox" checked={answers.analyticsProviders.includes('clarity')} onChange={() => toggleAnalytics('clarity')} />{t('blueprint.microsoftClarity')}</label>
                 </div></fieldset>
                 <fieldset className="choice-group"><legend>{t('blueprint.runtime')}</legend><p>{t('blueprint.runtimeNote')}</p><div className="choice-stack">
-                  {agents.length === 0 ? <small>{t('blueprint.runtimeCatalogLoading')}</small> : agents
-                    .flatMap(agent => {
-                      // Only ids the Blueprint schema accepts can be chosen; a custom Agent whose id
-                      // is outside the enum would fail validation on revision create.
-                      const provider = runtimeProviderSchema.safeParse(agent.id);
-                      return agent.detected && provider.success ? [{ agent, provider: provider.data }] : [];
-                    })
-                    .map(({ agent, provider }) => (
-                      <label key={agent.id}><input type="radio" name="runtime" checked={answers.runtimeProvider === provider} onChange={() => setAnswer('runtimeProvider', provider)} />{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</label>
-                    ))}
-                  {agents.filter(agent => agent.detected && runtimeProviderSchema.safeParse(agent.id).success).length === 0 && <small>{t('blueprint.runtimeNoneDetected')}</small>}
+                  {agents.length === 0 && profiles.length === 0 ? <small>{t('blueprint.runtimeCatalogLoading')}</small> : <>
+                    {agents
+                      .flatMap(agent => {
+                        const provider = runtimeProviderSchema.safeParse(`local-${agent.id}`);
+                        return agent.detected && provider.success ? [{ agent, provider: provider.data }] : [];
+                      })
+                      .map(({ agent, provider }) => (
+                        <label key={agent.id}><input type="radio" name="runtime" checked={answers.runtimeProvider === provider} onChange={() => setAnswer('runtimeProvider', provider)} />{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</label>
+                      ))}
+                    {profiles.map(profile => {
+                      const baseAgent = agents.find(a => a.id === profile.baseAgentId);
+                      const ready = baseAgent?.detected ?? false;
+                      return (
+                        <label key={profile.id} style={{ opacity: ready ? 1 : 0.5 }}>
+                          <input type="radio" name="runtime" checked={answers.runtimeProvider === profile.id} onChange={() => setAnswer('runtimeProvider', profile.id)} disabled={!ready} />
+                          {profile.icon ? `${profile.icon} ` : ''}{profile.name} · Profile (based on {baseAgent?.name ?? profile.baseAgentId})
+                          {!ready && ' — base agent not detected'}
+                        </label>
+                      );
+                    })}
+                  </>}
+                  {agents.filter(agent => agent.detected).length === 0 && profiles.length === 0 && <small>{t('blueprint.runtimeNoneDetected')}</small>}
                 </div></fieldset>
                 <label htmlFor="custom-instructions">{t('blueprint.customImplementationNote')}</label>
                 <textarea id="custom-instructions" value={answers.customInstructions} onChange={event => setAnswer('customInstructions', event.target.value)} placeholder={t('blueprint.customInstructionsPlaceholder')} maxLength={1000} />
