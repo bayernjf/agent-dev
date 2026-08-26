@@ -86,7 +86,9 @@ const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
   // `--dangerously-skip-permissions` avoids interactive approval prompts in the isolated task workspace.
   // `--output-format json` gives structured output parseable by the same runner as Codex.
   'claude-code': { status: 'candidate', buildCommand: (prompt, cwd) => ['claude', '-p', prompt, '--allowedTools', 'Read,Write,Edit,Bash', '--dangerously-skip-permissions', '--output-format', 'json'] },
-  aider: { status: 'candidate', buildCommand: (prompt, cwd) => ['aider', '--message', prompt, '--yes', '--cwd', cwd] },
+  // Aider has no `--cwd` flag; the working directory is set by the spawn cwd option.
+  // `--message` sends a single prompt, `--yes-always` auto-accepts all prompts.
+  aider: { status: 'candidate', buildCommand: (prompt, cwd) => ['aider', '--message', prompt, '--yes-always'] },
   // OpenCode 2.0 (`lildax`) dropped the v1 `-p --print` interface, so tasks run through the
   // session-based driver script. The default model is the free `nemotron-3-ultra-free` from the
   // built-in `opencode` provider: it is the strongest free model verified working on the Zen
@@ -101,7 +103,9 @@ const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
     const driver = fileURLToPath(new URL('../scripts/opencode2-driver.mjs', import.meta.url));
     return ['node', driver, cwd, 'nemotron-3-ultra-free', 'opencode', `--prompt=${promptFile}`];
   } },
-  openclaw: { status: 'candidate', buildCommand: (prompt, cwd) => ['openclaw', 'exec', '--json', '--sandbox', 'workspace-write', '--cd', cwd, prompt] },
+  // OpenClaw runs an embedded agent turn via `agent --local --agent main --message`. No `--cwd` flag;
+  // the working directory is set by the spawn cwd option. `--json` gives structured output.
+  openclaw: { status: 'candidate', buildCommand: (prompt, cwd) => ['openclaw', 'agent', '--local', '--agent', 'main', '--message', prompt, '--json'] },
   // CodeBuddy runs non-interactively via `-p`, with permissions bypassed because it executes inside
   // an already-isolated task workspace. `--no-session-persistence` keeps each run stateless.
   // Execution contract exercised locally: `codebuddy -p ... "READY"` returned the response and
