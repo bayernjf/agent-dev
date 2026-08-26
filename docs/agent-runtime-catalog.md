@@ -174,3 +174,14 @@ runtime:
 ## 8. 当前实现边界
 
 当前代码已提供本地 Agent Catalog API 和 Studio 面板：内置 Agent 来自 Key-Value 文件，本机未安装的内置 Agent 不显示；用户可以通过弹窗添加 custom Agent，未安装的 custom Agent 置灰并持久化到 `.agent-dev/agents.conf`。Capability Probe 现在返回明确的 Adapter 状态：`verified`（可执行）、`candidate`（可生成 dry-run，但未实测执行）或 `unsupported`（无 Adapter）。当前仅 Codex Adapter 已完成隔离 workspace 的真实执行验证；其他 Agent 不能自动执行。`isAgentExecutable()` 只会为 `verified` Adapter 返回 `true`。
+
+## 9. Agent Profile（基于已有 Agent 创建变体）
+
+除了添加全新的自定义 Agent，用户还可以基于已有的 verified Agent 创建 **Agent Profile**——命名变体，通过覆盖 system prompt、模型、温度、工具白名单、环境变量等配置来定制 Agent 行为。例如：
+
+- `codex-frontend`：基于 Codex，system prompt 专注 React/TypeScript
+- `codex-reviewer`：基于 Codex，禁用 Write/Edit 工具，只做代码审查
+
+Profile 是用户级配置（存储在 `.agent-dev/agent-profiles.json`），继承底层 Agent 的执行契约和安全边界（工具只能收窄不能放宽，环境变量必须在白名单内）。在 Runtime 选择时，Profile 和内置 Agent、自定义 Agent 平级。
+
+详见 [custom-agent-profiles.md](./custom-agent-profiles.md)。

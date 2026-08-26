@@ -265,3 +265,75 @@ Profile 继承底层 Agent 的所有安全边界，额外约束：
 | `packages/storage/src/index.ts` | `prepareRuntimeRun` / `executeRuntimeAttempt` 支持 Profile ID；增加 Profile 存储读写 |
 | `apps/daemon/src/app.ts` | 增加 `/api/runtime/profiles/*` 路由 |
 | `apps/studio/` | Agent 选择下拉、Profile 管理页面、Blueprint 表单 |
+
+## 12. 示例 Profile
+
+以下是三个常用 Profile 的配置示例，可直接通过 API 或 Studio 创建。
+
+### 12.1 前端专家（基于 Codex）
+
+```json
+{
+  "name": "Codex · 前端专家",
+  "baseAgentId": "codex",
+  "description": "专注 React/TypeScript 前端开发，优先使用函数组件和 Hooks",
+  "overrides": {
+    "systemPrompt": "You are a senior frontend engineer specializing in React and TypeScript. Always use functional components with Hooks. Prefer Tailwind CSS for styling. Write accessible HTML with proper ARIA attributes. Keep components small and composable.",
+    "model": "gpt-4o",
+    "temperature": 0.3
+  }
+}
+```
+
+### 12.2 后端专家（基于 Codex）
+
+```json
+{
+  "name": "Codex · 后端专家",
+  "baseAgentId": "codex",
+  "description": "专注 Node.js/数据库后端开发，强调错误处理和输入校验",
+  "overrides": {
+    "systemPrompt": "You are a senior backend engineer specializing in Node.js and PostgreSQL. Always validate all user input. Use proper error handling with meaningful error messages. Write database queries with parameterized statements to prevent SQL injection. Include logging for debugging.",
+    "model": "gpt-4o",
+    "temperature": 0.2
+  }
+}
+```
+
+### 12.3 代码审查员（基于 CodeBuddy）
+
+```json
+{
+  "name": "CodeBuddy · 审查员",
+  "baseAgentId": "codebuddy",
+  "description": "只做代码审查，不修改文件。关注安全、性能和可维护性",
+  "overrides": {
+    "systemPrompt": "You are a strict code reviewer. Do NOT modify any files. Read the code and provide a detailed review covering: security vulnerabilities, performance issues, code maintainability, naming conventions, and test coverage. Output your findings as a structured list with severity levels (critical/warning/info).",
+    "blockedTools": ["Write", "Edit", "Bash"]
+  }
+}
+```
+
+### 12.4 通过 API 创建
+
+```bash
+curl -X POST http://localhost:3737/api/runtime/profiles \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Codex · 前端专家",
+    "baseAgentId": "codex",
+    "overrides": {
+      "systemPrompt": "You are a senior frontend engineer...",
+      "temperature": 0.3
+    }
+  }'
+```
+
+### 12.5 存储位置
+
+创建后的 Profile 保存在：
+```
+.agent-dev/agent-profiles.json
+```
+
+这是一个 JSON 数组文件，可手动编辑、备份或版本管理。
