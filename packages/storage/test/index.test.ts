@@ -27,7 +27,7 @@ describe('AgentDevStore', () => {
       expect(reopened.getProject(created.id)?.blueprint.metadata.name).toBe('receipt-desk');
       await reopened.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   });
 
@@ -49,7 +49,7 @@ describe('AgentDevStore', () => {
       expect(revised.blueprint.spec.analytics.providers).toEqual(['clarity']);
       await store.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   });
 
@@ -79,7 +79,7 @@ describe('AgentDevStore', () => {
       expect(reopened.getBaselineApproval(created.id, 1)).toEqual(approval);
       await reopened.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   });
 
@@ -152,7 +152,7 @@ describe('AgentDevStore', () => {
       await expect(readFile(join(completed.workspacePath, 'ACCEPTANCE_REPORT.md'), 'utf8')).resolves.toContain('Quality Gate status is failed.');
       await store.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   }, 30_000);
 
@@ -183,7 +183,7 @@ describe('AgentDevStore', () => {
       expect(evidence.status).toBe('');
       await store.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   }, 30_000);
 
@@ -212,12 +212,13 @@ describe('AgentDevStore', () => {
       expect(tracked.stdout).not.toContain('.env');
       await store.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   }, 30_000);
 
   it('fails the run instead of committing a symbolic link outside the workspace', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    let outside = '';
     try {
       const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
       const created = await store.createProject({
@@ -234,7 +235,7 @@ describe('AgentDevStore', () => {
       // deliberately NOT node_modules — the template .gitignore now ignores `node_modules`
       // (with or without a trailing slash), so a symlink under that name never even stages. The
       // guard has to catch a link under any other, non-ignored name.
-      const outside = await mkdtemp(join(tmpdir(), 'agent-dev-outside-'));
+      outside = await mkdtemp(join(tmpdir(), 'agent-dev-outside-'));
       await mkdir(join(outside, 'vendor'), { recursive: true });
       await symlink(join(outside, 'vendor'), join(applied.workspacePath, 'vendor'));
       const run = await store.executeRuntimeRun(created.id, 1, async () => ({ exitCode: 0, signal: null, timedOut: false, output: 'wrote the feature', startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }));
@@ -245,7 +246,9 @@ describe('AgentDevStore', () => {
       expect(tracked.stdout).not.toContain('vendor');
       await store.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      // maxRetries handles ENOTEMPTY on Linux where .git/objects may still be releasing handles.
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      if (outside) await rm(outside, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   }, 30_000);
 
@@ -274,7 +277,7 @@ describe('AgentDevStore', () => {
       expect(store.getProject(created.id)?.state).toBe('BASELINE_READY');
       await store.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   });
 
@@ -336,7 +339,7 @@ describe('AgentDevStore', () => {
       await expect(reopened.getReleaseEvidence(created.id, 1)).resolves.toMatchObject({ webUrl: 'https://releasable-web.pages.dev' });
       await reopened.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   }, 30_000);
 
@@ -371,7 +374,7 @@ describe('AgentDevStore', () => {
       expect(retried.state).toBe('RELEASING');
       await store.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   }, 30_000);
 
@@ -437,7 +440,7 @@ describe('AgentDevStore', () => {
       await expect(store.publishPullRequest(created.id, 1, publisher)).rejects.toThrow(`The accepted commit ${acceptance.gitEvidence.head} is not part of`);
       await store.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   }, 60_000);
 
@@ -459,7 +462,7 @@ describe('AgentDevStore', () => {
       expect(store.getLatestApplyRun(created.id, 1)?.id).toBe(first.id);
       await store.close();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   });
 });
