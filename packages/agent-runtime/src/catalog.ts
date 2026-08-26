@@ -45,8 +45,8 @@ const BUILT_IN_CAPABILITIES: Record<string, AgentCapability[]> = {
   opencode: ['workspace-write', 'version-detection', 'non-interactive'],
   openclaw: ['workspace-write', 'version-detection', 'non-interactive'],
   codebuddy: ['workspace-write', 'version-detection', 'non-interactive'],
+  hermes: ['workspace-write', 'version-detection', 'non-interactive'],
   pi: ['read-only', 'version-detection'],
-  hermes: ['read-only', 'version-detection'],
 };
 
 const NON_INTERACTIVE_FLAGS: Record<string, string[]> = {
@@ -57,6 +57,8 @@ const NON_INTERACTIVE_FLAGS: Record<string, string[]> = {
   opencode: ['api'],
   openclaw: ['exec', '--json'],
   codebuddy: ['-p', '--print'],
+  // Hermes one-shot mode: `-z PROMPT` prints only the final response to stdout.
+  hermes: ['-z'],
 };
 
 type DetectionResult = { detected: boolean; version: string | null; detail: string };
