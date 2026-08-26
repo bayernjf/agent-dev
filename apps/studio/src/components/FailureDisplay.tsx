@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { classifyFailure, categoryLabel, severityLabel, type FailureClassification } from '@agent-dev/agent-runtime';
+import { classifyFailure, categoryLabel, severityLabel, type FailureClassification } from '@agent-dev/agent-runtime/failure-classification';
 
 type FailureDisplayProps = {
   error: string;

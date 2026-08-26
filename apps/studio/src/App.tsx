@@ -1525,7 +1525,7 @@ export function App() {
       setBlueprintImportResult(`Imported as revision ${payload.revision ?? 'new'}. Reloading...`);
       await loadProjects();
       if (selected) {
-        await loadProject(selected.id);
+        await selectProject(selected.id);
       }
       setTimeout(() => setBlueprintImportResult(null), 5000);
     } catch (cause) {

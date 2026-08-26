@@ -936,7 +936,13 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
         projectId,
         ...parsed.data,
         pipeline: parsed.data.pipeline
-          ? { ...parsed.data.pipeline, currentStepIndex: 0, results: [], status: 'idle' as const }
+          ? {
+              ...parsed.data.pipeline,
+              steps: parsed.data.pipeline.steps.map((step, index) => ({ ...step, id: `step-${index + 1}` })),
+              currentStepIndex: 0,
+              results: [],
+              status: 'idle' as const,
+            }
           : undefined,
       });
       return context.json({ task }, 201);
