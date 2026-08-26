@@ -67,6 +67,38 @@ export type DependencyInstallResult = {
   completedAt: string;
 };
 
+export type PipelineStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+export type PipelineStep = {
+  id: string;
+  name: string;
+  profileId: string;
+  prompt: string;
+  dependsOn?: string[];
+  outputArtifact?: string;
+  continueOnFailure?: boolean;
+  requiresApproval?: boolean;
+};
+
+export type PipelineStepResult = {
+  stepId: string;
+  status: PipelineStepStatus;
+  output?: string;
+  runtimeRunId?: string;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+};
+
+export type FeatureTaskPipeline = {
+  steps: PipelineStep[];
+  currentStepIndex: number;
+  results: PipelineStepResult[];
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'paused';
+  startedAt?: string;
+  completedAt?: string;
+};
+
 export type FeatureTask = {
   id: string;
   blueprintRevision: number;
@@ -76,6 +108,7 @@ export type FeatureTask = {
   status: 'draft' | 'approved';
   approvedBy?: string;
   approvedAt?: string;
+  pipeline?: FeatureTaskPipeline;
 };
 
 export type RuntimeAttempt = {
@@ -178,6 +211,25 @@ export type AgentCapabilityProbe = {
   workspaceWrite: boolean;
   helpAvailable: boolean;
   adapterStatus: 'verified' | 'candidate' | 'unsupported';
+};
+
+export type AgentProfile = {
+  id: string;
+  name: string;
+  description?: string;
+  baseAgentId: string;
+  icon?: string;
+  overrides: {
+    systemPrompt?: string;
+    model?: string;
+    temperature?: number;
+    env?: Record<string, string>;
+    allowedTools?: string[];
+    blockedTools?: string[];
+    maxTokens?: number;
+  };
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CredentialMeta = {
