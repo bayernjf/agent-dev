@@ -9,7 +9,7 @@ import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
+import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput, type AgentProfile, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
 import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
 import type { ReleaseSource } from '@agent-dev/deployment-composer';
 import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin, releaseIdempotencyKey, releaseStepPlan } from '@agent-dev/deployment-composer';
@@ -392,6 +392,51 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     return context.json({ agent: discoverAgentRuntimes(customAgents).at(-1) }, 201);
   });
 
+  // --- Agent Profiles ---
+
+  app.get('/api/runtime/profiles', async context => {
+    const profiles = await store.profiles.listProfiles();
+    return context.json({ profiles });
+  });
+
+  app.get('/api/runtime/profiles/:profileId', async context => {
+    const profile = await store.profiles.getProfile(context.req.param('profileId'));
+    if (!profile) return context.json({ error: 'Profile not found.' }, 404);
+    return context.json({ profile });
+  });
+
+  app.post('/api/runtime/profiles', async context => {
+    const parsed = agentProfileCreateSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Invalid profile input.', details: parsed.error.flatten() }, 400);
+    // Base agent must be verified/executable
+    if (!isAgentExecutable(parsed.data.baseAgentId)) {
+      return context.json({ error: `Base agent "${parsed.data.baseAgentId}" is not verified. Profiles can only be based on verified agents.` }, 400);
+    }
+    const { profile, validation } = await store.profiles.createProfile(parsed.data, {
+      verifyBaseAgent: id => isAgentExecutable(id),
+    });
+    if (!validation.valid) return context.json({ error: 'Profile validation failed.', details: validation.errors }, 400);
+    return context.json({ profile }, 201);
+  });
+
+  app.put('/api/runtime/profiles/:profileId', async context => {
+    const parsed = agentProfileUpdateSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Invalid profile update.', details: parsed.error.flatten() }, 400);
+    const profileId = context.req.param('profileId');
+    const existing = await store.profiles.getProfile(profileId);
+    if (!existing) return context.json({ error: 'Profile not found.' }, 404);
+    const { profile, validation } = await store.profiles.updateProfile(profileId, parsed.data);
+    if (!validation.valid) return context.json({ error: 'Profile validation failed.', details: validation.errors }, 400);
+    return context.json({ profile });
+  });
+
+  app.delete('/api/runtime/profiles/:profileId', async context => {
+    const profileId = context.req.param('profileId');
+    const deleted = await store.profiles.deleteProfile(profileId);
+    if (!deleted) return context.json({ error: 'Profile not found.' }, 404);
+    return context.json({ deleted: true });
+  });
+
   app.get('/api/projects/:projectId/runtime/plan', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
@@ -401,8 +446,13 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     // Prefer the Blueprint-selected runtime when no explicit run exists yet. Falls back to codex only
     // when the Blueprint did not specify a runtime (legacy Blueprints).
     const blueprintAgent = project.blueprint.spec.runtime?.provider;
-    const agentId = run?.agentId ?? blueprintAgent ?? 'codex';
-    const plan = isAgentExecutable(agentId) ? buildAgentExecutionPlan(task, task.workspacePath, agentId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
+    const rawAgentId = run?.agentId ?? blueprintAgent ?? 'codex';
+    // Resolve Profile if the agentId refers to one.
+    const profile = await store.profiles.getProfile(rawAgentId);
+    const agentId = profile ? profile.baseAgentId : rawAgentId;
+    const plan = isAgentExecutable(agentId)
+      ? buildAgentExecutionPlan(task, task.workspacePath, agentId, { profile: profile ?? undefined })
+      : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
     return context.json({ probe: probeCodexRuntime(), plan, run });
   });
 
@@ -413,10 +463,19 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (body?.confirmation !== 'PREPARE_RUNTIME_RUN') return context.json({ error: 'Runtime preparation requires confirmation PREPARE_RUNTIME_RUN.' }, 400);
     if (body.agentId) {
       const catalog = discoverAgentRuntimes(customAgents);
-      const agent = catalog.find(a => a.id === body.agentId);
-      if (!agent) return context.json({ error: 'The selected Agent was not found in the catalog.' }, 404);
-      if (!agent.detected) return context.json({ error: `Agent "${agent.name}" is not detected on PATH.` }, 409);
-      if (!isAgentExecutable(agent.id)) return context.json({ error: `Agent "${agent.name}" is detected, but does not have a verified non-interactive execution adapter.` }, 409);
+      // Check if the agentId refers to an Agent Profile first.
+      const profile = await store.profiles.getProfile(body.agentId);
+      if (profile) {
+        const baseAgent = catalog.find(a => a.id === profile.baseAgentId);
+        if (!baseAgent) return context.json({ error: `Profile base agent "${profile.baseAgentId}" was not found in the catalog.` }, 404);
+        if (!baseAgent.detected) return context.json({ error: `Profile base agent "${baseAgent.name}" is not detected on PATH.` }, 409);
+        if (!isAgentExecutable(profile.baseAgentId)) return context.json({ error: `Profile base agent "${baseAgent.name}" does not have a verified non-interactive execution adapter.` }, 409);
+      } else {
+        const agent = catalog.find(a => a.id === body.agentId);
+        if (!agent) return context.json({ error: 'The selected Agent was not found in the catalog.' }, 404);
+        if (!agent.detected) return context.json({ error: `Agent "${agent.name}" is not detected on PATH.` }, 409);
+        if (!isAgentExecutable(agent.id)) return context.json({ error: `Agent "${agent.name}" is detected, but does not have a verified non-interactive execution adapter.` }, 409);
+      }
     }
     try {
       // A request may override the runtime; otherwise use the Blueprint-selected provider.
