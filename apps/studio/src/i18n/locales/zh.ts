@@ -125,6 +125,7 @@ export const zh = {
     perPullRequest: '每个 Pull Request',
     stableDevApi: '稳定 Dev API',
     analytics: '分析服务',
+    analyticsNote: '可选。分析脚本仅在用户通过隐私横幅明确同意后才加载。测量 ID 在部署时配置，不会提交到代码仓库。',
     googleAnalytics4: 'Google Analytics 4',
     microsoftClarity: 'Microsoft Clarity',
     productType: '产品形态',

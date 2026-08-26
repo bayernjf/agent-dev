@@ -1940,6 +1940,11 @@ export function App() {
                 <button className={answers.dataSensitivity === 'sensitive' ? 'selected' : ''} type="button" onClick={() => setAnswer('dataSensitivity', 'sensitive')}><ShieldCheck size={15} />{t('blueprint.sensitive')}</button>
               </div></fieldset>
 
+              <fieldset className="choice-group"><legend>{t('blueprint.analytics')}</legend><p>{t('blueprint.analyticsNote')}</p><div className="choice-stack">
+                <label><input type="checkbox" checked={answers.analyticsProviders.includes('ga4')} onChange={() => toggleAnalytics('ga4')} />{t('blueprint.googleAnalytics4')}</label>
+                <label><input type="checkbox" checked={answers.analyticsProviders.includes('clarity')} onChange={() => toggleAnalytics('clarity')} />{t('blueprint.microsoftClarity')}</label>
+              </div></fieldset>
+
               {isProfessional && <>
                 <fieldset className="choice-group ownership-group"><legend>{t('blueprint.resourceOwnership')}</legend><p>{t('blueprint.ownershipNote')}</p>
                   {/* Only the providers this product type provisions are asked for: an MCP server or a
@@ -1953,10 +1958,6 @@ export function App() {
                 <fieldset className="choice-group"><legend>{t('blueprint.previewWorkflow')}</legend><div className="choice-stack">
                   <label><input type="radio" name="preview" checked={answers.previewStrategy === 'per-pull-request'} onChange={() => setAnswer('previewStrategy', 'per-pull-request')} />{t('blueprint.perPullRequest')}</label>
                   <label><input type="radio" name="preview" checked={answers.previewStrategy === 'stable-dev-api'} onChange={() => setAnswer('previewStrategy', 'stable-dev-api')} />{t('blueprint.stableDevApi')}</label>
-                </div></fieldset>
-                <fieldset className="choice-group"><legend>{t('blueprint.analytics')}</legend><div className="choice-stack">
-                  <label><input type="checkbox" checked={answers.analyticsProviders.includes('ga4')} onChange={() => toggleAnalytics('ga4')} />{t('blueprint.googleAnalytics4')}</label>
-                  <label><input type="checkbox" checked={answers.analyticsProviders.includes('clarity')} onChange={() => toggleAnalytics('clarity')} />{t('blueprint.microsoftClarity')}</label>
                 </div></fieldset>
                 <fieldset className="choice-group"><legend>{t('blueprint.runtime')}</legend><p>{t('blueprint.runtimeNote')}</p><div className="choice-stack">
                   {agents.length === 0 && profiles.length === 0 ? <small>{t('blueprint.runtimeCatalogLoading')}</small> : <>
