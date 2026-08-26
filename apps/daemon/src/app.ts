@@ -36,6 +36,9 @@ const approveBaselineSchema = z.object({
 const applyBaselineSchema = z.object({
   blueprintRevision: z.number().int().positive(),
   confirmation: z.literal('APPLY_BASELINE'),
+  noExternalChanges: z.boolean().optional(),
+  /** Optional: URL of an existing Git repository to import instead of generating from scratch. */
+  importRepositoryUrl: z.string().url().optional(),
 });
 
 const retryApplySchema = z.object({
@@ -286,6 +289,18 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     try {
       const queued = await store.createApplyRun(projectId, parsed.data.blueprintRevision);
+      // If importing an existing repository, clone it into the workspace before applying.
+      if (parsed.data.importRepositoryUrl) {
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const { mkdir, rm } = await import('node:fs/promises');
+        const execFileAsync = promisify(execFile);
+        // Ensure workspace directory exists and is empty for clone.
+        await rm(queued.workspacePath, { recursive: true, force: true });
+        await mkdir(queued.workspacePath, { recursive: true });
+        // Clone the repository (shallow, default branch).
+        await execFileAsync('git', ['clone', '--depth', '1', parsed.data.importRepositoryUrl, '.'], { cwd: queued.workspacePath, timeout: 60_000 });
+      }
       const run = await store.executeApplyRun(queued.id);
       events.emit({
         type: run.status === 'completed' ? 'apply.completed' : 'apply.failed',
@@ -293,7 +308,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
         projectName: project.name,
         occurredAt: run.updatedAt,
       });
-      return context.json({ run }, run.status === 'completed' ? 200 : 422);
+      return context.json({ run, imported: Boolean(parsed.data.importRepositoryUrl) }, run.status === 'completed' ? 200 : 422);
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to run local Apply.' }, 409);
     }
