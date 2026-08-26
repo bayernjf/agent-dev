@@ -6,6 +6,7 @@ import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
 import { baselineProvidersFor, getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
+import { FailureDisplay } from './components/FailureDisplay';
 import type {
   Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyStep, ApplyRun, DependencyReadiness,
   QualityGateResult, DependencyInstallResult, FeatureTask, RuntimeAttempt, RuntimeRun, GitEvidence,
@@ -1811,7 +1812,13 @@ export function App() {
             invisible until the user navigated back to it. Rendering it in the shell puts every
             message in the view that produced it. */}
         {(daemonOnline === false || error) && (
-          <p className="error" role="alert">{daemonOnline === false ? t('errors.daemonUnavailable') : error}</p>
+          <div className="error-panel" role="alert">
+            {daemonOnline === false ? (
+              <p className="error">{t('errors.daemonUnavailable')}</p>
+            ) : (
+              <FailureDisplay error={error} />
+            )}
+          </div>
         )}
 
         {view.kind === 'dashboard' && (
