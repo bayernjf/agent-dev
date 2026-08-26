@@ -61,6 +61,17 @@ const featureTaskSchema = z.object({
   title: z.string().trim().min(3).max(120),
   objective: z.string().trim().min(10).max(2000),
   acceptanceCriteria: z.array(z.string().trim().min(3).max(500)).min(1).max(20),
+  pipeline: z.object({
+    steps: z.array(z.object({
+      name: z.string().min(1).max(100),
+      profileId: z.string().min(1).max(120),
+      prompt: z.string().min(1).max(10_000),
+      dependsOn: z.array(z.string()).optional(),
+      outputArtifact: z.string().max(500).optional(),
+      continueOnFailure: z.boolean().optional(),
+      requiresApproval: z.boolean().optional(),
+    })).min(1).max(20),
+  }).optional(),
 });
 
 const featureTaskApprovalSchema = z.object({
@@ -664,6 +675,35 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       return context.json({ task });
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to approve the feature task.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/pipeline/execute', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ blueprintRevision: z.number().int().positive() }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Pipeline execution requires a current blueprint revision.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    if (project.blueprint.metadata.revision !== parsed.data.blueprintRevision) return context.json({ error: 'The pipeline must target the current Blueprint revision.' }, 409);
+    try {
+      const task = await store.executeFeatureTaskPipeline(projectId, parsed.data.blueprintRevision);
+      return context.json({ task });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to execute the pipeline.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/pipeline/resume', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ blueprintRevision: z.number().int().positive() }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Pipeline resume requires a current blueprint revision.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const task = await store.resumeFeatureTaskPipeline(projectId, parsed.data.blueprintRevision);
+      return context.json({ task });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to resume the pipeline.' }, 409);
     }
   });
 
