@@ -10,7 +10,7 @@ import type {
   Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyStep, ApplyRun, DependencyReadiness,
   QualityGateResult, DependencyInstallResult, FeatureTask, RuntimeAttempt, RuntimeRun, GitEvidence,
   PrEvidence, PreviewEvidence, AcceptanceRecord, ProviderPlan, ProviderVerification, AgentDescriptor,
-  AgentCapabilityProbe, CredentialMeta, ProjectResources, CredentialVerifyResult, PreviewStep,
+  AgentCapabilityProbe, AgentProfile, CredentialMeta, ProjectResources, CredentialVerifyResult, PreviewStep,
   PreviewDeploymentResult, WorkspaceVerification, ReleaseStep, ReleaseRun, ReleaseEvidence,
   ReleaseSource, ReleasePlan, View,
 } from './types';
@@ -98,6 +98,12 @@ export function App() {
   const [customAgentName, setCustomAgentName] = useState('');
   const [customAgentCommand, setCustomAgentCommand] = useState('');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
+  const [newProfileBaseAgent, setNewProfileBaseAgent] = useState('');
+  const [newProfileSystemPrompt, setNewProfileSystemPrompt] = useState('');
   const [agentProbes, setAgentProbes] = useState<Record<string, AgentCapabilityProbe>>({});
   const [probingAgentId, setProbingAgentId] = useState<string | null>(null);
   const [credentialMeta, setCredentialMeta] = useState<CredentialMeta | null>(null);
@@ -494,6 +500,58 @@ export function App() {
       setError(cause instanceof Error ? cause.message : t('errors.loadAgentCatalog'));
     } finally {
       setLoadingAgents(false);
+    }
+  };
+
+  const loadProfiles = async () => {
+    setLoadingProfiles(true);
+    try {
+      const response = await fetch('/api/runtime/profiles');
+      if (!response.ok) throw new Error('Failed to load agent profiles.');
+      const payload = await response.json() as { profiles: AgentProfile[] };
+      setProfiles(payload.profiles);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to load agent profiles.');
+    } finally {
+      setLoadingProfiles(false);
+    }
+  };
+
+  const createProfile = async () => {
+    if (!newProfileName.trim() || !newProfileBaseAgent) return;
+    setSavingProfile(true);
+    try {
+      const response = await fetch('/api/runtime/profiles', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: newProfileName.trim(),
+          baseAgentId: newProfileBaseAgent,
+          overrides: newProfileSystemPrompt.trim() ? { systemPrompt: newProfileSystemPrompt.trim() } : {},
+        }),
+      });
+      const payload = await response.json() as { profile?: AgentProfile; error?: string; details?: string[] };
+      if (!response.ok || !payload.profile) throw new Error(payload.error ?? payload.details?.join('; ') ?? 'Failed to create profile.');
+      setProfiles(current => [...current, payload.profile!]);
+      setNewProfileName('');
+      setNewProfileSystemPrompt('');
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to create profile.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const deleteProfile = async (profileId: string) => {
+    if (!window.confirm('Delete this agent profile?')) return;
+    try {
+      const response = await fetch(`/api/runtime/profiles/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Failed to delete profile.');
+      setProfiles(current => current.filter(p => p.id !== profileId));
+      if (selectedAgentId === profileId) setSelectedAgentId(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to delete profile.');
     }
   };
 
@@ -1111,6 +1169,7 @@ export function App() {
     void checkDaemon();
     void loadProjects();
     void loadAgents();
+    void loadProfiles();
     void loadCredentials();
     const source = new EventSource('/events');
     const onEvent = (event: Event) => {
@@ -1336,7 +1395,7 @@ export function App() {
 
   const agentsPanel = (
     <section className="agent-catalog-panel" id="agents">
-      <div className="panel-title"><div><p className="eyebrow">{t('agents.eyebrow')}</p><h2>{t('agents.title')}</h2></div><button className="icon-button" type="button" onClick={() => void loadAgents()} disabled={loadingAgents} aria-label={t('agents.refresh')} title={t('agents.refresh')}><RefreshCw size={17} /></button></div>
+      <div className="panel-title"><div><p className="eyebrow">{t('agents.eyebrow')}</p><h2>{t('agents.title')}</h2></div><button className="icon-button" type="button" onClick={() => { void loadAgents(); void loadProfiles(); }} disabled={loadingAgents || loadingProfiles} aria-label={t('agents.refresh')} title={t('agents.refresh')}><RefreshCw size={17} /></button></div>
       <p className="form-note">{t('agents.formNote')}</p>
       {loadingAgents && agents.length === 0 ? <p className="empty-state">{t('agents.detecting')}</p> : agents.length === 0 ? <p className="empty-state">{t('agents.notFound')}</p> : <div className="agent-list">{agents.map(agent => (
         <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => void probeAgent(agent)} disabled={!agent.detected || probingAgentId !== null}>
@@ -1344,6 +1403,53 @@ export function App() {
           <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? t('agents.detected') : t('agents.notDetected')}</span>
         </button>
       ))}</div>}
+
+      {/* Agent Profiles */}
+      {profiles.length > 0 && (
+        <div className="agent-profiles-section">
+          <p className="form-note" style={{ marginTop: '1rem', fontWeight: 600 }}>Agent Profiles</p>
+          <div className="agent-list">
+            {profiles.map(profile => {
+              const baseAgent = agents.find(a => a.id === profile.baseAgentId);
+              const isSelected = selectedAgentId === profile.id;
+              return (
+                <div className={`agent-item ${isSelected ? 'selected' : ''}`} key={profile.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedAgentId(profile.id)}>
+                  <div className="agent-info">
+                    <div className="agent-header">
+                      <strong>{profile.icon ? `${profile.icon} ` : ''}{profile.name}</strong>
+                      <span className="agent-source profile">profile</span>
+                    </div>
+                    <small className="agent-version">based on {baseAgent?.name ?? profile.baseAgentId}</small>
+                    {profile.description && <small className="agent-detail">{profile.description}</small>}
+                    {profile.overrides.model && <div className="agent-caps"><span className="agent-cap">model: {profile.overrides.model}</span></div>}
+                    {profile.overrides.systemPrompt && <div className="agent-caps"><span className="agent-cap">custom prompt</span></div>}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                    <span className={`agent-status ${baseAgent?.detected ? 'detected' : 'missing'}`}>{baseAgent?.detected ? 'ready' : 'base missing'}</span>
+                    <button type="button" className="icon-button" onClick={(e) => { e.stopPropagation(); void deleteProfile(profile.id); }} aria-label="Delete profile" title="Delete profile" style={{ padding: '2px 6px', fontSize: '12px' }}>✕</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <details className="agent-form-toggle">
+        <summary>Create Agent Profile</summary>
+        <div className="agent-form">
+          <label htmlFor="profile-name">Profile Name</label>
+          <input id="profile-name" value={newProfileName} onChange={e => setNewProfileName(e.target.value)} placeholder="e.g. Codex · Frontend Expert" maxLength={80} />
+          <label htmlFor="profile-base-agent">Base Agent</label>
+          <select id="profile-base-agent" value={newProfileBaseAgent} onChange={e => setNewProfileBaseAgent(e.target.value)}>
+            <option value="">Select a verified agent...</option>
+            {agents.filter(a => a.detected).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <label htmlFor="profile-system-prompt">System Prompt (appended to task prompt)</label>
+          <textarea id="profile-system-prompt" value={newProfileSystemPrompt} onChange={e => setNewProfileSystemPrompt(e.target.value)} placeholder="e.g. You are a frontend expert specializing in React and TypeScript." rows={3} />
+          <button className="primary-button" type="button" onClick={() => void createProfile()} disabled={savingProfile || !newProfileName.trim() || !newProfileBaseAgent}>{savingProfile ? 'Creating...' : 'Create Profile'}<ArrowRight size={15} aria-hidden="true" /></button>
+        </div>
+      </details>
       <details className="agent-form-toggle">
         <summary>{t('agents.addCustomSummary')}</summary>
         <div className="agent-form">

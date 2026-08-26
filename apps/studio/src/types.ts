@@ -180,6 +180,25 @@ export type AgentCapabilityProbe = {
   adapterStatus: 'verified' | 'candidate' | 'unsupported';
 };
 
+export type AgentProfile = {
+  id: string;
+  name: string;
+  description?: string;
+  baseAgentId: string;
+  icon?: string;
+  overrides: {
+    systemPrompt?: string;
+    model?: string;
+    temperature?: number;
+    env?: Record<string, string>;
+    allowedTools?: string[];
+    blockedTools?: string[];
+    maxTokens?: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CredentialMeta = {
   version: 1;
   updatedAt: string;
