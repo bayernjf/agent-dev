@@ -150,7 +150,7 @@ type BlueprintChange = {
 
 function diffBlueprints(oldBp: Record<string, unknown>, newBp: Record<string, unknown>, prefix = ''): BlueprintChange[] {
   const changes: BlueprintChange[] = [];
-  const allKeys = new Set([...Object.keys(oldBp ?? {}), ...Object.keys(newBp ?? {)]);
+  const allKeys = new Set([...Object.keys(oldBp ?? {}), ...Object.keys(newBp ?? {})]);
   for (const key of allKeys) {
     const path = prefix ? `${prefix}.${key}` : key;
     const oldVal = oldBp?.[key];
