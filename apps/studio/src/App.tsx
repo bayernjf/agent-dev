@@ -1966,18 +1966,51 @@ export function App() {
                         const provider = runtimeProviderSchema.safeParse(`local-${agent.id}`);
                         return agent.detected && provider.success ? [{ agent, provider: provider.data }] : [];
                       })
-                      .map(({ agent, provider }) => (
-                        <label key={agent.id}><input type="radio" name="runtime" checked={answers.runtimeProvider === provider} onChange={() => setAnswer('runtimeProvider', provider)} />{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</label>
-                      ))}
+                      .map(({ agent, provider }) => {
+                        const descKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Desc` as keyof typeof t;
+                        const installKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Install` as keyof typeof t;
+                        const desc = t(descKey) || '';
+                        const install = t(installKey) || '';
+                        return (
+                          <label key={agent.id} className="agent-option">
+                            <div className="agent-option-header">
+                              <input type="radio" name="runtime" checked={answers.runtimeProvider === provider} onChange={() => setAnswer('runtimeProvider', provider)} />
+                              <span className="agent-name">{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</span>
+                              <span className="agent-badge verified">{t('blueprint.runtimeVerified')}</span>
+                            </div>
+                            {desc && <p className="agent-desc">{desc}</p>}
+                          </label>
+                        );
+                      })}
                     {profiles.map(profile => {
                       const baseAgent = agents.find(a => a.id === profile.baseAgentId);
                       const ready = baseAgent?.detected ?? false;
                       return (
-                        <label key={profile.id} style={{ opacity: ready ? 1 : 0.5 }}>
-                          <input type="radio" name="runtime" checked={answers.runtimeProvider === profile.id} onChange={() => setAnswer('runtimeProvider', profile.id)} disabled={!ready} />
-                          {profile.icon ? `${profile.icon} ` : ''}{profile.name} · Profile (based on {baseAgent?.name ?? profile.baseAgentId})
-                          {!ready && ' — base agent not detected'}
+                        <label key={profile.id} className="agent-option" style={{ opacity: ready ? 1 : 0.5 }}>
+                          <div className="agent-option-header">
+                            <input type="radio" name="runtime" checked={answers.runtimeProvider === profile.id} onChange={() => setAnswer('runtimeProvider', profile.id)} disabled={!ready} />
+                            <span className="agent-name">{profile.icon ? `${profile.icon} ` : ''}{profile.name} · Profile</span>
+                            <span className="agent-badge profile">Profile</span>
+                          </div>
+                          <p className="agent-desc">Based on {baseAgent?.name ?? profile.baseAgentId}{!ready && ` — ${t('blueprint.runtimeNotDetected')}`}</p>
                         </label>
+                      );
+                    })}
+                    {/* Show not-detected agents with install guide */}
+                    {agents.filter(a => !a.detected).map(agent => {
+                      const descKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Desc` as keyof typeof t;
+                      const installKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Install` as keyof typeof t;
+                      const desc = t(descKey) || '';
+                      const install = t(installKey) || '';
+                      return (
+                        <div key={agent.id} className="agent-option not-detected">
+                          <div className="agent-option-header">
+                            <span className="agent-name" style={{ opacity: 0.6 }}>{agent.name}</span>
+                            <span className="agent-badge not-detected">{t('blueprint.runtimeNotDetected')}</span>
+                          </div>
+                          {desc && <p className="agent-desc">{desc}</p>}
+                          {install && <p className="agent-install"><code>{install}</code></p>}
+                        </div>
                       );
                     })}
                   </>}
