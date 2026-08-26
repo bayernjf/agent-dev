@@ -326,6 +326,77 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
+  // Get full secret with metadata and version history
+  app.get('/api/secret-backend/:key', async context => {
+    const key = context.req.param('key');
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const secret = await backend.getSecret(key);
+      if (!secret) return context.json({ error: 'Secret not found' }, 404);
+      return context.json({ type: backend.type, secret });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to get secret' }, 500);
+    }
+  });
+
+  // Rotate a secret (create new version)
+  app.post('/api/secret-backend/:key/rotate', async context => {
+    const key = context.req.param('key');
+    const parsed = z.object({ newValue: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const secret = await backend.rotate(key, parsed.data?.newValue);
+      return context.json({ ok: true, secret });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to rotate secret' }, 500);
+    }
+  });
+
+  // Approve a secret version
+  app.post('/api/secret-backend/:key/approve', async context => {
+    const key = context.req.param('key');
+    const parsed = z.object({ version: z.number().int().positive(), approver: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Version number is required.' }, 400);
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const secret = await backend.approve(key, parsed.data.version, parsed.data.approver);
+      return context.json({ ok: true, secret });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to approve secret' }, 500);
+    }
+  });
+
+  // Reject a secret version
+  app.post('/api/secret-backend/:key/reject', async context => {
+    const key = context.req.param('key');
+    const parsed = z.object({ version: z.number().int().positive(), reason: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Version number is required.' }, 400);
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const secret = await backend.reject(key, parsed.data.version, parsed.data.reason);
+      return context.json({ ok: true, secret });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to reject secret' }, 500);
+    }
+  });
+
+  // Get version history for a secret
+  app.get('/api/secret-backend/:key/history', async context => {
+    const key = context.req.param('key');
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const history = await backend.getHistory(key);
+      return context.json({ type: backend.type, key, history });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to get secret history' }, 500);
+    }
+  });
+
   // Blueprint export/import/diff
   app.get('/api/projects/:projectId/blueprint/export', context => {
     const project = store.getProject(context.req.param('projectId'));
