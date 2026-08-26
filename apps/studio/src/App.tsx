@@ -146,6 +146,11 @@ export function App() {
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [recoveringWorkspace, setRecoveringWorkspace] = useState(false);
   const [deployingPreview, setDeployingPreview] = useState(false);
+  const [blueprintDiff, setBlueprintDiff] = useState<{ added: string[]; removed: string[]; modified: string[] } | null>(null);
+  const [loadingDiff, setLoadingDiff] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
+  const [importingBlueprint, setImportingBlueprint] = useState(false);
+  const [blueprintImportResult, setBlueprintImportResult] = useState<string | null>(null);
 
   const decisions = useMemo(() => selected ? getBlueprintDecisions(selected.blueprint) : [], [selected]);
   const selectedArtifact = useMemo(
@@ -1436,6 +1441,75 @@ export function App() {
     }
   }
 
+  async function exportBlueprint() {
+    if (!selected) return;
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/blueprint/export`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? 'Export failed');
+      // Download as JSON file
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selected.name.replace(/\s+/g, '-').toLowerCase()}-blueprint-r${selected.blueprint.metadata.revision}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Export failed');
+    }
+  }
+
+  async function importBlueprint(file: File) {
+    if (!selected) return;
+    setImportingBlueprint(true);
+    setBlueprintImportResult(null);
+    try {
+      const text = await file.text();
+      const blueprint = JSON.parse(text);
+      const response = await fetch(`/api/projects/${selected.id}/blueprint/import`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ blueprint }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? 'Import failed');
+      setBlueprintImportResult(`Imported as revision ${payload.revision ?? 'new'}. Reloading...`);
+      await loadProjects();
+      if (selected) {
+        const updated = projects.find(p => p.id === selected.id);
+        if (updated) {
+          setSelected(updated);
+          setAnswers(answersFromBlueprint(updated.blueprint));
+        }
+      }
+      setTimeout(() => setBlueprintImportResult(null), 5000);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Import failed');
+    } finally {
+      setImportingBlueprint(false);
+    }
+  }
+
+  async function loadBlueprintDiff() {
+    if (!selected) return;
+    setLoadingDiff(true);
+    setShowDiff(true);
+    try {
+      const response = await fetch(`/api/projects/${selected.id}/blueprint/diff`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? 'Diff failed');
+      setBlueprintDiff({ added: payload.added ?? [], removed: payload.removed ?? [], modified: payload.modified ?? [] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Diff failed');
+      setBlueprintDiff(null);
+    } finally {
+      setLoadingDiff(false);
+    }
+  }
+
   const isProfessional = answers.mode === 'professional';
 
   const credentialsPanel = (
@@ -1799,6 +1873,20 @@ export function App() {
               {theme === 'dark' ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
             </button>
             <button className="icon-button" type="button" onClick={() => void loadProjects()} aria-label={t('common.refresh')} title={t('common.refresh')}><RefreshCw size={18} /></button>
+            {view.kind === 'project' && selected && (
+              <>
+                <button className="quiet-button" type="button" onClick={() => void exportBlueprint()} title="Export Blueprint as JSON">
+                  Export
+                </button>
+                <label className="quiet-button" style={{ cursor: 'pointer' }} title="Import Blueprint from JSON">
+                  Import
+                  <input type="file" accept="application/json" style={{ display: 'none' }} onChange={e => { const file = e.target.files?.[0]; if (file) void importBlueprint(file); e.target.value = ''; }} disabled={importingBlueprint} />
+                </label>
+                <button className="quiet-button" type="button" onClick={() => { if (showDiff) { setShowDiff(false); setBlueprintDiff(null); } else void loadBlueprintDiff(); }} title="Show diff with previous revision">
+                  {showDiff ? 'Hide Diff' : 'Show Diff'}
+                </button>
+              </>
+            )}
             {view.kind === 'dashboard' && (
               <button className="quiet-button" type="button" onClick={startNewProject}>
                 {t('projects.newBlueprint')}
@@ -1847,6 +1935,18 @@ export function App() {
             </nav>
 
             {view.kind === 'project' && view.tab === 'blueprint' && <>
+            {showDiff && selected && <section className="diff-section" id="blueprint-diff">
+              <div className="section-heading"><div><p className="eyebrow">Blueprint Diff</p><h2>Changes since previous revision</h2></div></div>
+              {loadingDiff ? <p>Loading diff...</p> : blueprintDiff ? (
+                <div className="diff-grid">
+                  {blueprintDiff.added.length > 0 && <article className="diff-card added"><h3>Added ({blueprintDiff.added.length})</h3><ul>{blueprintDiff.added.map(path => <li key={path}><code>{path}</code></li>)}</ul></article>}
+                  {blueprintDiff.removed.length > 0 && <article className="diff-card removed"><h3>Removed ({blueprintDiff.removed.length})</h3><ul>{blueprintDiff.removed.map(path => <li key={path}><code>{path}</code></li>)}</ul></article>}
+                  {blueprintDiff.modified.length > 0 && <article className="diff-card modified"><h3>Modified ({blueprintDiff.modified.length})</h3><ul>{blueprintDiff.modified.map(path => <li key={path}><code>{path}</code></li>)}</ul></article>}
+                  {blueprintDiff.added.length === 0 && blueprintDiff.removed.length === 0 && blueprintDiff.modified.length === 0 && <p>No changes since previous revision.</p>}
+                </div>
+              ) : <p>No diff available.</p>}
+            </section>}
+            {blueprintImportResult && <div className="import-result"><CheckCircle2 size={16} /> {blueprintImportResult}</div>}
             {selected && <section className="decision-section" id="decisions">
               <div className="section-heading"><div><p className="eyebrow">{t('decisions.eyebrowRevision', { revision: selected.blueprint.metadata.revision })}</p><h2>{t('decisions.title')}</h2></div><span className="mode-tag">{selected.blueprint.metadata.mode === 'beginner' ? t('blueprint.beginner') : t('blueprint.professional')}</span></div>
               <div className="decision-list">{decisions.map(decision => <article className="decision" key={decision.id}>
