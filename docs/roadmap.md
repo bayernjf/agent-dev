@@ -43,6 +43,8 @@
 - 导入现有仓库；
 - Local Claude Runtime；
 - Agent Runtime Catalog、内置 Agent Discovery 和自定义 Agent 最小配置（阶段 A API 已提前落地，Studio 选择器与持久化仍属于 v0.2）；
+- Agent Profile（基于 verified Agent 创建命名变体，覆盖 systemPrompt/model/温度/工具集/env）；
+- **多 Profile 串行流水线**（一个 Feature Task 内定义多步骤，每步用不同 Profile，前步输出作为后步输入，如"方案→实现→审查"闭环；视 Pilot 反馈决定是否纳入 v0.2 或推迟到 v0.3）；
 - GA4、Clarity接入与隐私 Gate；
 - Infisical Adapter；
 - 更完善的失败分类和修复建议；

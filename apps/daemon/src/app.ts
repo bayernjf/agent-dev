@@ -9,7 +9,7 @@ import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput } from '@agent-dev/agent-runtime';
+import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, runDoctor, type CustomAgentInput, type AgentProfile, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
 import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
 import type { ReleaseSource } from '@agent-dev/deployment-composer';
 import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin, releaseIdempotencyKey, releaseStepPlan } from '@agent-dev/deployment-composer';
@@ -36,6 +36,9 @@ const approveBaselineSchema = z.object({
 const applyBaselineSchema = z.object({
   blueprintRevision: z.number().int().positive(),
   confirmation: z.literal('APPLY_BASELINE'),
+  noExternalChanges: z.boolean().optional(),
+  /** Optional: URL of an existing Git repository to import instead of generating from scratch. */
+  importRepositoryUrl: z.string().url().optional(),
 });
 
 const retryApplySchema = z.object({
@@ -61,6 +64,17 @@ const featureTaskSchema = z.object({
   title: z.string().trim().min(3).max(120),
   objective: z.string().trim().min(10).max(2000),
   acceptanceCriteria: z.array(z.string().trim().min(3).max(500)).min(1).max(20),
+  pipeline: z.object({
+    steps: z.array(z.object({
+      name: z.string().min(1).max(100),
+      profileId: z.string().min(1).max(120),
+      prompt: z.string().min(1).max(10_000),
+      dependsOn: z.array(z.string()).optional(),
+      outputArtifact: z.string().max(500).optional(),
+      continueOnFailure: z.boolean().optional(),
+      requiresApproval: z.boolean().optional(),
+    })).min(1).max(20),
+  }).optional(),
 });
 
 const featureTaskApprovalSchema = z.object({
@@ -127,6 +141,33 @@ function hasValidGitHubSignature(body: string, signature: string | undefined, se
   return received.length === expectedBuffer.length && timingSafeEqual(received, expectedBuffer);
 }
 
+type BlueprintChange = {
+  path: string;
+  oldValue: unknown;
+  newValue: unknown;
+  type: 'added' | 'removed' | 'modified';
+};
+
+function diffBlueprints(oldBp: Record<string, unknown>, newBp: Record<string, unknown>, prefix = ''): BlueprintChange[] {
+  const changes: BlueprintChange[] = [];
+  const allKeys = new Set([...Object.keys(oldBp ?? {}), ...Object.keys(newBp ?? {})]);
+  for (const key of allKeys) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const oldVal = oldBp?.[key];
+    const newVal = newBp?.[key];
+    if (oldVal === undefined && newVal !== undefined) {
+      changes.push({ path, oldValue: undefined, newValue: newVal, type: 'added' });
+    } else if (oldVal !== undefined && newVal === undefined) {
+      changes.push({ path, oldValue: oldVal, newValue: undefined, type: 'removed' });
+    } else if (typeof oldVal === 'object' && typeof newVal === 'object' && oldVal !== null && newVal !== null && !Array.isArray(oldVal) && !Array.isArray(newVal)) {
+      changes.push(...diffBlueprints(oldVal as Record<string, unknown>, newVal as Record<string, unknown>, path));
+    } else if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+      changes.push({ path, oldValue: oldVal, newValue: newVal, type: 'modified' });
+    }
+  }
+  return changes;
+}
+
 export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}, dataDirectory?: string) {
   const app = new Hono();
   const customAgents: CustomAgentInput[] = dataDirectory ? loadCustomAgents(dataDirectory) : [];
@@ -176,6 +217,240 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.get('/api/health', context =>
     context.json({ service: 'agent-dev-daemon', status: 'ok', version: '0.1.0-alpha.0' }),
   );
+
+  app.get('/api/doctor', async context => {
+    try {
+      const report = await runDoctor();
+      return context.json(report);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Doctor check failed' }, 500);
+    }
+  });
+
+  // Auto-update
+  app.get('/api/update/check', async context => {
+    try {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      // Fetch latest
+      await execFileAsync('git', ['fetch', 'origin'], { timeout: 15_000 });
+      // Check if behind
+      const local = (await execFileAsync('git', ['rev-parse', 'HEAD'])).stdout.trim();
+      const remote = (await execFileAsync('git', ['rev-parse', '@{u}'])).stdout.trim();
+      const base = (await execFileAsync('git', ['merge-base', 'HEAD', '@{u}'])).stdout.trim();
+      const upToDate = local === remote;
+      const behind = upToDate ? 0 : parseInt((await execFileAsync('git', ['rev-list', '--count', `HEAD..@{u}`])).stdout.trim(), 10);
+      const diverged = local !== base && !upToDate;
+      // Get recent commits if behind
+      let commits: string[] = [];
+      if (behind > 0) {
+        const log = (await execFileAsync('git', ['log', '--oneline', `HEAD..@{u}`])).stdout.trim();
+        commits = log ? log.split('\n') : [];
+      }
+      return context.json({ upToDate, behind, diverged, commits, local, remote });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Update check failed', upToDate: true, behind: 0 }, 500);
+    }
+  });
+
+  app.post('/api/update', async context => {
+    try {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      // Check for uncommitted changes
+      try {
+        await execFileAsync('git', ['diff', '--quiet']);
+        await execFileAsync('git', ['diff', '--cached', '--quiet']);
+      } catch {
+        return context.json({ error: 'Uncommitted changes detected. Please commit or stash before updating.' }, 409);
+      }
+      // Pull
+      await execFileAsync('git', ['pull', '--ff-only'], { timeout: 60_000 });
+      // Install dependencies
+      await execFileAsync('npm', ['install'], { timeout: 120_000 });
+      // Build
+      await execFileAsync('npm', ['run', 'build'], { timeout: 120_000 });
+      return context.json({ ok: true, message: 'Update complete. Restart the daemon to apply changes.' });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Update failed' }, 500);
+    }
+  });
+
+  // Secret Backend management
+  app.get('/api/secret-backend/status', async context => {
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const status = await backend.isAvailable();
+      return context.json({ type: backend.type, ...status });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Secret backend status check failed' }, 500);
+    }
+  });
+
+  app.get('/api/secret-backend/keys', async context => {
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const keys = await backend.listKeys();
+      return context.json({ type: backend.type, keys });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to list secret keys' }, 500);
+    }
+  });
+
+  app.post('/api/secret-backend/set', async context => {
+    const parsed = z.object({ key: z.string().min(1).max(100), value: z.string().min(1) }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Secret key and value are required.' }, 400);
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      await backend.set(parsed.data.key, parsed.data.value);
+      return context.json({ ok: true, key: parsed.data.key });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to set secret' }, 500);
+    }
+  });
+
+  app.delete('/api/secret-backend/:key', async context => {
+    const key = context.req.param('key');
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      await backend.delete(key);
+      return context.json({ ok: true, key });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to delete secret' }, 500);
+    }
+  });
+
+  // Get full secret with metadata and version history
+  app.get('/api/secret-backend/:key', async context => {
+    const key = context.req.param('key');
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const secret = await backend.getSecret(key);
+      if (!secret) return context.json({ error: 'Secret not found' }, 404);
+      return context.json({ type: backend.type, secret });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to get secret' }, 500);
+    }
+  });
+
+  // Rotate a secret (create new version)
+  app.post('/api/secret-backend/:key/rotate', async context => {
+    const key = context.req.param('key');
+    const parsed = z.object({ newValue: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const secret = await backend.rotate(key, parsed.data?.newValue);
+      return context.json({ ok: true, secret });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to rotate secret' }, 500);
+    }
+  });
+
+  // Approve a secret version
+  app.post('/api/secret-backend/:key/approve', async context => {
+    const key = context.req.param('key');
+    const parsed = z.object({ version: z.number().int().positive(), approver: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Version number is required.' }, 400);
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const secret = await backend.approve(key, parsed.data.version, parsed.data.approver);
+      return context.json({ ok: true, secret });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to approve secret' }, 500);
+    }
+  });
+
+  // Reject a secret version
+  app.post('/api/secret-backend/:key/reject', async context => {
+    const key = context.req.param('key');
+    const parsed = z.object({ version: z.number().int().positive(), reason: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Version number is required.' }, 400);
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const secret = await backend.reject(key, parsed.data.version, parsed.data.reason);
+      return context.json({ ok: true, secret });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to reject secret' }, 500);
+    }
+  });
+
+  // Get version history for a secret
+  app.get('/api/secret-backend/:key/history', async context => {
+    const key = context.req.param('key');
+    try {
+      const { getActiveBackend } = await import('@agent-dev/provider-cli');
+      const backend = getActiveBackend();
+      const history = await backend.getHistory(key);
+      return context.json({ type: backend.type, key, history });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to get secret history' }, 500);
+    }
+  });
+
+  // Blueprint export/import/diff
+  app.get('/api/projects/:projectId/blueprint/export', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    return context.json({
+      format: 'agent-dev-blueprint',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      project: { name: project.name, productType: project.productType },
+      blueprint: project.blueprint,
+    });
+  });
+
+  app.post('/api/projects/:projectId/blueprint/import', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({
+      format: z.literal('agent-dev-blueprint'),
+      version: z.literal(1),
+      blueprint: z.record(z.unknown()),
+    }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Invalid blueprint import format. Expected { format: "agent-dev-blueprint", version: 1, blueprint: {...} }.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      // Validate the imported blueprint against the schema.
+      const { productBlueprintSchema } = await import('@agent-dev/blueprint');
+      const validated = productBlueprintSchema.parse(parsed.data.blueprint);
+      // Create a new revision with the imported blueprint.
+      const updated = store.reviseBlueprint(projectId, validated);
+      return context.json({ project: updated, imported: true });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to import blueprint' }, 400);
+    }
+  });
+
+  app.get('/api/projects/:projectId/blueprint/diff', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    // Compare current blueprint with the previous revision (if any).
+    const revisions = store.listBlueprintRevisions(project.id);
+    if (revisions.length < 2) {
+      return context.json({ projectId: project.id, currentRevision: project.blueprint.metadata.revision, previousRevision: null, changes: [], note: 'No previous revision to compare against.' });
+    }
+    const current = project.blueprint;
+    const previous = revisions[revisions.length - 2]!.blueprintJson;
+    const changes = diffBlueprints(previous, current);
+    return context.json({
+      projectId: project.id,
+      currentRevision: current.metadata.revision,
+      previousRevision: previous.metadata.revision,
+      changes,
+      changeCount: changes.length,
+    });
+  });
 
   app.get('/api/connectors/preflight', async context =>
     context.json(await (dependencies.runPreflight ?? runConnectorPreflight)()),
@@ -266,6 +541,18 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     try {
       const queued = await store.createApplyRun(projectId, parsed.data.blueprintRevision);
+      // If importing an existing repository, clone it into the workspace before applying.
+      if (parsed.data.importRepositoryUrl) {
+        const { execFile } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const { mkdir, rm } = await import('node:fs/promises');
+        const execFileAsync = promisify(execFile);
+        // Ensure workspace directory exists and is empty for clone.
+        await rm(queued.workspacePath, { recursive: true, force: true });
+        await mkdir(queued.workspacePath, { recursive: true });
+        // Clone the repository (shallow, default branch).
+        await execFileAsync('git', ['clone', '--depth', '1', parsed.data.importRepositoryUrl, '.'], { cwd: queued.workspacePath, timeout: 60_000 });
+      }
       const run = await store.executeApplyRun(queued.id);
       events.emit({
         type: run.status === 'completed' ? 'apply.completed' : 'apply.failed',
@@ -273,7 +560,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
         projectName: project.name,
         occurredAt: run.updatedAt,
       });
-      return context.json({ run }, run.status === 'completed' ? 200 : 422);
+      return context.json({ run, imported: Boolean(parsed.data.importRepositoryUrl) }, run.status === 'completed' ? 200 : 422);
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to run local Apply.' }, 409);
     }
@@ -392,6 +679,51 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     return context.json({ agent: discoverAgentRuntimes(customAgents).at(-1) }, 201);
   });
 
+  // --- Agent Profiles ---
+
+  app.get('/api/runtime/profiles', async context => {
+    const profiles = await store.profiles.listProfiles();
+    return context.json({ profiles });
+  });
+
+  app.get('/api/runtime/profiles/:profileId', async context => {
+    const profile = await store.profiles.getProfile(context.req.param('profileId'));
+    if (!profile) return context.json({ error: 'Profile not found.' }, 404);
+    return context.json({ profile });
+  });
+
+  app.post('/api/runtime/profiles', async context => {
+    const parsed = agentProfileCreateSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Invalid profile input.', details: parsed.error.flatten() }, 400);
+    // Base agent must be verified/executable
+    if (!isAgentExecutable(parsed.data.baseAgentId)) {
+      return context.json({ error: `Base agent "${parsed.data.baseAgentId}" is not verified. Profiles can only be based on verified agents.` }, 400);
+    }
+    const { profile, validation } = await store.profiles.createProfile(parsed.data, {
+      verifyBaseAgent: id => isAgentExecutable(id),
+    });
+    if (!validation.valid) return context.json({ error: 'Profile validation failed.', details: validation.errors }, 400);
+    return context.json({ profile }, 201);
+  });
+
+  app.put('/api/runtime/profiles/:profileId', async context => {
+    const parsed = agentProfileUpdateSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Invalid profile update.', details: parsed.error.flatten() }, 400);
+    const profileId = context.req.param('profileId');
+    const existing = await store.profiles.getProfile(profileId);
+    if (!existing) return context.json({ error: 'Profile not found.' }, 404);
+    const { profile, validation } = await store.profiles.updateProfile(profileId, parsed.data);
+    if (!validation.valid) return context.json({ error: 'Profile validation failed.', details: validation.errors }, 400);
+    return context.json({ profile });
+  });
+
+  app.delete('/api/runtime/profiles/:profileId', async context => {
+    const profileId = context.req.param('profileId');
+    const deleted = await store.profiles.deleteProfile(profileId);
+    if (!deleted) return context.json({ error: 'Profile not found.' }, 404);
+    return context.json({ deleted: true });
+  });
+
   app.get('/api/projects/:projectId/runtime/plan', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
@@ -401,8 +733,13 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     // Prefer the Blueprint-selected runtime when no explicit run exists yet. Falls back to codex only
     // when the Blueprint did not specify a runtime (legacy Blueprints).
     const blueprintAgent = project.blueprint.spec.runtime?.provider;
-    const agentId = run?.agentId ?? blueprintAgent ?? 'codex';
-    const plan = isAgentExecutable(agentId) ? buildAgentExecutionPlan(task, task.workspacePath, agentId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
+    const rawAgentId = run?.agentId ?? blueprintAgent ?? 'codex';
+    // Resolve Profile if the agentId refers to one.
+    const profile = await store.profiles.getProfile(rawAgentId);
+    const agentId = profile ? profile.baseAgentId : rawAgentId;
+    const plan = isAgentExecutable(agentId)
+      ? buildAgentExecutionPlan(task, task.workspacePath, agentId, { profile: profile ?? undefined })
+      : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
     return context.json({ probe: probeCodexRuntime(), plan, run });
   });
 
@@ -413,10 +750,19 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (body?.confirmation !== 'PREPARE_RUNTIME_RUN') return context.json({ error: 'Runtime preparation requires confirmation PREPARE_RUNTIME_RUN.' }, 400);
     if (body.agentId) {
       const catalog = discoverAgentRuntimes(customAgents);
-      const agent = catalog.find(a => a.id === body.agentId);
-      if (!agent) return context.json({ error: 'The selected Agent was not found in the catalog.' }, 404);
-      if (!agent.detected) return context.json({ error: `Agent "${agent.name}" is not detected on PATH.` }, 409);
-      if (!isAgentExecutable(agent.id)) return context.json({ error: `Agent "${agent.name}" is detected, but does not have a verified non-interactive execution adapter.` }, 409);
+      // Check if the agentId refers to an Agent Profile first.
+      const profile = await store.profiles.getProfile(body.agentId);
+      if (profile) {
+        const baseAgent = catalog.find(a => a.id === profile.baseAgentId);
+        if (!baseAgent) return context.json({ error: `Profile base agent "${profile.baseAgentId}" was not found in the catalog.` }, 404);
+        if (!baseAgent.detected) return context.json({ error: `Profile base agent "${baseAgent.name}" is not detected on PATH.` }, 409);
+        if (!isAgentExecutable(profile.baseAgentId)) return context.json({ error: `Profile base agent "${baseAgent.name}" does not have a verified non-interactive execution adapter.` }, 409);
+      } else {
+        const agent = catalog.find(a => a.id === body.agentId);
+        if (!agent) return context.json({ error: 'The selected Agent was not found in the catalog.' }, 404);
+        if (!agent.detected) return context.json({ error: `Agent "${agent.name}" is not detected on PATH.` }, 409);
+        if (!isAgentExecutable(agent.id)) return context.json({ error: `Agent "${agent.name}" is detected, but does not have a verified non-interactive execution adapter.` }, 409);
+      }
     }
     try {
       // A request may override the runtime; otherwise use the Blueprint-selected provider.
@@ -586,7 +932,19 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     if (project.blueprint.metadata.revision !== parsed.data.blueprintRevision) return context.json({ error: 'The feature task must target the current Blueprint revision.' }, 409);
     try {
-      const task = await store.createFeatureTask({ projectId, ...parsed.data });
+      const task = await store.createFeatureTask({
+        projectId,
+        ...parsed.data,
+        pipeline: parsed.data.pipeline
+          ? {
+              ...parsed.data.pipeline,
+              steps: parsed.data.pipeline.steps.map((step, index) => ({ ...step, id: `step-${index + 1}` })),
+              currentStepIndex: 0,
+              results: [],
+              status: 'idle' as const,
+            }
+          : undefined,
+      });
       return context.json({ task }, 201);
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to create the feature task.' }, 409);
@@ -605,6 +963,56 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       return context.json({ task });
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to approve the feature task.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/pipeline/execute', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ blueprintRevision: z.number().int().positive() }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Pipeline execution requires a current blueprint revision.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    if (project.blueprint.metadata.revision !== parsed.data.blueprintRevision) return context.json({ error: 'The pipeline must target the current Blueprint revision.' }, 409);
+    try {
+      const task = await store.executeFeatureTaskPipeline(projectId, parsed.data.blueprintRevision);
+      return context.json({ task });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to execute the pipeline.' }, 409);
+    }
+  });
+
+  app.put('/api/projects/:projectId/pipeline', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({
+      steps: z.array(z.object({
+        id: z.string().min(1),
+        name: z.string().min(1).max(120),
+        profileId: z.string().min(1),
+        prompt: z.string().max(4000).default(''),
+      })).min(1),
+    }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Pipeline steps are required (at least one step with name and profileId).' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const task = await store.updateFeatureTaskPipeline(projectId, project.blueprint.metadata.revision, parsed.data.steps);
+      return context.json({ task });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to update the pipeline.' }, 409);
+    }
+  });
+
+  app.post('/api/projects/:projectId/pipeline/resume', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({ blueprintRevision: z.number().int().positive() }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Pipeline resume requires a current blueprint revision.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const task = await store.resumeFeatureTaskPipeline(projectId, parsed.data.blueprintRevision);
+      return context.json({ task });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to resume the pipeline.' }, 409);
     }
   });
 

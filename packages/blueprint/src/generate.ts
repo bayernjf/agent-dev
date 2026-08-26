@@ -147,6 +147,80 @@ function yamlQuoted(value: string) {
   return JSON.stringify(value);
 }
 
+/**
+ * Generate analytics script snippets with a privacy consent gate.
+ * Scripts only load after the user explicitly consents (stored in localStorage).
+ * Returns an empty string if no analytics providers are selected.
+ */
+function analyticsSnippet(blueprint: ProductBlueprint): string {
+  const providers = blueprint.spec.analytics.providers;
+  if (providers.length === 0) return '';
+
+  const ga4Snippet = providers.includes('ga4') ? `
+    <!-- Google Analytics 4 (loaded only after consent) -->
+    <script>
+    (function() {
+      function loadGA4() {
+        var id = document.querySelector('meta[name="ga4-measurement-id"]')?.content;
+        if (!id) return;
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://www.googletagmanager.com/gtag/js?id=' + id;
+        document.head.appendChild(s);
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        window.gtag = gtag;
+        gtag('js', new Date());
+        gtag('config', id, { anonymize_ip: true });
+      }
+      if (localStorage.getItem('analytics-consent') === 'granted') loadGA4();
+      window.addEventListener('analytics-consent-granted', loadGA4);
+    })();
+    </script>` : '';
+
+  const claritySnippet = providers.includes('clarity') ? `
+    <!-- Microsoft Clarity (loaded only after consent) -->
+    <script>
+    (function() {
+      function loadClarity() {
+        var id = document.querySelector('meta[name="clarity-project-id"]')?.content;
+        if (!id) return;
+        (function(c,l,a,r,i,t,y){
+          c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+          t=l.createElement(r);t.async=1;t.src='https://www.clarity.ms/tag/'+i;
+          y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+        })(window, document, 'clarity', 'script', id);
+      }
+      if (localStorage.getItem('analytics-consent') === 'granted') loadClarity();
+      window.addEventListener('analytics-consent-granted', loadClarity);
+    })();
+    </script>` : '';
+
+  const consentBanner = `
+    <!-- Privacy consent banner -->
+    <div id="analytics-consent-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1a1a1a;color:#fff;padding:16px 24px;z-index:9999;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
+      <span style="font-size:14px;">We use analytics to improve the product. You can opt in or opt out at any time.</span>
+      <div style="display:flex;gap:8px;">
+        <button onclick="document.getElementById('analytics-consent-banner').style.display='none';localStorage.setItem('analytics-consent','denied');" style="background:transparent;color:#fff;border:1px solid #666;padding:8px 16px;cursor:pointer;border-radius:4px;">Decline</button>
+        <button onclick="document.getElementById('analytics-consent-banner').style.display='none';localStorage.setItem('analytics-consent','granted');window.dispatchEvent(new Event('analytics-consent-granted'));" style="background:#286b43;color:#fff;border:none;padding:8px 16px;cursor:pointer;border-radius:4px;">Accept</button>
+      </div>
+    </div>
+    <script>
+    (function() {
+      if (!localStorage.getItem('analytics-consent')) {
+        document.getElementById('analytics-consent-banner').style.display = 'flex';
+      }
+    })();
+    </script>`;
+
+  const metaTags = [
+    providers.includes('ga4') ? '    <meta name="ga4-measurement-id" content="%VITE_GA4_MEASUREMENT_ID%" />' : '',
+    providers.includes('clarity') ? '    <meta name="clarity-project-id" content="%VITE_CLARITY_PROJECT_ID%" />' : '',
+  ].filter(Boolean).join('\n');
+
+  return `\n${metaTags}${ga4Snippet}${claritySnippet}${consentBanner}\n  `;
+}
+
 function analyticsVariables(blueprint: ProductBlueprint) {
   return blueprint.spec.analytics.providers.flatMap(provider => {
     if (provider === 'ga4') {
@@ -352,7 +426,12 @@ function buildWebSaaS(blueprint: ProductBlueprint): GeneratedArtifact[] {
     { id: 'template-vite-config', title: 'Vite React configuration', path: 'vite.config.ts', content: `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\n\nexport default defineConfig({ plugins: [react()] });\n` },
     { id: 'template-readme', title: 'Web SaaS template README', path: 'README.md', content: `# ${markdown(blueprint.metadata.name)}\n\n${templateHeader}\n\nThis is the Agent-Dev fixed Web SaaS Golden Path. The web app deploys to Cloudflare Pages and the Hono API deploys to Vercel Functions.\n\n## Local commands\n\n- \`npm install\` (first materialization; creates the lock file)\n- \`npm run quality\`\n- \`npm run dev\`\n\n\`package-lock.json\` is committed by the first install, and CI runs \`npm ci\` against it.\n\n## Environment\n\nUse \`config/env.contract.yaml\` as the source of truth. Never commit secret values.\n` },
     { id: 'template-web-package', title: 'Web application package', path: 'apps/web/package.json', content: JSON.stringify({ name: 'web', private: true, type: 'module', scripts: { dev: 'vite', build: 'vite build' }, dependencies: { react: '^19.1.0', 'react-dom': '^19.1.0' }, devDependencies: { '@vitejs/plugin-react': '^4.4.1', vite: '^7.3.6', typescript: '^5.8.3' } }, null, 2) + '\n' },
-    { id: 'template-web-index', title: 'Vite web entry', path: 'apps/web/index.html', content: '<!doctype html>\n<html lang="en">\n  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="api-base-url" content="%VITE_API_BASE_URL%" /><title>Agent-Dev Web SaaS</title></head>\n  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>\n</html>\n' },
+    { id: 'template-web-index', title: 'Vite web entry', path: 'apps/web/index.html', content: `<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="api-base-url" content="%VITE_API_BASE_URL%" />${analyticsSnippet(blueprint)}<title>Agent-Dev Web SaaS</title></head>
+  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+</html>
+` },
     { id: 'template-web-main', title: 'Web application entrypoint', path: 'apps/web/src/main.tsx', content: `import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport './styles.css';\n\nconst apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '';\n\nfunction App() {\n  const [apiStatus, setApiStatus] = React.useState('checking');\n  React.useEffect(() => {\n    if (!apiBaseUrl) return setApiStatus('not configured');\n    fetch(\`\${apiBaseUrl}/api/health\`)\n      .then(response => response.json())\n      .then(body => setApiStatus(body.status ?? 'unknown'))\n      .catch(() => setApiStatus('unreachable'));\n  }, []);\n  return <main><p className="eyebrow">Agent-Dev Web SaaS</p><h1>${markdown(blueprint.metadata.name)}</h1><p>${markdown(blueprint.metadata.productIntent || 'Your product baseline is ready for the next feature.')}</p><span className="status">API {apiBaseUrl || 'unset'} health: {apiStatus}</span></main>;\n}\n\ncreateRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);\n` },
     { id: 'template-web-styles', title: 'Web application styles', path: 'apps/web/src/styles.css', content: ':root { font-family: Inter, system-ui, sans-serif; color: #1d2823; background: #f6f7f3; } body { margin: 0; min-width: 320px; } main { max-width: 720px; margin: 16vh auto; padding: 32px; } h1 { font-size: clamp(32px, 7vw, 64px); margin: 0 0 16px; } p { line-height: 1.6; } .eyebrow { color: #286b43; font-size: 12px; font-weight: 700; text-transform: uppercase; } .status { display: inline-block; margin-top: 20px; padding: 8px 10px; border-radius: 4px; color: #286b43; background: #e5f2e8; font-size: 13px; }\n' },
     { id: 'template-api-package', title: 'API application package', path: 'apps/api/package.json', content: JSON.stringify({ name: 'api', private: true, type: 'module', scripts: { dev: 'tsx src/index.ts' }, dependencies: { '@hono/node-server': '^1.14.1', hono: '^4.7.7' }, devDependencies: { tsx: '^4.19.3', typescript: '^5.8.3' } }, null, 2) + '\n' },
@@ -375,11 +454,6 @@ function buildLandingPage(blueprint: ProductBlueprint): GeneratedArtifact[] {
   const templateHeader = `Generated from ProductBlueprint revision ${blueprint.metadata.revision}.`;
   const safeName = blueprint.metadata.name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-dev-landing';
   const layout = blueprint.metadata.customInstructions?.trim() || blueprint.metadata.productIntent || 'Your product, distilled to one page.';
-  const analyticsSnippet = blueprint.spec.analytics.providers.map(provider =>
-    provider === 'ga4'
-      ? `    <!-- GA4: injected only after consent; value from %VITE_GA4_MEASUREMENT_ID% -->`
-      : `    <!-- Clarity: injected only after consent; value from %VITE_CLARITY_PROJECT_ID% -->`
-  ).join('\n');
 
   return [
     // Plain static site, no workspace tooling. `npm run build` copies src/ to dist/ and asserts the
@@ -387,7 +461,7 @@ function buildLandingPage(blueprint: ProductBlueprint): GeneratedArtifact[] {
     { id: 'template-root-package', title: 'Landing page package', path: 'package.json', content: JSON.stringify({ name: safeName, private: true, type: 'module', scripts: { build: 'node scripts/build.mjs', lint: 'node scripts/build.mjs --check', quality: qualityScript(blueprint) } }, null, 2) + '\n' },
     { id: 'template-build-script', title: 'Static build / inject script', path: 'scripts/build.mjs', content: `import { mkdir, copyFile } from 'node:fs/promises';\n\n// Landing pages are static: this copies the src tree to dist and validates the entry document.\n// Analytics IDs are injected from the environment contract at deploy time, never committed.\nawait mkdir('dist', { recursive: true });\nfor (const file of ['index.html', 'styles.css', 'app.js']) {\n  await copyFile('src/' + file, 'dist/' + file).catch(() => {});\n}\nconst { readFile } = await import('node:fs/promises');\nconst html = await readFile('dist/index.html', 'utf8');\nif (!html.includes('<main')) throw new Error('build: index.html must contain a <main> landmark for SEO/a11y.');\nconsole.log('build: static site prepared at dist/');\n` },
     { id: 'template-readme', title: 'Landing page README', path: 'README.md', content: `# ${markdown(blueprint.metadata.name)}\n\n${templateHeader}\n\nThis is the Agent-Dev landing-page Golden Path. A single static site deploys to Cloudflare Pages.\n\n## Local commands\n\n- \`npm run build\` (prepare static output)\n- \`npm run quality\`\n\n## Environment\n\nUse \`config/env.contract.yaml\` as the source of truth. Never commit secret values.\n` },
-    { id: 'template-index', title: 'Landing page entry', path: 'src/index.html', content: `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <meta name="description" content="${markdown(layout)}" />\n    <title>${markdown(blueprint.metadata.name)}</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <main>\n      <p class="eyebrow">${markdown(blueprint.metadata.name)}</p>\n      <h1>${markdown(blueprint.metadata.name)}</h1>\n      <p class="subhead">${markdown(layout)}</p>\n      <a class="cta" href="#get-started">Get started</a>\n    </main>\n    ${analyticsSnippet}\n    <script src="app.js"></script>\n  </body>\n</html>\n` },
+    { id: 'template-index', title: 'Landing page entry', path: 'src/index.html', content: `<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <meta name="description" content="${markdown(layout)}" />\n    <title>${markdown(blueprint.metadata.name)}</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <main>\n      <p class="eyebrow">${markdown(blueprint.metadata.name)}</p>\n      <h1>${markdown(blueprint.metadata.name)}</h1>\n      <p class="subhead">${markdown(layout)}</p>\n      <a class="cta" href="#get-started">Get started</a>\n    </main>\n    ${analyticsSnippet(blueprint)}\n    <script src="app.js"></script>\n  </body>\n</html>\n` },
     {  id: 'template-styles', title: 'Landing page styles', path: 'src/styles.css', content: ':root { font-family: Inter, system-ui, sans-serif; color: #1d2823; background: #f6f7f3; } body { margin: 0; } main { max-width: 720px; margin: 18vh auto; padding: 32px; } h1 { font-size: clamp(36px, 8vw, 72px); margin: 0 0 16px; } .eyebrow { color: #286b43; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; } .subhead { font-size: 20px; line-height: 1.5; color: #4a5c52; } .cta { display: inline-block; margin-top: 24px; padding: 12px 20px; border-radius: 6px; background: #286b43; color: #fff; text-decoration: none; font-weight: 600; }\n' },
     { id: 'template-app-js', title: 'Landing page script', path: 'src/app.js', content: `// No framework needed for a landing page. Keep it dependency-free so it loads fast and scores well.\nconst params = new URLSearchParams(location.search);\ndocument.querySelectorAll('[data-param]').forEach(el => {\n  const key = el.getAttribute('data-param');\n  if (params.has(key)) el.textContent = params.get(key);\n});\n` },
     { id: 'template-cloudflare', title: 'Cloudflare Pages configuration', path: 'wrangler.toml', content: `# ${templateHeader}\nname = "${safeName}"\ncompatibility_date = "2026-01-01"\npages_build_output_dir = "dist"\n` },

@@ -31,16 +31,10 @@ export const blueprintModeSchema = z.enum(['beginner', 'professional']);
 export const desktopShellSchema = z.enum(['tauri', 'electron']);
 export const analyticsProviderSchema = z.enum(['ga4', 'clarity']);
 
-// Runtime provider ids must match keys in the agent-runtime AGENT_ADAPTERS registry. `local-` is a
-// namespace prefix so Blueprint stays explicit about which local Agent is chosen.
-export const runtimeProviderSchema = z.enum([
-  'local-codex',
-  'local-opencode',
-  'local-claude',
-  'local-aider',
-  'local-openclaw',
-  'local-codebuddy',
-]);
+// Runtime provider accepts built-in agent ids (with `local-` prefix) or dynamic Agent Profile ids.
+// Profile ids are created by users at runtime, so they cannot be a fixed enum. Validation that the
+// referenced agent/profile actually exists and is executable happens in the storage layer at run time.
+export const runtimeProviderSchema = z.string().min(1).max(120);
 
 export const blueprintAnswersSchema = z.object({
   mode: blueprintModeSchema.default('beginner'),

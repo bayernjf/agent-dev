@@ -9,10 +9,11 @@ import { drizzle } from 'drizzle-orm/sql-js';
 import initSqlJs, { type Database } from 'sql.js';
 import type { ProductBlueprint } from '@agent-dev/blueprint';
 import { createBaselinePlan, createDryRunPlan, productBlueprintSchema } from '@agent-dev/blueprint';
-import { buildAgentExecutionPlan, executeCodexPlan, isAgentExecutable, type CodexExecutionPlan, type CodexExecutionResult, type CodexProcessRunner } from '@agent-dev/agent-runtime';
+import { buildAgentExecutionPlan, executeCodexPlan, isAgentExecutable, type CodexExecutionPlan, type CodexExecutionResult, type CodexProcessRunner, type AgentProfile, resolvePipelinePrompt, getNextPipelineStep, isPipelineComplete, type FeatureTaskPipeline, type PipelineStep, type PipelineStepResult } from '@agent-dev/agent-runtime';
 import { createNeedsInputRun, restoreDeliveryActor, type DeliveryEvent, type DeliverySnapshot, type DeliveryState } from '@agent-dev/workflow';
 import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects, releaseRuns } from './schema.js';
 import { migrations } from './migrations.js';
+import { ProfileStore, type CreateProfileInput, type UpdateProfileInput, type ProfileValidationResult } from './profiles-store.js';
 
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
@@ -173,6 +174,8 @@ export type FeatureTask = {
   approvedAt?: string;
   workspacePath: string;
   createdAt: string;
+  /** Optional multi-step pipeline. If present, the task is executed as a serial pipeline. */
+  pipeline?: import('@agent-dev/agent-runtime').FeatureTaskPipeline;
 };
 
 export type RuntimeRun = {
@@ -238,12 +241,14 @@ export type AcceptanceRecord = {
 
 export class AgentDevStore {
   private readonly orm: ReturnType<typeof createOrm>;
+  readonly profiles: ProfileStore;
 
   private constructor(
     private readonly sqlite: Database,
     private readonly databasePath: string,
   ) {
     this.orm = createOrm(sqlite);
+    this.profiles = new ProfileStore(dirname(databasePath));
   }
 
   /** Where the platform keeps its own state and the workspaces it creates. */
@@ -413,6 +418,43 @@ export class AgentDevStore {
     };
   }
 
+  listBlueprintRevisions(projectId: string): Array<{ revision: number; blueprintJson: ProductBlueprint; createdAt: string }> {
+    const rows = this.orm.select().from(blueprintRevisions)
+      .where(eq(blueprintRevisions.projectId, projectId))
+      .orderBy(desc(blueprintRevisions.revision))
+      .all();
+    return rows.map(row => ({
+      revision: row.revision,
+      blueprintJson: productBlueprintSchema.parse(JSON.parse(row.blueprintJson)),
+      createdAt: row.createdAt,
+    }));
+  }
+
+  reviseBlueprint(projectId: string, blueprint: ProductBlueprint): StoredProject {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error(`Project ${projectId} not found.`);
+    const newRevision = project.blueprint.metadata.revision + 1;
+    const updatedBlueprint: ProductBlueprint = {
+      ...blueprint,
+      metadata: { ...blueprint.metadata, revision: newRevision },
+    };
+    const now = new Date().toISOString();
+    const revisionId = randomUUID();
+    this.orm.insert(blueprintRevisions).values({
+      id: revisionId,
+      projectId,
+      revision: newRevision,
+      blueprintJson: JSON.stringify(updatedBlueprint),
+      createdAt: now,
+    }).run();
+    this.orm.update(projects).set({
+      productType: updatedBlueprint.spec.product.type,
+      updatedAt: now,
+    }).where(eq(projects.id, projectId)).run();
+    this.persist();
+    return this.getProject(projectId)!;
+  }
+
   getBaselineApproval(projectId: string, blueprintRevision: number): BaselineApproval | null {
     const approval = this.orm.select().from(baselineApprovals)
       .where(eq(baselineApprovals.projectId, projectId))
@@ -550,9 +592,19 @@ export class AgentDevStore {
     try {
       await this.executePendingStep(run, steps[0], attempts, options, async () => { productBlueprintSchema.parse(project.blueprint); });
       await this.executePendingStep(run, steps[1], attempts, options, async () => { await mkdir(run.workspacePath, { recursive: true }); });
+      // If the workspace already contains a .git directory (e.g. imported from an
+      // existing repository), treat it like a remote base: do not overwrite user files.
+      if (!useRemoteBase) {
+        try {
+          await access(join(run.workspacePath, '.git'));
+          useRemoteBase = true;
+        } catch {
+          // No .git directory — proceed with scaffold generation.
+        }
+      }
       await this.executePendingStep(run, steps[2], attempts, options, async () => {
-        // When basing on the remote `dev` branch, the scaffold already lives there and must not be
-        // overwritten by a fresh generation — that would wipe out previously shipped feature code.
+        // When basing on the remote `dev` branch or an imported repository, the scaffold
+        // already lives there and must not be overwritten — that would wipe out user code.
         if (useRemoteBase) return;
         for (const artifact of createDryRunPlan(project.blueprint).artifacts) {
           const target = join(run.workspacePath, artifact.path);
@@ -745,7 +797,16 @@ export class AgentDevStore {
     if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before creating a feature task.');
     const existing = await this.getFeatureTask(input.projectId, input.blueprintRevision);
     if (existing) return existing;
-    const task: FeatureTask = { ...input, id: randomUUID(), status: 'draft', workspacePath: run.workspacePath, createdAt: new Date().toISOString() };
+    // Initialize pipeline state if steps are provided.
+    const pipeline = input.pipeline
+      ? {
+          steps: input.pipeline.steps.map((step, index) => ({ ...step, id: step.id ?? `step-${index + 1}` })),
+          currentStepIndex: 0,
+          results: [],
+          status: 'idle' as const,
+        }
+      : undefined;
+    const task: FeatureTask = { ...input, pipeline, id: randomUUID(), status: 'draft', workspacePath: run.workspacePath, createdAt: new Date().toISOString() };
     await writeFile(join(run.workspacePath, 'feature-task.json'), JSON.stringify(task, null, 2) + '\n', 'utf8');
     await writeFile(join(run.workspacePath, 'FEATURE_TASK.md'), this.buildFeatureTask(task), 'utf8');
     await execFileAsync('git', ['add', 'feature-task.json', 'FEATURE_TASK.md'], { cwd: run.workspacePath });
@@ -778,6 +839,26 @@ export class AgentDevStore {
     return approved;
   }
 
+  async updateFeatureTaskPipeline(projectId: string, blueprintRevision: number, steps: { id: string; name: string; profileId: string; prompt: string }[]): Promise<FeatureTask> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task) throw new Error('Feature task not found.');
+    if (task.status !== 'draft') throw new Error('Pipeline can only be edited while the task is in draft status.');
+    const pipeline = task.pipeline ?? { steps: [], currentStepIndex: 0, results: [], status: 'idle' as const };
+    const updated: FeatureTask = {
+      ...task,
+      pipeline: {
+        ...pipeline,
+        steps: steps.map((step, index) => ({ ...step, id: step.id || `step-${index + 1}` })),
+        status: 'idle' as const,
+        currentStepIndex: 0,
+        results: [],
+      },
+    };
+    await writeFile(join(task.workspacePath, 'feature-task.json'), JSON.stringify(updated, null, 2) + '\n', 'utf8');
+    await writeFile(join(task.workspacePath, 'FEATURE_TASK.md'), this.buildFeatureTask(updated), 'utf8');
+    return updated;
+  }
+
   async prepareRuntimeRun(projectId: string, blueprintRevision: number, agentId = 'codex'): Promise<RuntimeRun> {
     const task = await this.getFeatureTask(projectId, blueprintRevision);
     if (!task || task.status !== 'approved') throw new Error('Approve a Feature Task before preparing a Runtime run.');
@@ -786,8 +867,15 @@ export class AgentDevStore {
     const now = new Date().toISOString();
     // Blueprint runtime providers use a `local-` namespace prefix (e.g. `local-codebuddy`), but the
     // adapter registry keys are bare (e.g. `codebuddy`). Strip the prefix before looking up the adapter.
-    const adapterId = agentId.startsWith('local-') ? agentId.slice(6) : agentId;
-    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId, status: 'planned', plan: isAgentExecutable(adapterId) ? buildAgentExecutionPlan(task, task.workspacePath, adapterId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex'), attempts: 0, history: [], createdAt: now, updatedAt: now };
+    const rawAdapterId = agentId.startsWith('local-') ? agentId.slice(6) : agentId;
+    // Check if the agentId refers to an Agent Profile. If so, resolve the base agent and pass the profile.
+    const profile = await this.profiles.getProfile(rawAdapterId);
+    const adapterId = profile ? profile.baseAgentId : rawAdapterId;
+    const executable = isAgentExecutable(adapterId);
+    const plan = executable
+      ? buildAgentExecutionPlan(task, task.workspacePath, adapterId, { profile: profile ?? undefined })
+      : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
+    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId, status: 'planned', plan, attempts: 0, history: [], createdAt: now, updatedAt: now };
     await writeFile(join(task.workspacePath, 'runtime-run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8');
     await writeFile(join(task.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(run, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
     await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: task.workspacePath });
@@ -819,8 +907,12 @@ export class AgentDevStore {
 
   private async executeRuntimeAttempt(task: FeatureTask, existing: RuntimeRun, runner?: CodexProcessRunner): Promise<RuntimeRun> {
     const attemptNumber = existing.attempts + 1;
-    const existingAdapterId = existing.agentId?.startsWith('local-') ? existing.agentId.slice(6) : existing.agentId;
-    const plan = buildAgentExecutionPlan(task, task.workspacePath, existingAdapterId && isAgentExecutable(existingAdapterId) ? existingAdapterId : 'codex', { execute: true });
+    const rawAdapterId = existing.agentId?.startsWith('local-') ? existing.agentId.slice(6) : existing.agentId;
+    // Resolve profile if the agentId refers to one.
+    const profile = rawAdapterId ? await this.profiles.getProfile(rawAdapterId) : null;
+    const adapterId = profile ? profile.baseAgentId : rawAdapterId;
+    const executable = adapterId && isAgentExecutable(adapterId);
+    const plan = buildAgentExecutionPlan(task, task.workspacePath, executable ? adapterId : 'codex', { execute: true, profile: profile ?? undefined });
     const startedAt = new Date().toISOString();
     const attempt: RuntimeAttempt = { attempt: attemptNumber, status: 'running', plan, startedAt };
 
@@ -864,6 +956,183 @@ export class AgentDevStore {
       await this.advanceDelivery(task.projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }]);
     }
     return finished;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Feature Task Pipeline (multi-step serial execution with different Profiles)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Execute a Feature Task's pipeline step by step.
+   * Each step uses its own Profile and prompt; previous step outputs can be
+   * referenced via {{step:step-id.output}} placeholders.
+   *
+   * Returns the updated FeatureTask with pipeline results.
+   */
+  async executeFeatureTaskPipeline(
+    projectId: string,
+    blueprintRevision: number,
+    runner?: CodexProcessRunner,
+  ): Promise<FeatureTask> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task) throw new Error('Feature Task not found.');
+    if (task.status !== 'approved') throw new Error('Approve the Feature Task before executing its pipeline.');
+    if (!task.pipeline) throw new Error('This Feature Task has no pipeline configured.');
+
+    let pipeline: FeatureTaskPipeline = {
+      ...task.pipeline,
+      status: 'running',
+      startedAt: task.pipeline.startedAt ?? new Date().toISOString(),
+    };
+
+    // Execute steps until complete, blocked, or no more ready steps.
+    let safetyCounter = 0;
+    const maxIterations = pipeline.steps.length * 3;
+    while (safetyCounter < maxIterations) {
+      safetyCounter++;
+      const nextStep = getNextPipelineStep(pipeline.steps, pipeline.results);
+      if (!nextStep) break;
+
+      // Check if this step requires human approval (pause).
+      if (nextStep.requiresApproval && !this.isStepApproved(pipeline, nextStep.id)) {
+        pipeline.status = 'paused';
+        await this.saveFeatureTask({ ...task, pipeline });
+        return { ...task, pipeline };
+      }
+
+      const stepResult = await this.executePipelineStep(task, pipeline, nextStep, runner);
+      pipeline = this.updatePipelineResult(pipeline, stepResult);
+      await this.saveFeatureTask({ ...task, pipeline });
+
+      // If step failed and continueOnFailure is false, stop.
+      if (stepResult.status === 'failed' && !nextStep.continueOnFailure) {
+        pipeline.status = 'failed';
+        pipeline.completedAt = new Date().toISOString();
+        await this.saveFeatureTask({ ...task, pipeline });
+        return { ...task, pipeline };
+      }
+    }
+
+    // Mark complete if all steps done.
+    if (isPipelineComplete(pipeline.steps, pipeline.results)) {
+      pipeline.status = 'completed';
+      pipeline.completedAt = new Date().toISOString();
+      await this.saveFeatureTask({ ...task, pipeline });
+      await this.advanceDelivery(task.projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }]);
+    } else if (pipeline.status !== 'paused') {
+      pipeline.status = 'failed';
+      pipeline.completedAt = new Date().toISOString();
+      await this.saveFeatureTask({ ...task, pipeline });
+    }
+
+    return { ...task, pipeline };
+  }
+
+  /**
+   * Execute a single pipeline step.
+   * Creates a temporary ApprovedTask with the step's resolved prompt,
+   * builds an execution plan using the step's Profile, and executes it.
+   */
+  private async executePipelineStep(
+    task: FeatureTask,
+    pipeline: FeatureTaskPipeline,
+    step: PipelineStep,
+    runner?: CodexProcessRunner,
+  ): Promise<PipelineStepResult> {
+    const startedAt = new Date().toISOString();
+    const result: PipelineStepResult = { stepId: step.id, status: 'running', startedAt };
+
+    try {
+      // Resolve prompt template with previous step outputs.
+      const resolvedPrompt = resolvePipelinePrompt(step.prompt, pipeline.results);
+
+      // Resolve Profile.
+      const profile = await this.profiles.getProfile(step.profileId);
+      if (!profile) throw new Error(`Profile "${step.profileId}" not found.`);
+      const adapterId = profile.baseAgentId;
+      if (!isAgentExecutable(adapterId)) throw new Error(`Base agent "${adapterId}" is not executable.`);
+
+      // Build a temporary task with the step's prompt as objective.
+      const stepTask: FeatureTask = {
+        ...task,
+        objective: `[Pipeline Step: ${step.name}]\n\n${resolvedPrompt}`,
+        acceptanceCriteria: [`Step "${step.name}" completes without error`],
+      };
+
+      // Build and execute plan.
+      const plan = buildAgentExecutionPlan(stepTask, task.workspacePath, adapterId, {
+        execute: true,
+        profile,
+      });
+      const execResult = await executeCodexPlan(plan, runner);
+
+      // Truncate output for storage (keep last 2000 chars).
+      const output = execResult.output.length > 2000
+        ? '...[truncated]...\n' + execResult.output.slice(-2000)
+        : execResult.output;
+
+      result.status = execResult.exitCode === 0 && !execResult.timedOut ? 'completed' : 'failed';
+      result.output = output;
+      result.completedAt = execResult.completedAt;
+      if (result.status === 'failed') {
+        result.error = `Exit code: ${execResult.exitCode}, timed out: ${execResult.timedOut}`;
+      }
+
+      // Write output artifact if specified.
+      if (step.outputArtifact && result.status === 'completed') {
+        const artifactPath = join(task.workspacePath, step.outputArtifact);
+        await writeFile(artifactPath, output, 'utf8');
+      }
+
+      // Commit agent changes on success.
+      if (result.status === 'completed') {
+        await this.commitAgentChanges(task);
+      }
+    } catch (error) {
+      result.status = 'failed';
+      result.error = error instanceof Error ? error.message : String(error);
+      result.completedAt = new Date().toISOString();
+    }
+
+    return result;
+  }
+
+  private updatePipelineResult(pipeline: FeatureTaskPipeline, stepResult: PipelineStepResult): FeatureTaskPipeline {
+    const existingIndex = pipeline.results.findIndex(r => r.stepId === stepResult.stepId);
+    const results = existingIndex >= 0
+      ? pipeline.results.map((r, i) => i === existingIndex ? stepResult : r)
+      : [...pipeline.results, stepResult];
+    const currentStepIndex = pipeline.steps.findIndex(s => s.id === stepResult.stepId);
+    return { ...pipeline, results, currentStepIndex: Math.max(currentStepIndex, pipeline.currentStepIndex) };
+  }
+
+  private isStepApproved(_pipeline: FeatureTaskPipeline, _stepId: string): boolean {
+    // For now, steps with requiresApproval are always treated as not approved
+    // until an explicit approval API is implemented. This pauses the pipeline.
+    return false;
+  }
+
+  /** Save updated FeatureTask to workspace and commit. */
+  private async saveFeatureTask(task: FeatureTask): Promise<void> {
+    await writeFile(join(task.workspacePath, 'feature-task.json'), JSON.stringify(task, null, 2) + '\n', 'utf8');
+    await writeFile(join(task.workspacePath, 'FEATURE_TASK.md'), this.buildFeatureTask(task), 'utf8');
+  }
+
+  /** Resume a paused pipeline (after human approval). */
+  async resumeFeatureTaskPipeline(
+    projectId: string,
+    blueprintRevision: number,
+    runner?: CodexProcessRunner,
+  ): Promise<FeatureTask> {
+    const task = await this.getFeatureTask(projectId, blueprintRevision);
+    if (!task || !task.pipeline) throw new Error('Feature Task or pipeline not found.');
+    if (task.pipeline.status !== 'paused') throw new Error('Pipeline is not paused.');
+    // Mark the current step as approved by clearing requiresApproval (simplified).
+    const currentStep = task.pipeline.steps[task.pipeline.currentStepIndex];
+    if (currentStep) {
+      currentStep.requiresApproval = false;
+    }
+    return this.executeFeatureTaskPipeline(projectId, blueprintRevision, runner);
   }
 
   // Every other commit in the pipeline stages only the report file it just wrote, and the agent
@@ -1298,7 +1567,12 @@ export class AgentDevStore {
   }
 
   private buildFeatureTask(task: FeatureTask) {
-    return `# ${task.title}\n\n- Task ID: ${task.id}\n- Blueprint revision: ${task.blueprintRevision}\n- Status: ${task.status}\n- Created: ${task.createdAt}\n${task.approvedBy ? `- Approved by: ${task.approvedBy}\n- Approved at: ${task.approvedAt}\n` : ''}\n## Objective\n\n${task.objective}\n\n## Acceptance criteria\n\n${task.acceptanceCriteria.map((criterion, index) => `${index + 1}. [ ] ${criterion}`).join('\n')}\n\n## Agent boundary\n\nImplement only this task on the existing local feature branch. Run the configured quality gate and report evidence before requesting human acceptance.\n`;
+    const pipelineSection = task.pipeline ? `\n## Pipeline\n\n- Status: ${task.pipeline.status}\n- Steps: ${task.pipeline.steps.length}\n${task.pipeline.steps.map((step, i) => {
+      const stepResult = task.pipeline!.results.find(r => r.stepId === step.id);
+      const status = stepResult?.status ?? 'pending';
+      return `${i + 1}. **${step.name}** (profile: ${step.profileId}) — ${status}${stepResult?.error ? ` — error: ${stepResult.error}` : ''}`;
+    }).join('\n')}\n` : '';
+    return `# ${task.title}\n\n- Task ID: ${task.id}\n- Blueprint revision: ${task.blueprintRevision}\n- Status: ${task.status}\n- Created: ${task.createdAt}\n${task.approvedBy ? `- Approved by: ${task.approvedBy}\n- Approved at: ${task.approvedAt}\n` : ''}\n## Objective\n\n${task.objective}\n\n## Acceptance criteria\n\n${task.acceptanceCriteria.map((criterion, index) => `${index + 1}. [ ] ${criterion}`).join('\n')}\n\n## Agent boundary\n\nImplement only this task on the existing local feature branch. Run the configured quality gate and report evidence before requesting human acceptance.\n${pipelineSection}`;
   }
 
   private buildRuntimeRunReport(run: RuntimeRun, evidence: GitEvidence) {
@@ -1327,3 +1601,5 @@ export class AgentDevStore {
     await writeFile(this.databasePath, this.sqlite.export());
   }
 }
+
+export { ProfileStore, type CreateProfileInput, type UpdateProfileInput, type ProfileValidationResult };
