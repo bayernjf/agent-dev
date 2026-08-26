@@ -530,10 +530,30 @@ export class AgentDevStore {
     for (const step of steps) if (step.status === 'running' || step.status === 'failed') step.status = 'pending';
     const attempts = run.attempts + 1;
     await this.updateApplyRun(run, 'running', steps, attempts);
+    // If a previous revision already provisioned the GitHub repository and its `dev` branch exists,
+    // base this workspace on the remote integration branch instead of `git init`-ing a fresh history.
+    // Without this, every revision is an orphan tree and pull requests against `dev` fail with
+    // "no history in common".
+    const sourceControl = project.blueprint.spec.sourceControl;
+    const repoSlug = project.blueprint.metadata.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const remoteUrl = sourceControl?.owner ? `git@github.com:${sourceControl.owner}/${repoSlug}.git` : '';
+    let useRemoteBase = false;
+    if (remoteUrl && run.blueprintRevision > 1) {
+      try {
+        // `ls-remote --exit-code` exits 0 when the ref exists, non-zero otherwise.
+        await execFileAsync('git', ['ls-remote', '--exit-code', '--heads', remoteUrl, 'dev'], { timeout: 10_000 });
+        useRemoteBase = true;
+      } catch {
+        useRemoteBase = false;
+      }
+    }
     try {
       await this.executePendingStep(run, steps[0], attempts, options, async () => { productBlueprintSchema.parse(project.blueprint); });
       await this.executePendingStep(run, steps[1], attempts, options, async () => { await mkdir(run.workspacePath, { recursive: true }); });
       await this.executePendingStep(run, steps[2], attempts, options, async () => {
+        // When basing on the remote `dev` branch, the scaffold already lives there and must not be
+        // overwritten by a fresh generation — that would wipe out previously shipped feature code.
+        if (useRemoteBase) return;
         for (const artifact of createDryRunPlan(project.blueprint).artifacts) {
           const target = join(run.workspacePath, artifact.path);
           await mkdir(dirname(target), { recursive: true });
@@ -551,6 +571,24 @@ export class AgentDevStore {
         }, null, 2) + '\n', 'utf8');
       });
       await this.executePendingStep(run, steps[4], attempts, options, async () => {
+        if (useRemoteBase) {
+          // A retry may leave files from a previous failed run (e.g. DELIVERY_REPORT.md), and
+          // `write-manifest` always creates apply-manifest.json. Wipe everything so `git clone ... .`
+          // has an empty directory, then re-create the manifest after the clone.
+          await execFileAsync('rm', ['-rf', run.workspacePath]);
+          await mkdir(run.workspacePath, { recursive: true });
+          await execFileAsync('git', ['clone', '--branch', 'dev', '--depth', '1', remoteUrl, '.'], { cwd: run.workspacePath });
+          const manifestPath = join(run.workspacePath, 'apply-manifest.json');
+          await writeFile(manifestPath, JSON.stringify({
+            projectId: run.projectId,
+            blueprintRevision: run.blueprintRevision,
+            noExternalChanges: true,
+            generatedAt: new Date().toISOString(),
+            providerWrites: [],
+            note: 'Local Apply Simulator only. No provider resource was created.',
+          }, null, 2) + '\n', 'utf8');
+          return;
+        }
         await execFileAsync('git', ['init', '-q'], { cwd: run.workspacePath });
         await execFileAsync('git', ['add', '-A'], { cwd: run.workspacePath });
         try {
@@ -570,12 +608,21 @@ export class AgentDevStore {
         manifest.git = { baselineCommit, featureBranch };
         await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
         await execFileAsync('git', ['add', 'apply-manifest.json'], { cwd: run.workspacePath });
-        await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '--amend', '--no-edit', '-q'], { cwd: run.workspacePath });
+        if (useRemoteBase) {
+          // On a remote base, HEAD is the upstream `dev` tip and must not be amended.
+          await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `chore: record apply manifest for revision ${run.blueprintRevision}`], { cwd: run.workspacePath });
+        } else {
+          await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '--amend', '--no-edit', '-q'], { cwd: run.workspacePath });
+        }
       });
       await this.executePendingStep(run, steps[6], attempts, options, async () => {
         await writeFile(join(run.workspacePath, 'DELIVERY_REPORT.md'), this.buildDeliveryReport(run, project.blueprint.metadata.name, steps, 'completed'), 'utf8');
         await execFileAsync('git', ['add', 'DELIVERY_REPORT.md'], { cwd: run.workspacePath });
-        await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '--amend', '--no-edit', '-q'], { cwd: run.workspacePath });
+        if (useRemoteBase) {
+          await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', 'chore: record delivery report'], { cwd: run.workspacePath });
+        } else {
+          await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '--amend', '--no-edit', '-q'], { cwd: run.workspacePath });
+        }
       });
       const completed = await this.updateApplyRun(run, 'completed', steps, attempts);
       await this.advanceDelivery(run.projectId, [{ type: 'BASELINE_CREATED' }]);
@@ -737,7 +784,10 @@ export class AgentDevStore {
     const existing = await this.getRuntimeRun(projectId, blueprintRevision);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId, status: 'planned', plan: isAgentExecutable(agentId) ? buildAgentExecutionPlan(task, task.workspacePath, agentId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex'), attempts: 0, history: [], createdAt: now, updatedAt: now };
+    // Blueprint runtime providers use a `local-` namespace prefix (e.g. `local-codebuddy`), but the
+    // adapter registry keys are bare (e.g. `codebuddy`). Strip the prefix before looking up the adapter.
+    const adapterId = agentId.startsWith('local-') ? agentId.slice(6) : agentId;
+    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId, status: 'planned', plan: isAgentExecutable(adapterId) ? buildAgentExecutionPlan(task, task.workspacePath, adapterId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex'), attempts: 0, history: [], createdAt: now, updatedAt: now };
     await writeFile(join(task.workspacePath, 'runtime-run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8');
     await writeFile(join(task.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(run, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
     await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: task.workspacePath });
@@ -769,7 +819,8 @@ export class AgentDevStore {
 
   private async executeRuntimeAttempt(task: FeatureTask, existing: RuntimeRun, runner?: CodexProcessRunner): Promise<RuntimeRun> {
     const attemptNumber = existing.attempts + 1;
-    const plan = buildAgentExecutionPlan(task, task.workspacePath, existing.agentId && isAgentExecutable(existing.agentId) ? existing.agentId : 'codex', { execute: true });
+    const existingAdapterId = existing.agentId?.startsWith('local-') ? existing.agentId.slice(6) : existing.agentId;
+    const plan = buildAgentExecutionPlan(task, task.workspacePath, existingAdapterId && isAgentExecutable(existingAdapterId) ? existingAdapterId : 'codex', { execute: true });
     const startedAt = new Date().toISOString();
     const attempt: RuntimeAttempt = { attempt: attemptNumber, status: 'running', plan, startedAt };
 
