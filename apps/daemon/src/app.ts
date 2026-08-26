@@ -932,7 +932,13 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!project) return context.json({ error: 'Project not found.' }, 404);
     if (project.blueprint.metadata.revision !== parsed.data.blueprintRevision) return context.json({ error: 'The feature task must target the current Blueprint revision.' }, 409);
     try {
-      const task = await store.createFeatureTask({ projectId, ...parsed.data });
+      const task = await store.createFeatureTask({
+        projectId,
+        ...parsed.data,
+        pipeline: parsed.data.pipeline
+          ? { ...parsed.data.pipeline, currentStepIndex: 0, results: [], status: 'idle' as const }
+          : undefined,
+      });
       return context.json({ task }, 201);
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to create the feature task.' }, 409);
