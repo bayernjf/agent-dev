@@ -141,6 +141,33 @@ function hasValidGitHubSignature(body: string, signature: string | undefined, se
   return received.length === expectedBuffer.length && timingSafeEqual(received, expectedBuffer);
 }
 
+type BlueprintChange = {
+  path: string;
+  oldValue: unknown;
+  newValue: unknown;
+  type: 'added' | 'removed' | 'modified';
+};
+
+function diffBlueprints(oldBp: Record<string, unknown>, newBp: Record<string, unknown>, prefix = ''): BlueprintChange[] {
+  const changes: BlueprintChange[] = [];
+  const allKeys = new Set([...Object.keys(oldBp ?? {}), ...Object.keys(newBp ?? {)]);
+  for (const key of allKeys) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const oldVal = oldBp?.[key];
+    const newVal = newBp?.[key];
+    if (oldVal === undefined && newVal !== undefined) {
+      changes.push({ path, oldValue: undefined, newValue: newVal, type: 'added' });
+    } else if (oldVal !== undefined && newVal === undefined) {
+      changes.push({ path, oldValue: oldVal, newValue: undefined, type: 'removed' });
+    } else if (typeof oldVal === 'object' && typeof newVal === 'object' && oldVal !== null && newVal !== null && !Array.isArray(oldVal) && !Array.isArray(newVal)) {
+      changes.push(...diffBlueprints(oldVal as Record<string, unknown>, newVal as Record<string, unknown>, path));
+    } else if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+      changes.push({ path, oldValue: oldVal, newValue: newVal, type: 'modified' });
+    }
+  }
+  return changes;
+}
+
 export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}, dataDirectory?: string) {
   const app = new Hono();
   const customAgents: CustomAgentInput[] = dataDirectory ? loadCustomAgents(dataDirectory) : [];
@@ -246,6 +273,61 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Failed to delete secret' }, 500);
     }
+  });
+
+  // Blueprint export/import/diff
+  app.get('/api/projects/:projectId/blueprint/export', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    return context.json({
+      format: 'agent-dev-blueprint',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      project: { name: project.name, productType: project.productType },
+      blueprint: project.blueprint,
+    });
+  });
+
+  app.post('/api/projects/:projectId/blueprint/import', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({
+      format: z.literal('agent-dev-blueprint'),
+      version: z.literal(1),
+      blueprint: z.record(z.unknown()),
+    }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Invalid blueprint import format. Expected { format: "agent-dev-blueprint", version: 1, blueprint: {...} }.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      // Validate the imported blueprint against the schema.
+      const { productBlueprintSchema } = await import('@agent-dev/blueprint');
+      const validated = productBlueprintSchema.parse(parsed.data.blueprint);
+      // Create a new revision with the imported blueprint.
+      const updated = store.reviseBlueprint(projectId, validated);
+      return context.json({ project: updated, imported: true });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to import blueprint' }, 400);
+    }
+  });
+
+  app.get('/api/projects/:projectId/blueprint/diff', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    // Compare current blueprint with the previous revision (if any).
+    const revisions = store.listBlueprintRevisions(project.id);
+    if (revisions.length < 2) {
+      return context.json({ projectId: project.id, currentRevision: project.blueprint.metadata.revision, previousRevision: null, changes: [], note: 'No previous revision to compare against.' });
+    }
+    const current = project.blueprint;
+    const previous = revisions[revisions.length - 2]!.blueprintJson;
+    const changes = diffBlueprints(previous, current);
+    return context.json({
+      projectId: project.id,
+      currentRevision: current.metadata.revision,
+      previousRevision: previous.metadata.revision,
+      changes,
+      changeCount: changes.length,
+    });
   });
 
   app.get('/api/connectors/preflight', async context =>

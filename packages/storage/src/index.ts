@@ -418,6 +418,43 @@ export class AgentDevStore {
     };
   }
 
+  listBlueprintRevisions(projectId: string): Array<{ revision: number; blueprintJson: ProductBlueprint; createdAt: string }> {
+    const rows = this.orm.select().from(blueprintRevisions)
+      .where(eq(blueprintRevisions.projectId, projectId))
+      .orderBy(desc(blueprintRevisions.revision))
+      .all();
+    return rows.map(row => ({
+      revision: row.revision,
+      blueprintJson: productBlueprintSchema.parse(JSON.parse(row.blueprintJson)),
+      createdAt: row.createdAt,
+    }));
+  }
+
+  reviseBlueprint(projectId: string, blueprint: ProductBlueprint): StoredProject {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error(`Project ${projectId} not found.`);
+    const newRevision = project.blueprint.metadata.revision + 1;
+    const updatedBlueprint: ProductBlueprint = {
+      ...blueprint,
+      metadata: { ...blueprint.metadata, revision: newRevision },
+    };
+    const now = new Date().toISOString();
+    const revisionId = randomUUID();
+    this.orm.insert(blueprintRevisions).values({
+      id: revisionId,
+      projectId,
+      revision: newRevision,
+      blueprintJson: JSON.stringify(updatedBlueprint),
+      createdAt: now,
+    }).run();
+    this.orm.update(projects).set({
+      productType: updatedBlueprint.spec.product.type,
+      updatedAt: now,
+    }).where(eq(projects.id, projectId)).run();
+    this.persist();
+    return this.getProject(projectId)!;
+  }
+
   getBaselineApproval(projectId: string, blueprintRevision: number): BaselineApproval | null {
     const approval = this.orm.select().from(baselineApprovals)
       .where(eq(baselineApprovals.projectId, projectId))
