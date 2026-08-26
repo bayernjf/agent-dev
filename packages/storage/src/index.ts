@@ -737,7 +737,10 @@ export class AgentDevStore {
     const existing = await this.getRuntimeRun(projectId, blueprintRevision);
     if (existing) return existing;
     const now = new Date().toISOString();
-    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId, status: 'planned', plan: isAgentExecutable(agentId) ? buildAgentExecutionPlan(task, task.workspacePath, agentId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex'), attempts: 0, history: [], createdAt: now, updatedAt: now };
+    // Blueprint runtime providers use a `local-` namespace prefix (e.g. `local-codebuddy`), but the
+    // adapter registry keys are bare (e.g. `codebuddy`). Strip the prefix before looking up the adapter.
+    const adapterId = agentId.startsWith('local-') ? agentId.slice(6) : agentId;
+    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId, status: 'planned', plan: isAgentExecutable(adapterId) ? buildAgentExecutionPlan(task, task.workspacePath, adapterId) : buildAgentExecutionPlan(task, task.workspacePath, 'codex'), attempts: 0, history: [], createdAt: now, updatedAt: now };
     await writeFile(join(task.workspacePath, 'runtime-run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8');
     await writeFile(join(task.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(run, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
     await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: task.workspacePath });
@@ -769,7 +772,8 @@ export class AgentDevStore {
 
   private async executeRuntimeAttempt(task: FeatureTask, existing: RuntimeRun, runner?: CodexProcessRunner): Promise<RuntimeRun> {
     const attemptNumber = existing.attempts + 1;
-    const plan = buildAgentExecutionPlan(task, task.workspacePath, existing.agentId && isAgentExecutable(existing.agentId) ? existing.agentId : 'codex', { execute: true });
+    const existingAdapterId = existing.agentId?.startsWith('local-') ? existing.agentId.slice(6) : existing.agentId;
+    const plan = buildAgentExecutionPlan(task, task.workspacePath, existingAdapterId && isAgentExecutable(existingAdapterId) ? existingAdapterId : 'codex', { execute: true });
     const startedAt = new Date().toISOString();
     const attempt: RuntimeAttempt = { attempt: attemptNumber, status: 'running', plan, startedAt };
 
