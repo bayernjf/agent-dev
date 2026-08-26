@@ -9,7 +9,7 @@ import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, type CustomAgentInput, type AgentProfile, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
+import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, runDoctor, type CustomAgentInput, type AgentProfile, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
 import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
 import type { ReleaseSource } from '@agent-dev/deployment-composer';
 import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin, releaseIdempotencyKey, releaseStepPlan } from '@agent-dev/deployment-composer';
@@ -187,6 +187,15 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.get('/api/health', context =>
     context.json({ service: 'agent-dev-daemon', status: 'ok', version: '0.1.0-alpha.0' }),
   );
+
+  app.get('/api/doctor', async context => {
+    try {
+      const report = await runDoctor();
+      return context.json(report);
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Doctor check failed' }, 500);
+    }
+  });
 
   app.get('/api/connectors/preflight', async context =>
     context.json(await (dependencies.runPreflight ?? runConnectorPreflight)()),
