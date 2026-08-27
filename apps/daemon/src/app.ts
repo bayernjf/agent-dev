@@ -397,7 +397,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
-  // Blueprint export/import/diff
+  // Blueprint export/import/diff/revisions
   app.get('/api/projects/:projectId/blueprint/export', context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
@@ -408,6 +408,59 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       project: { name: project.name, productType: project.productType },
       blueprint: project.blueprint,
     });
+  });
+
+  app.get('/api/projects/:projectId/blueprint/revisions', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const revisions = store.listBlueprintRevisions(project.id);
+    return context.json({
+      projectId: project.id,
+      currentRevision: project.blueprint.metadata.revision,
+      revisions: revisions.map(r => ({
+        revision: r.revision,
+        createdAt: r.createdAt,
+        productType: r.blueprintJson.spec.product.type,
+        runtime: r.blueprintJson.spec.runtime?.provider ?? 'codex',
+      })),
+    });
+  });
+
+  app.post('/api/projects/:projectId/blueprint/revise', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({
+      blueprint: z.record(z.unknown()),
+      confirmation: z.literal('REVISE_BLUEPRINT'),
+    }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Revise requires a blueprint object and confirmation REVISE_BLUEPRINT.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const { productBlueprintSchema } = await import('@agent-dev/blueprint');
+      const validated = productBlueprintSchema.parse(parsed.data.blueprint);
+      const previousRevision = project.blueprint.metadata.revision;
+      const previousBlueprint = project.blueprint;
+      const updated = store.reviseBlueprint(projectId, validated);
+      // Auto-generate diff for upgrade review
+      const changes = diffBlueprints(
+        previousBlueprint as unknown as Record<string, unknown>,
+        updated.blueprint as unknown as Record<string, unknown>,
+      );
+      events.emit({ type: 'blueprint.revised', projectId, projectName: project.name, occurredAt: new Date().toISOString() });
+      return context.json({
+        project: updated,
+        previousRevision,
+        newRevision: updated.blueprint.metadata.revision,
+        reviewRequired: changes.length > 0,
+        changes,
+        changeCount: changes.length,
+        note: changes.length > 0
+          ? `Blueprint upgraded from revision ${previousRevision} to ${updated.blueprint.metadata.revision} with ${changes.length} change(s). Review changes before applying.`
+          : 'Blueprint revised with no substantive changes.',
+      });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to revise blueprint' }, 400);
+    }
   });
 
   app.post('/api/projects/:projectId/blueprint/import', async context => {
