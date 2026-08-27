@@ -397,7 +397,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
-  // Blueprint export/import/diff
+  // Blueprint export/import/diff/revisions
   app.get('/api/projects/:projectId/blueprint/export', context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
@@ -408,6 +408,59 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       project: { name: project.name, productType: project.productType },
       blueprint: project.blueprint,
     });
+  });
+
+  app.get('/api/projects/:projectId/blueprint/revisions', context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    const revisions = store.listBlueprintRevisions(project.id);
+    return context.json({
+      projectId: project.id,
+      currentRevision: project.blueprint.metadata.revision,
+      revisions: revisions.map(r => ({
+        revision: r.revision,
+        createdAt: r.createdAt,
+        productType: r.blueprintJson.spec.product.type,
+        runtime: r.blueprintJson.spec.runtime?.provider ?? 'codex',
+      })),
+    });
+  });
+
+  app.post('/api/projects/:projectId/blueprint/revise', async context => {
+    const projectId = context.req.param('projectId');
+    const parsed = z.object({
+      blueprint: z.record(z.unknown()),
+      confirmation: z.literal('REVISE_BLUEPRINT'),
+    }).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Revise requires a blueprint object and confirmation REVISE_BLUEPRINT.' }, 400);
+    const project = store.getProject(projectId);
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      const { productBlueprintSchema } = await import('@agent-dev/blueprint');
+      const validated = productBlueprintSchema.parse(parsed.data.blueprint);
+      const previousRevision = project.blueprint.metadata.revision;
+      const previousBlueprint = project.blueprint;
+      const updated = store.reviseBlueprint(projectId, validated);
+      // Auto-generate diff for upgrade review
+      const changes = diffBlueprints(
+        previousBlueprint as unknown as Record<string, unknown>,
+        updated.blueprint as unknown as Record<string, unknown>,
+      );
+      events.emit({ type: 'blueprint.revised', projectId, projectName: project.name, occurredAt: new Date().toISOString() });
+      return context.json({
+        project: updated,
+        previousRevision,
+        newRevision: updated.blueprint.metadata.revision,
+        reviewRequired: changes.length > 0,
+        changes,
+        changeCount: changes.length,
+        note: changes.length > 0
+          ? `Blueprint upgraded from revision ${previousRevision} to ${updated.blueprint.metadata.revision} with ${changes.length} change(s). Review changes before applying.`
+          : 'Blueprint revised with no substantive changes.',
+      });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Failed to revise blueprint' }, 400);
+    }
   });
 
   app.post('/api/projects/:projectId/blueprint/import', async context => {
@@ -545,13 +598,30 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       if (parsed.data.importRepositoryUrl) {
         const { execFile } = await import('node:child_process');
         const { promisify } = await import('node:util');
-        const { mkdir, rm } = await import('node:fs/promises');
+        const { mkdir, rm, writeFile } = await import('node:fs/promises');
+        const { join } = await import('node:path');
         const execFileAsync = promisify(execFile);
         // Ensure workspace directory exists and is empty for clone.
         await rm(queued.workspacePath, { recursive: true, force: true });
         await mkdir(queued.workspacePath, { recursive: true });
         // Clone the repository (shallow, default branch).
         await execFileAsync('git', ['clone', '--depth', '1', parsed.data.importRepositoryUrl, '.'], { cwd: queued.workspacePath, timeout: 60_000 });
+        // Ensure the integration branch (dev) exists. Imported repositories may only
+        // have a main/master branch; Agent-Dev needs dev as the baseline for PRs.
+        const integrationBranch = project.blueprint.spec.sourceControl?.integrationBranch ?? 'dev';
+        const branches = await execFileAsync('git', ['branch', '--list', integrationBranch], { cwd: queued.workspacePath });
+        if (!branches.stdout.trim()) {
+          await execFileAsync('git', ['switch', '-c', integrationBranch], { cwd: queued.workspacePath });
+        } else {
+          await execFileAsync('git', ['switch', integrationBranch], { cwd: queued.workspacePath });
+        }
+        // Record import metadata so executeApplyRun knows this is an imported repository
+        // and should not wipe-and-reclone (which would lose the imported history).
+        await writeFile(join(queued.workspacePath, '.agent-dev-import'), JSON.stringify({
+          sourceUrl: parsed.data.importRepositoryUrl,
+          importedAt: new Date().toISOString(),
+          originalBranch: (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: queued.workspacePath })).stdout.trim(),
+        }, null, 2) + '\n', 'utf8');
       }
       const run = await store.executeApplyRun(queued.id);
       events.emit({
