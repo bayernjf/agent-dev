@@ -41,33 +41,37 @@ v0.1 验证的是「作者本人能跑通整条流水线」。v0.2 验证的是*
    - 交付：adapter status → `verified`；补充 runtime 契约测试（断言 claude 在 PATH 上才返回，避免 v0.1 缺陷 16 同类环境依赖测试）。
    - 依赖：无。
 
-2. **P0-2 一键 macOS 安装 + 诊断增强**
+2. **P0-2 一键 macOS 安装 + 诊断增强** ✅（2026-08-27 完成）
    - 外部用户不会手动配 Node22 / fnm / PATH / 代理。需：安装包（或 `brew`/脚本）固化 `.node-version`、Daemon 启动注入 `https_proxy`/`NODE_USE_ENV_PROXY=1`；`doctor` 把 v0.1 真实经验（代理、Cloudflare 域名延迟、CLI 版本冲突）做成可诊断项。
+   - 已完成：`scripts/install-macos.sh` 一键安装（Homebrew→fnm→Node22→依赖→build），`~/.agent-dev/env` 代理配置，launchd 自启，doctor 诊断已有。
    - 依赖：无，但应早于外部用户招募。
 
-3. **P0-3 失败分类与可读性修复建议**
+3. **P0-3 失败分类与可读性修复建议** ✅（2026-08-27 完成）
    - 将 v0.1 的 17 个真实缺陷归类为「环境类 / 配置类 / 平台类 / 产品类」，每个失败状态机步骤产出：原因 + 给外部用户的修复步骤（深链）+ 是否可自动重试。
-   - 这是 Pilot 退出条件能否达成的核心——作者能看懂 raw 报错，外人不能。
+   - 已完成：`packages/agent-runtime/src/failure-classification.ts` 覆盖 19 种失败模式（含本轮新增 7 种），24 个单元测试，Studio FailureDisplay 组件已有。
    - 依赖：无。
 
 ### P1 — 扩大可交付范围（Pilot 中期）
 
-4. **P1-1 导入现有仓库**
+4. **P1-1 导入现有仓库** ✅（2026-08-27 完成）
    - Apply 支持「已有 Git 仓库」：检测远端、对齐 baseline、不覆盖用户文件、冲突走 Manual Gate。
+   - 已完成：Apply API 支持 `importRepositoryUrl`，导入后自动确保 dev 分支存在，`.agent-dev-import` 标记，保留用户历史不 wipe-and-reclone，冲突检测（conflicts/wouldAdd/keptExisting 记录到 apply-manifest.json）。
    - 依赖：P0-3（导入冲突需复用失败分类）。
 
 5. **P1-2 Infisical Secret Backend Adapter**
    - 抽象 `SecretBackend`（平台 / Keychain / Infisical / Doppler），v0.1 仅前两者。Infisical 实现：版本、审批、轮换、跨平台同步；Agent-Dev 仍只持有引用不存明文。
+   - 基础代码已写（local-file + Infisical 基础），未连真实 Infisical 验证。
    - 依赖：无硬依赖，但建议与 P1-1 之后做，避免同时动 Secret 与导入两条链路。
 
-6. **P1-3 Blueprint 分享 + 升级提示**
+6. **P1-3 Blueprint 分享 + 升级提示** ✅（2026-08-27 完成）
    - 导出/导入 `agent-dev.yaml`、版本升级时提示 Review（复用 Blueprint 漂移检测能力）。
+   - 已完成：导出/导入 API 已有，新增 `GET /blueprint/revisions` 版本列表，`POST /blueprint/revise` 升级时自动生成 diff 并返回 reviewRequired 标志。
 
 ### P2 — 增强项（Pilot 后期或视反馈）
 
-7. **P2-1 GA4 / Clarity 自动接入 + 隐私 Gate**
-8. **P2-2 自动更新机制**（P0-2 安装包之上的更新通道）
-9. **P2-3 Agent Catalog 外部用户引导文案**
+7. **P2-1 GA4 / Clarity 自动接入 + 隐私 Gate** ✅（2026-08-26 完成）
+8. **P2-2 自动更新机制** ✅（2026-08-26 完成，`scripts/update.sh`）
+9. **P2-3 Agent Catalog 外部用户引导文案** ✅（2026-08-26 完成）
 10. **P2-4 无托管部署类型的交付状态机闭环**（2026-08-27 项目 4「MCP Word Tools」验证发现）
     - 问题：api-tool / landing-page 等无托管部署类型的项目，状态机无法通过正常 API 推进到 DELIVERED。`preview/deploy` 和 `release/request` / `release/approve` 都会因 `noHostedDeploymentReason` 返回 409。
     - 当前 workaround：直接调用 store 的 `advanceDelivery` 方法手动发送 `REQUEST_RELEASE` → `APPROVE_RELEASE` → `RELEASE_COMPLETE` 事件。
