@@ -19,6 +19,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "doctor": "tsx -e \"import { runDoctor, formatDoctorSummary } from './packages/agent-runtime/src/doctor.ts'; const report = await runDoctor(); console.log(formatDoctorSummary(report));\"",
+    "install:macos": "bash scripts/install-macos.sh",
     "update": "bash scripts/update.sh",
     "start": "npm run start -w @agent-dev/cli"
   },
