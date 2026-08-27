@@ -174,7 +174,7 @@ describe('failure classification', () => {
       ];
       for (const msg of testCases) {
         const result = classifyFailure(msg);
-        expect(result.remediation.length).toBeGreaterThan(0, `No remediation for: ${msg}`);
+        expect(result.remediation.length, `No remediation for: ${msg}`).toBeGreaterThan(0);
       }
     });
 
