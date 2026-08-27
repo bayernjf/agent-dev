@@ -545,13 +545,30 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       if (parsed.data.importRepositoryUrl) {
         const { execFile } = await import('node:child_process');
         const { promisify } = await import('node:util');
-        const { mkdir, rm } = await import('node:fs/promises');
+        const { mkdir, rm, writeFile } = await import('node:fs/promises');
+        const { join } = await import('node:path');
         const execFileAsync = promisify(execFile);
         // Ensure workspace directory exists and is empty for clone.
         await rm(queued.workspacePath, { recursive: true, force: true });
         await mkdir(queued.workspacePath, { recursive: true });
         // Clone the repository (shallow, default branch).
         await execFileAsync('git', ['clone', '--depth', '1', parsed.data.importRepositoryUrl, '.'], { cwd: queued.workspacePath, timeout: 60_000 });
+        // Ensure the integration branch (dev) exists. Imported repositories may only
+        // have a main/master branch; Agent-Dev needs dev as the baseline for PRs.
+        const integrationBranch = project.blueprint.spec.sourceControl?.integrationBranch ?? 'dev';
+        const branches = await execFileAsync('git', ['branch', '--list', integrationBranch], { cwd: queued.workspacePath });
+        if (!branches.stdout.trim()) {
+          await execFileAsync('git', ['switch', '-c', integrationBranch], { cwd: queued.workspacePath });
+        } else {
+          await execFileAsync('git', ['switch', integrationBranch], { cwd: queued.workspacePath });
+        }
+        // Record import metadata so executeApplyRun knows this is an imported repository
+        // and should not wipe-and-reclone (which would lose the imported history).
+        await writeFile(join(queued.workspacePath, '.agent-dev-import'), JSON.stringify({
+          sourceUrl: parsed.data.importRepositoryUrl,
+          importedAt: new Date().toISOString(),
+          originalBranch: (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: queued.workspacePath })).stdout.trim(),
+        }, null, 2) + '\n', 'utf8');
       }
       const run = await store.executeApplyRun(queued.id);
       events.emit({

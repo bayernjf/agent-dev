@@ -594,10 +594,19 @@ export class AgentDevStore {
       await this.executePendingStep(run, steps[1], attempts, options, async () => { await mkdir(run.workspacePath, { recursive: true }); });
       // If the workspace already contains a .git directory (e.g. imported from an
       // existing repository), treat it like a remote base: do not overwrite user files.
+      // Imported repositories are marked with .agent-dev-import to distinguish from
+      // remote dev branch clones (which should be re-cloned on retry).
+      let isImportedRepository = false;
       if (!useRemoteBase) {
         try {
           await access(join(run.workspacePath, '.git'));
           useRemoteBase = true;
+          try {
+            await access(join(run.workspacePath, '.agent-dev-import'));
+            isImportedRepository = true;
+          } catch {
+            // Not an imported repo — will be re-cloned from remote dev branch.
+          }
         } catch {
           // No .git directory — proceed with scaffold generation.
         }
@@ -613,17 +622,62 @@ export class AgentDevStore {
         }
       });
       await this.executePendingStep(run, steps[3], attempts, options, async () => {
-        await writeFile(join(run.workspacePath, 'apply-manifest.json'), JSON.stringify({
+        const manifest: Record<string, unknown> = {
           projectId: run.projectId,
           blueprintRevision: run.blueprintRevision,
           noExternalChanges: true,
           generatedAt: new Date().toISOString(),
           providerWrites: [],
           note: 'Local Apply Simulator only. No provider resource was created.',
-        }, null, 2) + '\n', 'utf8');
+        };
+        // For imported repositories, detect conflicts between Blueprint-expected files
+        // and existing repository files, and record an import summary.
+        if (isImportedRepository) {
+          const expectedArtifacts = createDryRunPlan(project.blueprint).artifacts;
+          const conflicts: string[] = [];
+          const wouldAdd: string[] = [];
+          const keptExisting: string[] = [];
+          for (const artifact of expectedArtifacts) {
+            const target = join(run.workspacePath, artifact.path);
+            try {
+              await access(target);
+              // File exists — check if content differs (potential conflict)
+              const existing = await readFile(target, 'utf8');
+              if (existing !== artifact.content) {
+                conflicts.push(artifact.path);
+              } else {
+                keptExisting.push(artifact.path);
+              }
+            } catch {
+              wouldAdd.push(artifact.path);
+            }
+          }
+          // Read import metadata
+          let importMeta: Record<string, unknown> = {};
+          try {
+            importMeta = JSON.parse(await readFile(join(run.workspacePath, '.agent-dev-import'), 'utf8'));
+          } catch {
+            // Ignore missing import metadata
+          }
+          manifest.imported = true;
+          manifest.importSummary = {
+            sourceUrl: importMeta.sourceUrl ?? 'unknown',
+            originalBranch: importMeta.originalBranch ?? 'unknown',
+            conflicts,
+            wouldAdd,
+            keptExisting,
+            conflictCount: conflicts.length,
+            addCount: wouldAdd.length,
+            keptCount: keptExisting.length,
+          };
+          if (conflicts.length > 0) {
+            manifest.note = `Imported repository with ${conflicts.length} file conflict(s). User files preserved — review conflicts before merging.`;
+          }
+        }
+        await writeFile(join(run.workspacePath, 'apply-manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
       });
       await this.executePendingStep(run, steps[4], attempts, options, async () => {
-        if (useRemoteBase) {
+        if (useRemoteBase && !isImportedRepository) {
           // A retry may leave files from a previous failed run (e.g. DELIVERY_REPORT.md), and
           // `write-manifest` always creates apply-manifest.json. Wipe everything so `git clone ... .`
           // has an empty directory, then re-create the manifest after the clone.
@@ -639,6 +693,20 @@ export class AgentDevStore {
             providerWrites: [],
             note: 'Local Apply Simulator only. No provider resource was created.',
           }, null, 2) + '\n', 'utf8');
+          return;
+        }
+        if (isImportedRepository) {
+          // Imported repository: keep the existing history and files. Only ensure
+          // the integration branch is checked out and create a baseline commit if needed.
+          const integrationBranch = project.blueprint.spec.sourceControl?.integrationBranch ?? 'dev';
+          await execFileAsync('git', ['switch', integrationBranch], { cwd: run.workspacePath });
+          // Stage any agent-dev files (apply-manifest.json was written in step 3)
+          await execFileAsync('git', ['add', '-A'], { cwd: run.workspacePath });
+          try {
+            await execFileAsync('git', ['diff', '--cached', '--quiet'], { cwd: run.workspacePath });
+          } catch {
+            await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `chore: record apply manifest for imported repository (revision ${run.blueprintRevision})`], { cwd: run.workspacePath });
+          }
           return;
         }
         await execFileAsync('git', ['init', '-q'], { cwd: run.workspacePath });
