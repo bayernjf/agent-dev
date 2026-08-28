@@ -115,7 +115,7 @@ metadata:
   revision: 1
 spec:
   product:
-    type: web-saas
+    type: web-app
     dataSensitivity: standard
   stack:
     frontend: react-vite
