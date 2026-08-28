@@ -43,7 +43,7 @@ Product Type
 
 | 类型 | 首选技术候选 | 关键交付证据 | 主要人工步骤 |
 | --- | --- | --- | --- |
-| Web SaaS | React/Vite + Hono + Supabase | Preview URL、API smoke、CI Checks | 云账号授权、Preview 验收、生产批准 |
+| Web 端 | React/Vite + Hono + Supabase | Preview URL、API smoke、CI Checks | 云账号授权、Preview 验收、生产批准 |
 | 落地页/内容站 | Astro 或 React/Vite + 静态托管 | Lighthouse、SEO 检查、埋点验证 | 域名、GA4/Clarity、发布批准 |
 | 浏览器插件 | WXT/Plasmo + TypeScript | manifest 校验、打包产物、扩展 smoke | 权限确认、商店开发者账号、商店审核 |
 | 桌面应用 | Tauri 或 Electron | macOS/Windows 构建、安装启动、签名状态 | 证书、签名、公证、分发批准 |
@@ -134,7 +134,7 @@ Product Type
 
 已实现并可生成真实模板的产品类型：
 
-- `web-saas`：React/Vite + Hono + Supabase 完整脚手架（Cloudflare Pages + Vercel）。
+- `web-app`：React/Vite + Hono + Supabase 完整脚手架（Cloudflare Pages + Vercel）。
 - `landing-page`：静态站点脚手架（Cloudflare Pages），无后端依赖；环境契约不含 Supabase/Vercel 密钥。
 - `browser-extension`：MV3 + Vite/crxjs 脚手架，可本地 Load unpacked；商店图标与提交审核为人工步骤。
 - `desktop`：默认 Tauri v2 脚手架（Vite webview + Rust 核心），可本地构建出安装包；专业模式可选 `desktopShell: 'electron'`，产出 main/preload/renderer 三层与 `electron-builder.yml`。
