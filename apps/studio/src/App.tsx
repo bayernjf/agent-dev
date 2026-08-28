@@ -18,7 +18,7 @@ import type {
 import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
 
 const PRODUCT_TYPE_LABEL_KEYS = [
-  ['web-saas', 'blueprint.productTypeWebSaas'],
+  ['web-app', 'blueprint.productTypeWebApp'],
   ['landing-page', 'blueprint.productTypeLandingPage'],
   ['browser-extension', 'blueprint.productTypeBrowserExtension'],
   ['desktop', 'blueprint.productTypeDesktop'],
@@ -1726,7 +1726,7 @@ export function App() {
               </label>
             </div>
           </div>
-          {importError && <p style={{ color: 'var(--error, #dc2626)', fontSize: '12px', marginTop: '4px' }}>{importError}</p>}
+          {importError && <p style={{ color: 'var(--status-fail)', fontSize: '12px', marginTop: '4px' }}>{importError}</p>}
           <div className="agent-list">
             {profiles.map(profile => {
               const baseAgent = agents.find(a => a.id === profile.baseAgentId);
@@ -1771,7 +1771,7 @@ export function App() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => { setTestingProfileId(null); setTestResult({ output: '', exitCode: null, status: 'idle' }); }}>
           <div style={{ background: 'var(--bg, #fff)', padding: '24px', borderRadius: '8px', maxWidth: '600px', width: '90%', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>Test Profile: {profiles.find(p => p.id === testingProfileId)?.name}</h3>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary, #666)' }}>Runs a capability probe on the base agent to verify connectivity.</p>
+            <p style={{ fontSize: '13px', color: 'var(--text-2)' }}>Runs a capability probe on the base agent to verify connectivity.</p>
             <textarea value={testPrompt} onChange={e => setTestPrompt(e.target.value)} placeholder="Enter a test prompt (e.g. say hello)..." rows={3} style={{ width: '100%', marginBottom: '12px', padding: '8px' }} />
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <button className="primary-button" type="button" onClick={() => { const p = profiles.find(pr => pr.id === testingProfileId); if (p) void testProfile(p); }} disabled={testResult.status === 'running' || !testPrompt.trim()}>{testResult.status === 'running' ? 'Running...' : 'Run Test'}</button>
@@ -1783,7 +1783,7 @@ export function App() {
                   Result: {testResult.status === 'done' ? '✓ Success' : testResult.status === 'error' ? '✗ Error' : '⏳ Running...'}
                   {testResult.exitCode !== null && ` (exit: ${testResult.exitCode})`}
                 </p>
-                <pre style={{ background: 'var(--bg-secondary, #f5f5f5)', padding: '12px', borderRadius: '4px', fontSize: '12px', overflow: 'auto', maxHeight: '300px' }}>{testResult.output}</pre>
+                <pre style={{ background: 'var(--surface-muted)', padding: '12px', borderRadius: '4px', fontSize: '12px', overflow: 'auto', maxHeight: '300px' }}>{testResult.output}</pre>
               </div>
             )}
           </div>
@@ -1810,7 +1810,7 @@ export function App() {
             <option value="">Select a verified agent...</option>
             {agents.filter(a => a.detected).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-          {editingProfileId && <p style={{ fontSize: '12px', color: 'var(--text-secondary, #666)' }}>Base agent cannot be changed after creation.</p>}
+          {editingProfileId && <p style={{ fontSize: '12px', color: 'var(--text-2)' }}>Base agent cannot be changed after creation.</p>}
           <label htmlFor="profile-system-prompt">System Prompt (appended to task prompt)</label>
           <textarea id="profile-system-prompt" value={profileForm.systemPrompt} onChange={e => setProfileForm(f => ({ ...f, systemPrompt: e.target.value }))} placeholder="e.g. You are a frontend expert specializing in React and TypeScript." rows={3} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -1825,7 +1825,7 @@ export function App() {
           </div>
           <label htmlFor="profile-allowed-tools">Allowed Tools (comma-separated)</label>
           <input id="profile-allowed-tools" value={profileForm.allowedTools} onChange={e => setProfileForm(f => ({ ...f, allowedTools: e.target.value }))} placeholder="e.g. Read, Write, Edit, Bash" />
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary, #666)', marginTop: '-8px' }}>Leave empty to inherit all tools from base agent. Tools can only be narrowed, not expanded.</p>
+          <p style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '-8px' }}>Leave empty to inherit all tools from base agent. Tools can only be narrowed, not expanded.</p>
           <label>Environment Variables</label>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
             <input value={profileForm.envKey} onChange={e => setProfileForm(f => ({ ...f, envKey: e.target.value }))} placeholder="KEY" style={{ flex: 1 }} />
@@ -2028,15 +2028,15 @@ export function App() {
             </>}
 
             {view.kind === 'project' && view.tab === 'release' && selected && <>
-              {releasePlan && <div className={`production-release ${selected.state.toLowerCase()}`}><div className="runtime-heading"><div><p className="eyebrow">{t('release.eyebrow')}</p><h3>{selected.state === 'DELIVERED' ? t('release.released') : selected.state === 'AWAITING_APPROVAL' ? t('release.awaitingApproval') : selected.state === 'RELEASING' ? t('release.releasing') : t('release.requestTitle')}</h3><p>{t('release.productionOriginWithValue', { origin: releasePlan.corsOrigin })} · {t('release.approvalIs', { approval: releasePlan.productionApproval })}</p></div></div>
+              {releasePlan && <div className={`production-release ${selected.state.toLowerCase()}`}><div className="runtime-heading"><div><p className="eyebrow">{t('release.eyebrow')}</p><h3>{selected.state === 'DELIVERED' ? (releasePlan.manualDistribution ? t('release.distributed') : t('release.released')) : selected.state === 'AWAITING_APPROVAL' ? t('release.awaitingApproval') : selected.state === 'RELEASING' ? t('release.releasing') : t('release.requestTitle')}</h3><p>{releasePlan.manualDistribution ? t('release.manualDistributionNote') : t('release.productionOriginWithValue', { origin: releasePlan.corsOrigin ?? '' })} · {t('release.approvalIs', { approval: releasePlan.productionApproval })}</p></div></div>
                 <ol className="release-steps">{(releaseRun?.steps ?? releasePlan.steps).map(step => <li key={step.id}><span className={`step-dot ${step.status}`} aria-hidden="true" /> <span>{step.title}</span><em>{t(`stepStatus.${step.status}` as KeyPath)}</em>{step.detail && <small>{step.detail}</small>}</li>)}</ol>
                 {releasePlan.source
                   ? <p className="release-source">{t('release.releasingSource', { repository: releasePlan.source.repository, branch: releasePlan.source.branch, commit: releasePlan.source.acceptedCommit.slice(0, 7) })}</p>
                   : <p className="release-source blocked">{t('release.sourceBlocked', { reason: releasePlan.sourceReason ?? '' })}</p>}
-                {selected.state === 'PREVIEW_READY' && <button className="primary-button" type="button" onClick={() => void requestRelease()} disabled={releaseBusy || !releasePlan.workspace.usable || !releasePlan.source}>{releaseBusy ? t('release.requesting') : t('release.requestTitle')}<ArrowRight size={15} aria-hidden="true" /></button>}
-                {selected.state === 'AWAITING_APPROVAL' && <div className="release-approval">{approverField('release-approver', t('release.whoApproves'))}<label htmlFor="release-summary">{t('release.whatIsReleased')}</label><textarea id="release-summary" value={releaseSummary} onChange={event => setReleaseSummary(event.target.value)} placeholder={t('release.releaseSummaryPlaceholder')} maxLength={500} /><button className="primary-button" type="button" onClick={() => void approveRelease()} disabled={releaseBusy}>{releaseBusy ? t('release.releasingButton') : t('release.approveAndRelease')}<ShieldCheck size={15} aria-hidden="true" /></button></div>}
+                {(selected.state === 'PREVIEW_READY' || (Boolean(releasePlan.manualDistribution) && selected.state === 'PR_OPEN')) && <button className="primary-button" type="button" onClick={() => void requestRelease()} disabled={releaseBusy || !releasePlan.workspace.usable || !releasePlan.source}>{releaseBusy ? t('release.requesting') : t('release.requestTitle')}<ArrowRight size={15} aria-hidden="true" /></button>}
+                {selected.state === 'AWAITING_APPROVAL' && <div className="release-approval">{approverField('release-approver', t('release.whoApproves'))}<label htmlFor="release-summary">{t('release.whatIsReleased')}</label><textarea id="release-summary" value={releaseSummary} onChange={event => setReleaseSummary(event.target.value)} placeholder={t('release.releaseSummaryPlaceholder')} maxLength={500} /><button className="primary-button" type="button" onClick={() => void approveRelease()} disabled={releaseBusy}>{releaseBusy ? t('release.releasingButton') : releasePlan.manualDistribution ? t('release.approveAndDistribute') : t('release.approveAndRelease')}<ShieldCheck size={15} aria-hidden="true" /></button></div>}
                 {releaseRun?.status === 'failed' && <button className="secondary-button retry-button" type="button" onClick={() => void retryRelease()} disabled={releaseBusy || releaseRun.attempts >= 3}>{releaseBusy ? t('release.retrying') : releaseRun.attempts >= 3 ? t('release.retryLimitReached') : t('release.retryApprovedRelease')}<RefreshCw size={15} aria-hidden="true" /></button>}
-                {releaseEvidence && <div className="release-evidence"><p>{t('release.approvedBy', { approvedBy: releaseEvidence.approvedBy, date: new Date(releaseEvidence.recordedAt).toLocaleString(), summary: releaseEvidence.approvalSummary })}</p><div className="preview-urls"><span>{t('release.api')} <a href={releaseEvidence.apiBaseUrl} target="_blank" rel="noreferrer">{releaseEvidence.apiBaseUrl}</a></span><span>{t('release.web')} <a href={releaseEvidence.webUrl} target="_blank" rel="noreferrer">{releaseEvidence.webUrl}</a></span><span>{t('evidence.cors')}: <code>{releaseEvidence.corsOrigin}</code></span></div><pre className="evidence-observations">{JSON.stringify(releaseEvidence.observations, null, 2)}</pre></div>}</div>}
+                {releaseEvidence && <div className="release-evidence"><p>{t('release.approvedBy', { approvedBy: releaseEvidence.approvedBy, date: new Date(releaseEvidence.recordedAt).toLocaleString(), summary: releaseEvidence.approvalSummary })}</p>{releaseEvidence.distribution === 'manual' ? <div className="preview-urls"><span>{t('release.distributionManual')}</span></div> : <div className="preview-urls"><span>{t('release.api')} <a href={releaseEvidence.apiBaseUrl} target="_blank" rel="noreferrer">{releaseEvidence.apiBaseUrl}</a></span><span>{t('release.web')} <a href={releaseEvidence.webUrl} target="_blank" rel="noreferrer">{releaseEvidence.webUrl}</a></span><span>{t('evidence.cors')}: <code>{releaseEvidence.corsOrigin}</code></span></div>}<pre className="evidence-observations">{JSON.stringify(releaseEvidence.observations, null, 2)}</pre></div>}</div>}
             </>}
 
             {view.kind === 'project' && view.tab === 'iteration' && <>

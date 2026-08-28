@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { baselineProvidersFor, blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryRunPlan, getBlueprintDecisions, type ProductBlueprint } from '@agent-dev/blueprint';
 import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
 import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
-import { AgentDevStore } from '@agent-dev/storage';
+import { AgentDevStore, type ReleaseStep } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, runDoctor, type CustomAgentInput, type AgentProfile, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
 import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
@@ -1278,8 +1278,9 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   const resolveReleaseContext = async (projectId: string) => {
     const project = store.getProject(projectId);
     if (!project) return { error: 'Project not found.' as const, statusCode: 404 as const };
-    const unsupported = noHostedDeploymentReason(project.blueprint);
-    if (unsupported) return { error: unsupported, statusCode: 409 as const };
+    // Types without a hosted deployment target still release: their release is a human confirming
+    // the manual distribution steps, not a composer deploying to a URL.
+    const manualDistribution = noHostedDeploymentReason(project.blueprint) !== null;
     const revision = project.blueprint.metadata.revision;
     const run = store.getLatestApplyRun(projectId, revision);
     if (!run || run.status !== 'completed') return { error: 'Complete the baseline Apply before releasing to production.' as const, statusCode: 409 as const };
@@ -1300,8 +1301,16 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       acceptedCommit: acceptance!.gitEvidence.head,
       checkoutPath: join(store.dataDirectory, 'releases', projectId, branch),
     };
-    return { project, revision, run, workspace, source, sourceReason };
+    return { project, revision, run, workspace, source, sourceReason, manualDistribution };
   };
+
+  // The single step a manual distribution release journals: there is nothing to deploy, so the run
+  // completes when the named approver confirms the steps in generated/DISTRIBUTION.md were done.
+  const manualDistributionSteps = (): ReleaseStep[] => [{
+    id: 'confirm-manual-distribution',
+    title: 'Confirm the manual distribution steps from generated/DISTRIBUTION.md',
+    status: 'pending',
+  }];
 
   const runRelease = async (
     projectId: string,
@@ -1335,13 +1344,14 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const projectId = context.req.param('projectId');
     const resolved = await resolveReleaseContext(projectId);
     if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
-    const { project, revision, run, workspace, source, sourceReason } = resolved;
+    const { project, revision, workspace, source, sourceReason, manualDistribution } = resolved;
     return context.json({
-      steps: releaseStepPlan(),
+      steps: manualDistribution ? manualDistributionSteps() : releaseStepPlan(),
+      manualDistribution,
       source,
       sourceReason,
       idempotencyKey: releaseIdempotencyKey(projectSlug(project.name)),
-      corsOrigin: productionWebOrigin(projectSlug(project.name)),
+      corsOrigin: manualDistribution ? undefined : productionWebOrigin(projectSlug(project.name)),
       productionApproval: project.blueprint.spec.policy.productionApproval,
       state: project.state,
       workspace,
@@ -1369,6 +1379,11 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
     if (!resolved.workspace.usable) return context.json({ error: resolved.workspace.reason, workspace: resolved.workspace }, 409);
     if (!resolved.source) return context.json({ error: resolved.sourceReason }, 409);
+    // The PR_OPEN shortcut exists for products with no hosted deployment target. A hosted product
+    // that skipped the preview gate could release to production without a recorded deployment.
+    if (!resolved.manualDistribution && resolved.project.state === 'PR_OPEN') {
+      return context.json({ error: 'Deploy and record a preview before releasing a hosted product: production must follow the preview gate.' }, 409);
+    }
     try {
       const project = await store.requestRelease(projectId, resolved.revision);
       events.emit({ type: 'release.requested', projectId, projectName: project.name, occurredAt: new Date().toISOString() });
@@ -1388,9 +1403,45 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!parsed.success) return context.json({ error: 'Approving a release requires confirmation APPROVE_RELEASE, approvedBy and summary.' }, 400);
     const resolved = await resolveReleaseContext(projectId);
     if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
-    const { project, revision, run, workspace, source, sourceReason } = resolved;
+    const { project, revision, run, workspace, source, sourceReason, manualDistribution } = resolved;
     if (!workspace.usable) return context.json({ error: workspace.reason, workspace }, 409);
     if (!source) return context.json({ error: sourceReason }, 409);
+
+    if (manualDistribution) {
+      // There is nothing to deploy: the approval itself is the distribution confirmation. The human
+      // gates stay intact — named approver, recorded summary, evidence written from the production branch.
+      try {
+        const steps = manualDistributionSteps();
+        const approved = await store.approveRelease(projectId, revision, {
+          approvedBy: parsed.data.approvedBy,
+          summary: parsed.data.summary,
+          steps,
+        });
+        events.emit({ type: 'release.approved', projectId, projectName: project.name, occurredAt: approved.createdAt });
+        const confirmedAt = new Date().toISOString();
+        const releaseRun = await store.updateReleaseRun(approved.id, 'completed', [{
+          ...steps[0], status: 'completed', startedAt: confirmedAt, completedAt: confirmedAt, detail: parsed.data.summary,
+        }]);
+        const evidence = await store.recordReleaseEvidence(projectId, revision, {
+          projectName: projectSlug(project.name),
+          distribution: 'manual',
+          approvedBy: releaseRun.approvedBy,
+          approvalSummary: releaseRun.approvalSummary,
+          observations: {
+            distribution: 'manual',
+            repository: source.repository,
+            branch: source.branch,
+            acceptedCommit: source.acceptedCommit,
+            confirmedBy: parsed.data.approvedBy,
+            confirmation: parsed.data.summary,
+          },
+        });
+        events.emit({ type: 'release.completed', projectId, projectName: project.name, occurredAt: evidence.recordedAt });
+        return context.json({ releaseRun, evidence });
+      } catch (error) {
+        return context.json({ error: error instanceof Error ? error.message : 'Unable to approve a release.' }, 409);
+      }
+    }
 
     const composer = new ReleaseComposer({ workspacePath: run.workspacePath, projectName: projectSlug(project.name), source });
     let releaseRunId: string;
@@ -1416,9 +1467,12 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (!parsed.success) return context.json({ error: 'Retrying a release requires confirmation RETRY_RELEASE.' }, 400);
     const resolved = await resolveReleaseContext(projectId);
     if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
-    const { project, revision, run, workspace, source, sourceReason } = resolved;
+    const { project, revision, run, workspace, source, sourceReason, manualDistribution } = resolved;
     if (!workspace.usable) return context.json({ error: workspace.reason, workspace }, 409);
     if (!source) return context.json({ error: sourceReason }, 409);
+    if (manualDistribution) {
+      return context.json({ error: 'A manual distribution release has no automated steps to retry; approve a new release instead.' }, 409);
+    }
     const existing = store.getLatestReleaseRun(projectId, revision);
     if (!existing) return context.json({ error: 'No release run is available to retry.' }, 404);
     if (existing.status !== 'failed') return context.json({ error: 'Only a failed release can be retried.' }, 409);

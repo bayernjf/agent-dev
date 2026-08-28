@@ -39,7 +39,13 @@ async function main() {
     return;
   }
 
-  console.log('Usage: agent-dev <doctor|start>');
+  if (command === 'mcp') {
+    const { runAgentDevMcp } = await import('./mcp.js');
+    await runAgentDevMcp();
+    return;
+  }
+
+  console.log('Usage: agent-dev <doctor|start|mcp>');
   process.exitCode = 1;
 }
 
