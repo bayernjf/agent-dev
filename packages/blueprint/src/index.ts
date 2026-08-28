@@ -14,11 +14,11 @@ export {
   type ManualAction,
 } from './generate.js';
 
-// Every product type now ships a generated template: web-saas, landing-page, browser-extension,
+// Every product type now ships a generated template: web-app, landing-page, browser-extension,
 // desktop (Tauri v2 by default, Electron in professional mode), mobile (Expo) and api-tool.
 // See multi-product-delivery-plan.md for what stays a manual step per type (signing, store review).
 export const productTypeSchema = z.enum([
-  'web-saas',
+  'web-app',
   'landing-page',
   'browser-extension',
   'desktop',
@@ -38,7 +38,7 @@ export const runtimeProviderSchema = z.string().min(1).max(120);
 
 export const blueprintAnswersSchema = z.object({
   mode: blueprintModeSchema.default('beginner'),
-  productType: productTypeSchema.default('web-saas'),
+  productType: productTypeSchema.default('web-app'),
   productIntent: z.string().trim().max(500).default(''),
   dataSensitivity: z.enum(['standard', 'sensitive']).default('standard'),
   previewStrategy: z.enum(['per-pull-request', 'stable-dev-api']).default('per-pull-request'),
@@ -128,7 +128,7 @@ export type BlueprintDecision = {
 // Every check named here has to be a real script in that product type's generated package.json,
 // otherwise the generated `quality` gate dies mid-run and CI can never go green.
 const QUALITY_CHECKS: Record<string, ProductBlueprint['spec']['quality']['required']> = {
-  'web-saas': ['lint', 'typecheck', 'unit', 'build', 'smoke'],
+  'web-app': ['lint', 'typecheck', 'unit', 'build', 'smoke'],
   'landing-page': ['lint', 'build'],
   'browser-extension': ['typecheck', 'build'],
   'desktop:tauri': ['typecheck', 'build', 'rust-check'],
@@ -139,7 +139,7 @@ const QUALITY_CHECKS: Record<string, ProductBlueprint['spec']['quality']['requir
 
 export function qualityChecksFor(productType: string, desktopShell = 'tauri'): ProductBlueprint['spec']['quality']['required'] {
   const key = productType === 'desktop' ? `desktop:${desktopShell}` : productType;
-  return QUALITY_CHECKS[key] ?? QUALITY_CHECKS['web-saas']!;
+  return QUALITY_CHECKS[key] ?? QUALITY_CHECKS['web-app']!;
 }
 
 export function createBlueprint(name: string, input: Partial<BlueprintAnswers> = {}, revision = 1): ProductBlueprint {
@@ -205,7 +205,7 @@ export function getBlueprintDecisions(blueprint: ProductBlueprint): BlueprintDec
       title: 'Application baseline',
       value: 'React/Vite, Hono and npm workspaces',
       mode: 'auto',
-      reason: 'This is the tested v0.1 Web SaaS golden path.',
+      reason: 'This is the tested v0.1 Web app golden path.',
     },
     {
       id: 'source-control',

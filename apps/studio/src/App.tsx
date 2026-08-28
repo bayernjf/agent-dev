@@ -18,7 +18,7 @@ import type {
 import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
 
 const PRODUCT_TYPE_LABEL_KEYS = [
-  ['web-saas', 'blueprint.productTypeWebSaas'],
+  ['web-app', 'blueprint.productTypeWebApp'],
   ['landing-page', 'blueprint.productTypeLandingPage'],
   ['browser-extension', 'blueprint.productTypeBrowserExtension'],
   ['desktop', 'blueprint.productTypeDesktop'],
@@ -1726,7 +1726,7 @@ export function App() {
               </label>
             </div>
           </div>
-          {importError && <p style={{ color: 'var(--error, #dc2626)', fontSize: '12px', marginTop: '4px' }}>{importError}</p>}
+          {importError && <p style={{ color: 'var(--status-fail)', fontSize: '12px', marginTop: '4px' }}>{importError}</p>}
           <div className="agent-list">
             {profiles.map(profile => {
               const baseAgent = agents.find(a => a.id === profile.baseAgentId);
@@ -1771,7 +1771,7 @@ export function App() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => { setTestingProfileId(null); setTestResult({ output: '', exitCode: null, status: 'idle' }); }}>
           <div style={{ background: 'var(--bg, #fff)', padding: '24px', borderRadius: '8px', maxWidth: '600px', width: '90%', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>Test Profile: {profiles.find(p => p.id === testingProfileId)?.name}</h3>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary, #666)' }}>Runs a capability probe on the base agent to verify connectivity.</p>
+            <p style={{ fontSize: '13px', color: 'var(--text-2)' }}>Runs a capability probe on the base agent to verify connectivity.</p>
             <textarea value={testPrompt} onChange={e => setTestPrompt(e.target.value)} placeholder="Enter a test prompt (e.g. say hello)..." rows={3} style={{ width: '100%', marginBottom: '12px', padding: '8px' }} />
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <button className="primary-button" type="button" onClick={() => { const p = profiles.find(pr => pr.id === testingProfileId); if (p) void testProfile(p); }} disabled={testResult.status === 'running' || !testPrompt.trim()}>{testResult.status === 'running' ? 'Running...' : 'Run Test'}</button>
@@ -1783,7 +1783,7 @@ export function App() {
                   Result: {testResult.status === 'done' ? '✓ Success' : testResult.status === 'error' ? '✗ Error' : '⏳ Running...'}
                   {testResult.exitCode !== null && ` (exit: ${testResult.exitCode})`}
                 </p>
-                <pre style={{ background: 'var(--bg-secondary, #f5f5f5)', padding: '12px', borderRadius: '4px', fontSize: '12px', overflow: 'auto', maxHeight: '300px' }}>{testResult.output}</pre>
+                <pre style={{ background: 'var(--surface-muted)', padding: '12px', borderRadius: '4px', fontSize: '12px', overflow: 'auto', maxHeight: '300px' }}>{testResult.output}</pre>
               </div>
             )}
           </div>
@@ -1810,7 +1810,7 @@ export function App() {
             <option value="">Select a verified agent...</option>
             {agents.filter(a => a.detected).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-          {editingProfileId && <p style={{ fontSize: '12px', color: 'var(--text-secondary, #666)' }}>Base agent cannot be changed after creation.</p>}
+          {editingProfileId && <p style={{ fontSize: '12px', color: 'var(--text-2)' }}>Base agent cannot be changed after creation.</p>}
           <label htmlFor="profile-system-prompt">System Prompt (appended to task prompt)</label>
           <textarea id="profile-system-prompt" value={profileForm.systemPrompt} onChange={e => setProfileForm(f => ({ ...f, systemPrompt: e.target.value }))} placeholder="e.g. You are a frontend expert specializing in React and TypeScript." rows={3} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -1825,7 +1825,7 @@ export function App() {
           </div>
           <label htmlFor="profile-allowed-tools">Allowed Tools (comma-separated)</label>
           <input id="profile-allowed-tools" value={profileForm.allowedTools} onChange={e => setProfileForm(f => ({ ...f, allowedTools: e.target.value }))} placeholder="e.g. Read, Write, Edit, Bash" />
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary, #666)', marginTop: '-8px' }}>Leave empty to inherit all tools from base agent. Tools can only be narrowed, not expanded.</p>
+          <p style={{ fontSize: '12px', color: 'var(--text-2)', marginTop: '-8px' }}>Leave empty to inherit all tools from base agent. Tools can only be narrowed, not expanded.</p>
           <label>Environment Variables</label>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
             <input value={profileForm.envKey} onChange={e => setProfileForm(f => ({ ...f, envKey: e.target.value }))} placeholder="KEY" style={{ flex: 1 }} />
