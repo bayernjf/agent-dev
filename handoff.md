@@ -1,7 +1,7 @@
 # Agent-Dev 项目交接
 
 > 更新时间：2026-08-28
-> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）为唯一剩余 P0；同日新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；同日新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾
 > 工作目录：仓库根目录
 
 ## 最近进度
@@ -299,6 +299,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 | Analytics 默认 | 待确认 | 默认关闭，隐私确认后再接入 |
 | GitHub Ruleset | 待确认 | 支持则自动计划；权限/套餐不足时生成 Manual Action |
 | Blueprint 开源 | 待确认 | v0.1 稳定后再发布 v1alpha1 |
+| Local Claude Runtime 验证 | 已推迟（2026-08-29） | v0.2 P0-1 暂缓；`claude-code` adapter 保持 `candidate`，不进 verified 列表。当前 Runtime 主力为 OpenCode 2.0 + `nemotron-3-ultra-free`。恢复触发条件：出现主力用 Claude 的 Pilot 用户 / 外部用户明确要求 / 免费模型额度或可用性出问题 |
 
 ## 10. 交接完成定义
 

@@ -39,7 +39,7 @@ v0.1 验证的是「作者本人能跑通整条流水线」。v0.2 验证的是*
 
 ### P0 — 决定 Pilot 能否成立的「门槛项」（必须先做）
 
-1. **P0-1 Local Claude Runtime 验证**
+1. **P0-1 Local Claude Runtime 验证** ⏸️ **已推迟（2026-08-29 用户决策）**
 
    * 把 `claude-code` adapter 从 `candidate` 实测到 `verified`：跑通至少一次真实 Feature Task、产物提交守卫（`.env`/外部 symlink 拦截）、`apply/recover`、`release/retry` 在 Claude 下同样成立。
 
@@ -48,6 +48,12 @@ v0.1 验证的是「作者本人能跑通整条流水线」。v0.2 验证的是*
    * 交付：adapter status → `verified`；补充 runtime 契约测试（断言 claude 在 PATH 上才返回，避免 v0.1 缺陷 16 同类环境依赖测试）。
 
    * 依赖：无。
+
+   * **推迟理由**：当前 Runtime 主力已切到 OpenCode 2.0 + `nemotron-3-ultra-free`（项目 3、4 均跑通完整交付），Claude 不是 Pilot 首交付的必需路径；且 §5 已标注 Claude 凭证路径与「不读取/上传 Claude 登录 Token」的隐私边界存在待澄清冲突。**推迟不构成 Pilot 阻塞**：v0.2 退出条件（10 人中 7 人首交付）不绑定特定 Runtime。
+
+   * **推迟期间的状态**：`claude-code` adapter 保持 `candidate`——不进 verified Runtime 列表，Studio 不引导用户选它。
+
+   * **恢复触发条件**（任一命中即重启该 P0）：① Pilot 招募中出现主力用 Claude 的用户；② 有外部用户明确要求 Claude Runtime；③ `nemotron-3-ultra-free` 额度或可用性出问题，需要备用 Runtime。
 
 2. **P0-2 一键 macOS 安装 + 诊断增强** ✅（2026-08-27 完成）
 
@@ -116,7 +122,7 @@ v0.1 验证的是「作者本人能跑通整条流水线」。v0.2 验证的是*
 
 ## 4. 里程碑与节奏（建议）
 
-* **M1（P0 完成）**：Claude 验证 + 安装包 + 失败分类。内部可先对 2-3 名友好外部用户灰度。
+* **M1（P0 完成）**：~~Claude 验证~~（2026-08-29 用户决策推迟，见 §3 P0-1）+ 安装包 + 失败分类。**M1 视为达成**：剩余两项已完成，推迟的 P0-1 按其恢复触发条件判定、不阻塞灰度。内部可先对 2-3 名友好外部用户灰度。
 
 * **M2（P1 完成）**：导入仓库 + Infisical + Blueprint 分享。开始正式招募 10 人。
 
