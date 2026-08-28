@@ -120,9 +120,11 @@ export type ReleaseApprovalInput = {
 
 export type ReleaseEvidence = {
   projectName: string;
-  apiBaseUrl: string;
-  webUrl: string;
-  corsOrigin: string;
+  // Hosted deployment targets produce these URLs; product types distributed manually have none.
+  apiBaseUrl?: string;
+  webUrl?: string;
+  corsOrigin?: string;
+  distribution?: 'manual';
   approvedBy: string;
   approvalSummary: string;
   observations: Record<string, unknown>;
@@ -1438,7 +1440,7 @@ export class AgentDevStore {
   async requestRelease(projectId: string, blueprintRevision: number): Promise<StoredProject> {
     const project = this.getProject(projectId);
     if (!project || project.blueprint.metadata.revision !== blueprintRevision) throw new Error('A release request must target the current Blueprint revision.');
-    if (project.state !== 'PREVIEW_READY') throw new Error(`A release can only be requested from PREVIEW_READY, current state is ${project.state}.`);
+    if (project.state !== 'PREVIEW_READY' && project.state !== 'PR_OPEN') throw new Error(`A release can only be requested from PREVIEW_READY or PR_OPEN, current state is ${project.state}.`);
     const run = this.getLatestApplyRun(projectId, blueprintRevision);
     if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before requesting a release.');
     return this.advanceDelivery(projectId, [{ type: 'REQUEST_RELEASE' }]);
@@ -1505,13 +1507,18 @@ export class AgentDevStore {
     const observations = Object.entries(record.observations)
       .map(([key, value]) => `- ${key}: \`${JSON.stringify(value)}\``)
       .join('\n');
+    const targets = record.apiBaseUrl || record.webUrl
+      ? [
+        `- API: ${record.apiBaseUrl}`,
+        `- Web: ${record.webUrl}`,
+        `- Allowed origin: ${record.corsOrigin}`,
+      ]
+      : ['- Distribution: manual (this product type has no hosted deployment target)'];
     return [
       '# Production Release Evidence',
       '',
       `- Product: ${record.projectName}`,
-      `- API: ${record.apiBaseUrl}`,
-      `- Web: ${record.webUrl}`,
-      `- Allowed origin: ${record.corsOrigin}`,
+      ...targets,
       `- Approved by: ${record.approvedBy}`,
       `- Recorded: ${record.recordedAt}`,
       '',
@@ -1523,8 +1530,9 @@ export class AgentDevStore {
       '',
       observations || '- none recorded',
       '',
-      'Every value above was observed against the deployed production URLs. A step without an',
-      'observation cannot reach this report.',
+      record.distribution === 'manual'
+        ? 'This product type has no hosted deployment target. The approval above records the manual distribution the approver confirmed from the production branch.'
+        : 'Every value above was observed against the deployed production URLs. A step without an observation cannot reach this report.',
       '',
     ].join('\n');
   }

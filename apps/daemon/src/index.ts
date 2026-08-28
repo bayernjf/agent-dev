@@ -5,6 +5,8 @@ import { AgentDevStore } from '@agent-dev/storage';
 import { createDaemonApp } from './app.js';
 import { DaemonEventBus } from './events.js';
 
+export { createDaemonApp } from './app.js';
+
 export type StartDaemonOptions = {
   port?: number;
   databasePath?: string;

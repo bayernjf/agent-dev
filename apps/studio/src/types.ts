@@ -301,9 +301,11 @@ export type ReleaseRun = {
 
 export type ReleaseEvidence = {
   projectName: string;
-  apiBaseUrl: string;
-  webUrl: string;
-  corsOrigin: string;
+  // Hosted deployment targets produce these URLs; product types distributed manually have none.
+  apiBaseUrl?: string;
+  webUrl?: string;
+  corsOrigin?: string;
+  distribution?: 'manual';
   approvedBy: string;
   approvalSummary: string;
   observations: Record<string, unknown>;
@@ -319,8 +321,9 @@ export type ReleaseSource = {
 
 export type ReleasePlan = {
   steps: ReleaseStep[];
+  manualDistribution?: boolean;
   idempotencyKey: string;
-  corsOrigin: string;
+  corsOrigin?: string;
   productionApproval: string;
   state: string;
   workspace: WorkspaceVerification;

@@ -554,6 +554,10 @@ export const en = {
     approvedBy: 'Approved by {approvedBy} at {date} · {summary}',
     api: 'API:',
     web: 'Web:',
+    manualDistributionNote: 'This product type has no hosted deployment target; release is a manually confirmed distribution.',
+    distributed: 'Distribution confirmed',
+    approveAndDistribute: 'Approve and confirm the distribution',
+    distributionManual: 'Distribution: manual',
   },
   featureTask: {
     eyebrow: 'Feature delivery',
