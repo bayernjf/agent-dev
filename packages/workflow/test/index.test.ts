@@ -115,6 +115,30 @@ describe('delivery workflow', () => {
     actor.stop();
   });
 
+  it('opens the release gate straight from the PR for products without a hosted preview', () => {
+    const actor = createNeedsInputRun({ projectId: 'project-1', runId: 'run-1' });
+    actor.send({ type: 'PLAN_COMPLETE' });
+    actor.send({ type: 'APPROVE_PROVISIONING' });
+    actor.send({ type: 'BASELINE_CREATED' });
+    actor.send({ type: 'START_IMPLEMENTATION' });
+    actor.send({ type: 'IMPLEMENTATION_COMPLETE' });
+    actor.send({ type: 'VERIFY_COMPLETE' });
+    actor.send({ type: 'PR_CREATED' });
+    expect(actor.getSnapshot().value).toBe('PR_OPEN');
+
+    // The shortcut still goes through the approval gate: a bare approval cannot open it.
+    actor.send({ type: 'APPROVE_RELEASE' });
+    expect(actor.getSnapshot().value).toBe('PR_OPEN');
+
+    actor.send({ type: 'REQUEST_RELEASE' });
+    expect(actor.getSnapshot().value).toBe('AWAITING_APPROVAL');
+    actor.send({ type: 'APPROVE_RELEASE' });
+    expect(actor.getSnapshot().value).toBe('RELEASING');
+    actor.send({ type: 'RELEASE_COMPLETE' });
+    expect(actor.getSnapshot().value).toBe('DELIVERED');
+    actor.stop();
+  });
+
   it('falls back to VERIFYING when a snapshot predates resumeTarget', () => {
     const original = createNeedsInputRun({ projectId: 'project-1', runId: 'run-1' });
     original.send({ type: 'PLAN_COMPLETE' });
