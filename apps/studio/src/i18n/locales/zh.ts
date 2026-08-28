@@ -551,6 +551,10 @@ export const zh = {
     approvedBy: '由 {approvedBy} 于 {date} 批准 · {summary}',
     api: 'API:',
     web: 'Web:',
+    manualDistributionNote: '此产品类型没有托管部署目标，发布为人工确认的分发。',
+    distributed: '分发已确认',
+    approveAndDistribute: '批准并确认分发',
+    distributionManual: '分发方式：人工',
   },
   featureTask: {
     eyebrow: '功能交付',

@@ -92,6 +92,10 @@ export const deliveryMachine = createMachine({
     PR_OPEN: {
       on: {
         PREVIEW_AVAILABLE: 'PREVIEW_READY',
+        // Product types with no hosted deployment target have no preview to deploy: their release
+        // is a manually confirmed distribution, so the release gate can open straight from the PR.
+        // Which projects may use this shortcut is enforced where the blueprint is known.
+        REQUEST_RELEASE: 'AWAITING_APPROVAL',
         FAIL: { target: 'FAILED', actions: assign({ resumeTarget: () => 'PR_OPEN' as const }) },
       },
     },
