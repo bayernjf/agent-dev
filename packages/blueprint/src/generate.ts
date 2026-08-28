@@ -198,7 +198,7 @@ function analyticsSnippet(blueprint: ProductBlueprint): string {
 
   const consentBanner = `
     <!-- Privacy consent banner -->
-    <div id="analytics-consent-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1a1a1a;color:#fff;padding:16px 24px;z-index:9999;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
+    <div id="analytics-consent-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1a1a1a;color:#fff;padding:16px 24px;z-index:9999;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
       <span style="font-size:14px;">We use analytics to improve the product. You can opt in or opt out at any time.</span>
       <div style="display:flex;gap:8px;">
         <button onclick="document.getElementById('analytics-consent-banner').style.display='none';localStorage.setItem('analytics-consent','denied');" style="background:transparent;color:#fff;border:1px solid #666;padding:8px 16px;cursor:pointer;border-radius:4px;">Decline</button>
