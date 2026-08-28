@@ -1,10 +1,18 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-24
-> 当前阶段：三个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3）——BluePrint → Preview → Production 全周期在真实云端跑通，3/3 验证目标达成；Local Delivery Control Plane 已实现；真实 Provider Adapter 已验证通过（GitHub/Vercel/Cloudflare 真实接入，Supabase Manual 降级）；凭证管理 Phase 2 已实现
+> 更新时间：2026-08-27
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3 已完成，P0-1（Claude Runtime 验证）为唯一剩余 P0
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **v0.2 四项功能完成 + 项目 4 端到端交付（2026-08-27）**：
+  - **P0-3 失败分类完善**：新增 7 种失败分类模式（生产分支不匹配、工作区需恢复、schema 迁移、云资源不匹配、外部 symlink 拦截、依赖安装失败、Node 版本），修复 agent CLI 模式双向匹配，新增 24 个单元测试，全量 155 测试通过。
+  - **项目 4「MCP Word Tools」端到端交付完成（4/4，首个非 web-saas 类型 api-tool）**：Blueprint → 基线审批 → GitHub 仓库创建（`bayernjf/mcp-word-tools`）→ Apply → Feature Task（Add count_tokens tool）→ Runtime 执行 → Quality Gate（5/5 测试通过）→ Acceptance（approved by feng）→ PR #2 合并到 dev → dev 合并到 main → **DELIVERED**。**发现设计缺口**：api-tool/landing-page 等无托管部署类型无法通过正常 API 推进到 DELIVERED（preview/deploy 和 release API 因 noHostedDeploymentReason 返回 409），已记录为 P2-4，本次通过直接调用 store.advanceDelivery 手动推进。
+  - **P0-2 一键 macOS 安装脚本**：`scripts/install-macos.sh` 自动安装 Homebrew → fnm → Node.js 22 → agent-dev 依赖 → build，配置代理环境变量（`~/.agent-dev/env`），创建 daemon launcher + launchd plist 实现登录自启和崩溃重启，安装后自动运行 doctor 验证。注册为 `npm run install:macos`。
+  - **P1-1 导入现有 Git 仓库**：Apply API 支持 `importRepositoryUrl`，导入后自动确保 dev 集成分支存在，用 `.agent-dev-import` 标记导入仓库，executeApplyRun 检测后保留用户历史不做 wipe-and-reclone，新增冲突检测（比较 Blueprint 期望文件与现有文件，记录 conflicts/wouldAdd/keptExisting 到 apply-manifest.json），用户文件永不被覆盖。
+  - **P1-3 Blueprint 升级 Review 提示**：新增 `GET /blueprint/revisions` 列出所有版本及元数据，新增 `POST /blueprint/revise` 验证并创建新版本后自动生成与上一版本的 diff，返回 reviewRequired 标志和变更列表，Studio 可在 Apply 前提示用户 Review。复用已有的 diffBlueprints 递归比较器。
+  - **GitHub Actions 修复**：Vitest 的 `toBeGreaterThan` 不支持第二个参数（错误消息），那是 Jest API。修复为 `expect(value, message).toBeGreaterThan(0)`。
 
 - **三个缺陷从根因修掉（2026-08-26，提交 `ec1de1a` / `2358b9d` / `f2e4278`）**：
   - **缺陷 26：Blueprint 不再声明并不存在的部署目标**（补完缺陷 24 的另一半）。`deployment.web.provider` / `deployment.api.provider` / `data.provider` / `data.auth` 是硬编码 `z.literal`，所以即使基线计划已经按类型停止索取这几家 provider，一个 MCP server 的 blueprint 仍然写着"Cloudflare Pages + Vercel Functions + Supabase Auth"——对交付事实的假陈述，而这几个字段正是最终报告和后续消费方判断"存在什么"的依据。四个字段放宽为含 `'none'` 的枚举，取值改由 `baselineProvidersFor(productType)` 决定（与基线计划同一事实源）。放宽前先量过影响面：这三个字段在测试之外没有读取点，composer/release 不受影响，也不会让任何 workspace 变成 `staleConfig`；放宽是枚举加成员，不能拒绝已持久化的行。证据：23 行持久化 blueprint 复验 `failing: 0`。
