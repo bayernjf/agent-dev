@@ -4,7 +4,7 @@ export const APPROVER_STORAGE_KEY = 'agent-dev.approver';
 
 export const defaultAnswers: BlueprintAnswers = {
   mode: 'beginner',
-  productType: 'web-saas',
+  productType: 'web-app',
   desktopShell: 'tauri',
   productIntent: '',
   dataSensitivity: 'standard',

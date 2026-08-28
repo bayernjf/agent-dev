@@ -89,4 +89,18 @@ export const migrations = [
       ALTER TABLE apply_runs ADD COLUMN recovery_index INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    id: '0006_rename_web_saas_product_type',
+    sql: `
+      -- 'web-saas' was renamed to 'web-app': SaaS names a business model while every other product
+      -- type names a delivery shape. productBlueprintSchema is a strict enum and parses on every
+      -- read, so a leftover value would throw and take down the whole project list, not just one
+      -- row. The stored copy has to be rewritten here rather than tolerated by the schema.
+      UPDATE projects SET product_type = 'web-app' WHERE product_type = 'web-saas';
+
+      UPDATE blueprint_revisions
+      SET blueprint_json = json_set(blueprint_json, '$.spec.product.type', 'web-app')
+      WHERE json_extract(blueprint_json, '$.spec.product.type') = 'web-saas';
+    `,
+  },
 ] as const;

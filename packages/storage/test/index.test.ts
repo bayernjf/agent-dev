@@ -1,11 +1,16 @@
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
+import initSqlJs from 'sql.js';
 import { createBlueprint, createDefaultBlueprint } from '@agent-dev/blueprint';
 import { AgentDevStore } from '../src/index.js';
+import { migrations } from '../src/migrations.js';
+
+const require = createRequire(import.meta.url);
 
 const execFileAsync = promisify(execFile);
 
@@ -460,6 +465,51 @@ describe('AgentDevStore', () => {
       expect(first.recoveryIndex).toBe(0);
       expect(store.listApplyRuns(created.id, 1)).toHaveLength(1);
       expect(store.getLatestApplyRun(created.id, 1)?.id).toBe(first.id);
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  });
+});
+
+describe('migrations', () => {
+  const rename = '0006_rename_web_saas_product_type';
+
+  it('rewrites a stored blueprint that still carries the pre-rename product type', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-migration-'));
+    const databasePath = join(directory, 'agent-dev.sqlite');
+    try {
+      // Build the legacy database by hand and stop right before the rename, so the real
+      // migration runner is what has to repair it.
+      const SQL = await initSqlJs({ locateFile: () => require.resolve('sql.js/dist/sql-wasm.wasm') });
+      const legacy = new SQL.Database();
+      legacy.run('CREATE TABLE IF NOT EXISTS __agent_dev_migrations (id TEXT PRIMARY KEY NOT NULL);');
+      for (const migration of migrations) {
+        if (migration.id === rename) continue;
+        legacy.exec(migration.sql);
+        legacy.run('INSERT INTO __agent_dev_migrations (id) VALUES (?);', [migration.id]);
+      }
+
+      const blueprint = createDefaultBlueprint('legacy-desk');
+      const legacyBlueprint = JSON.stringify({
+        ...blueprint,
+        spec: { ...blueprint.spec, product: { ...blueprint.spec.product, type: 'web-saas' } },
+      });
+      const now = new Date().toISOString();
+      legacy.run('INSERT INTO projects (id, name, product_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);',
+        ['p-legacy', 'Legacy Desk', 'web-saas', 'NEEDS_INPUT', now, now]);
+      legacy.run('INSERT INTO blueprint_revisions (id, project_id, revision, blueprint_json, created_at) VALUES (?, ?, ?, ?, ?);',
+        ['b-legacy', 'p-legacy', 1, legacyBlueprint, now]);
+      legacy.run('INSERT INTO delivery_runs (id, project_id, state, snapshot_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);',
+        ['r-legacy', 'p-legacy', 'NEEDS_INPUT', '{}', now, now]);
+
+      await writeFile(databasePath, Buffer.from(legacy.export()));
+      legacy.close();
+
+      const store = await AgentDevStore.open(databasePath);
+      // Both copies are read on every project load, and blueprint_json goes through a strict enum.
+      expect(store.listBlueprintRevisions('p-legacy')[0]?.blueprintJson.spec.product.type).toBe('web-app');
+      expect(store.listProjects().find(project => project.id === 'p-legacy')?.productType).toBe('web-app');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });

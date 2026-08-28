@@ -3,7 +3,7 @@ import { createBlueprint } from '@agent-dev/blueprint';
 import { providerSpecsFromBlueprint } from '../src/providers.js';
 
 describe('providerSpecsFromBlueprint', () => {
-  it('plans every Golden Path provider for web-saas', () => {
+  it('plans every Golden Path provider for web-app', () => {
     const specs = providerSpecsFromBlueprint(createBlueprint('Receipt Desk', {
       githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme',
     }));

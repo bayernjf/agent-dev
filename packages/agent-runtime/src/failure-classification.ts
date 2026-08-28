@@ -296,7 +296,7 @@ const FAILURE_PATTERNS: FailurePattern[] = [
     explanation: 'The Blueprint declares cloud deployment targets that do not match the product type, or the required cloud providers are not configured. For example, an API tool (MCP server) does not need Vercel or Cloudflare, but the Blueprint may still declare them.',
     remediation: [
       'Check the Blueprint deployment configuration matches your product type',
-      'Web SaaS requires GitHub + Vercel + Cloudflare + Supabase',
+      'Web app requires GitHub + Vercel + Cloudflare + Supabase',
       'Landing page requires GitHub + Cloudflare',
       'API tool / MCP server requires only GitHub (no cloud hosting)',
       'Re-generate the Blueprint if the product type was changed',
