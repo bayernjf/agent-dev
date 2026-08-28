@@ -18,7 +18,7 @@ import type {
 import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
 
 const PRODUCT_TYPE_LABEL_KEYS = [
-  ['web-saas', 'blueprint.productTypeWebSaas'],
+  ['web-app', 'blueprint.productTypeWebApp'],
   ['landing-page', 'blueprint.productTypeLandingPage'],
   ['browser-extension', 'blueprint.productTypeBrowserExtension'],
   ['desktop', 'blueprint.productTypeDesktop'],

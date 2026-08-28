@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, getBlueprintDecisions, getManualActions, productBlueprintSchema } from '../src/index.js';
 
 describe('ProductBlueprint', () => {
-  it('creates the fixed v0.1 Web SaaS Golden Path', () => {
+  it('creates the fixed v0.1 Web app Golden Path', () => {
     const blueprint = createDefaultBlueprint('Receipt Desk');
 
     expect(blueprint.spec.deployment.web.provider).toBe('cloudflare-pages');
@@ -105,10 +105,10 @@ describe('ProductBlueprint', () => {
   });
 
   it('only asks the user to authorize the providers the product type uses', () => {
-    const ids = (productType: 'web-saas' | 'api-tool' | 'landing-page') =>
+    const ids = (productType: 'web-app' | 'api-tool' | 'landing-page') =>
       getManualActions(createBlueprint('Authorization Desk', { productType })).map(action => action.id);
 
-    expect(ids('web-saas')).toEqual(['authorize-github', 'authorize-supabase', 'authorize-cloudflare', 'authorize-vercel']);
+    expect(ids('web-app')).toEqual(['authorize-github', 'authorize-supabase', 'authorize-cloudflare', 'authorize-vercel']);
     expect(ids('api-tool')).toEqual(['authorize-github']);
     expect(ids('landing-page')).toEqual(['authorize-github', 'authorize-cloudflare']);
   });
@@ -161,7 +161,7 @@ describe('ProductBlueprint', () => {
     // The gate is one `npm run quality` chain: a check declared in the contract but missing from
     // scripts stops the chain with "Missing script", so the product's CI can never go green.
     const combos = [
-      { productType: 'web-saas' },
+      { productType: 'web-app' },
       { productType: 'landing-page' },
       { productType: 'browser-extension' },
       { productType: 'desktop', desktopShell: 'tauri' },
@@ -183,7 +183,7 @@ describe('ProductBlueprint', () => {
     }
   });
 
-  it('ships the config and fixtures the web-saas quality checks need', () => {
+  it('ships the config and fixtures the web-app quality checks need', () => {
     const artifacts = createDryRunPlan(createBlueprint('Receipt Desk', {}, 1)).artifacts;
     // A `unit` script with no test file, or a `lint` script with no config, exits non-zero rather
     // than reporting a passing gate — so the scaffold has to ship both.
@@ -194,9 +194,9 @@ describe('ProductBlueprint', () => {
     for (const rule of ['.env', '.env.*', '.agent-dev/', '.vercel/', '.wrangler/']) expect(ignore).toContain(rule);
   });
 
-  it('keeps web-saas as the default product type and generates the full scaffold', () => {
+  it('keeps web-app as the default product type and generates the full scaffold', () => {
     const blueprint = createDefaultBlueprint('Receipt Desk');
-    expect(blueprint.spec.product.type).toBe('web-saas');
+    expect(blueprint.spec.product.type).toBe('web-app');
     const artifacts = createDryRunPlan(blueprint).artifacts;
     expect(artifacts.find(a => a.path === 'apps/web/src/main.tsx')).toBeDefined();
     expect(artifacts.find(a => a.path === 'apps/api/src/index.ts')).toBeDefined();
@@ -236,7 +236,7 @@ describe('ProductBlueprint', () => {
     expect(artifacts.find(a => a.path === 'src/content.ts')).toBeDefined();
     // Governance docs are still emitted.
     expect(artifacts.find(a => a.path === 'generated/PRODUCT_STANDARD.md')).toBeDefined();
-    // No Web SaaS scaffold is emitted.
+    // No Web app scaffold is emitted.
     expect(artifacts.find(a => a.path === 'apps/web/src/main.tsx')).toBeUndefined();
     // The handoff is the normal governance one, not the "not yet auto-generated" placeholder.
     expect(artifacts.find(a => a.path === 'generated/DELIVERY_HANDOFF.md')?.content).not.toContain('not yet');
