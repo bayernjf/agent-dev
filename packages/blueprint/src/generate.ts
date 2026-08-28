@@ -2,7 +2,7 @@ import type { ProductBlueprint } from './index.js';
 
 // id is intentionally a string rather than a fixed literal union: each product type contributes its
 // own template ids (e.g. `template-landing-index`), and a closed union would force every type to
-// share the web-saas ids. The generator owns the namespace; tests assert by stable `path`.
+// share the web-app ids. The generator owns the namespace; tests assert by stable `path`.
 export type GeneratedArtifact = {
   id: string;
   title: string;
@@ -55,7 +55,7 @@ export type BaselineProviderId = 'github' | 'supabase' | 'vercel' | 'cloudflare'
 // call Supabase "optional" are deliberately absent from it: optional must not gate approval.
 // Keyed on ProductType rather than string so a new product type cannot compile until it declares one.
 export const PRODUCT_TYPE_DESCRIPTORS: Record<ProductType, { frontend: string; backend: string; deploySteps: string; hasBackend: boolean; providers: readonly BaselineProviderId[] }> = {
-  'web-saas': {
+  'web-app': {
     frontend: 'React/Vite on Cloudflare Pages',
     backend: 'Hono on Vercel Functions',
     deploySteps: 'Deploy the Vercel API Preview, then the Cloudflare Pages Preview.',
@@ -98,7 +98,7 @@ export const PRODUCT_TYPE_DESCRIPTORS: Record<ProductType, { frontend: string; b
   },
   // An MCP server is the one API-first shape with its own delivery path: it is consumed as a local
   // process through a client's config file, so nothing is deployed to a URL and no cloud project
-  // is created. Webhook receivers and HTTP tool endpoints belong in web-saas' API workspace.
+  // is created. Webhook receivers and HTTP tool endpoints belong in web-app' API workspace.
   'api-tool': {
     frontend: 'None (MCP server; tools are the interface)',
     backend: 'Model Context Protocol server over stdio (@modelcontextprotocol/sdk), TypeScript',
@@ -368,7 +368,7 @@ export function getManualActions(blueprint: ProductBlueprint): ManualAction[] {
 // release boundary are identical regardless of the delivered artifact shape. Only the Delivery
 // baseline and deploy step strings differ per type, drawn from PRODUCT_TYPE_DESCRIPTORS.
 function buildGovernanceArtifacts(blueprint: ProductBlueprint): GeneratedArtifact[] {
-  const desc = PRODUCT_TYPE_DESCRIPTORS[blueprint.spec.product.type] ?? PRODUCT_TYPE_DESCRIPTORS['web-saas'];
+  const desc = PRODUCT_TYPE_DESCRIPTORS[blueprint.spec.product.type] ?? PRODUCT_TYPE_DESCRIPTORS['web-app'];
   const intent = markdown(blueprint.metadata.productIntent || 'Not specified yet.');
   const analytics = blueprint.spec.analytics.providers.length === 0 ? 'None' : blueprint.spec.analytics.providers.join(', ').toUpperCase();
   const quality = blueprint.spec.quality.required.join(', ');
@@ -417,22 +417,22 @@ function buildWebSaaS(blueprint: ProductBlueprint): GeneratedArtifact[] {
   const templateHeader = `Generated from ProductBlueprint revision ${blueprint.metadata.revision}.`;
   const templatePackageName = blueprint.metadata.name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-dev-product';
   return [
-    { id: 'template-root-package', title: 'Web SaaS workspace package', path: 'package.json', content: JSON.stringify({ name: templatePackageName, private: true, type: 'module', packageManager: 'npm@10.8.2', scripts: { dev: 'concurrently -k "npm run dev -w web" "npm run dev -w api"', lint: 'eslint .', typecheck: 'tsc --noEmit', unit: 'vitest run', build: 'npm run build -w web', smoke: 'node scripts/smoke.mjs', quality: qualityScript(blueprint) }, workspaces: ['apps/web', 'apps/api'], devDependencies: { '@eslint/js': '^9.26.0', '@types/node': '^22.15.3', '@types/react': '^19.1.2', '@types/react-dom': '^19.1.2', '@vitejs/plugin-react': '^4.4.1', concurrently: '^9.1.0', eslint: '^9.26.0', globals: '^16.0.0', typescript: '^5.8.3', 'typescript-eslint': '^8.32.0', vite: '^7.3.6', vitest: '^3.1.3' } }, null, 2) + '\n' },
+    { id: 'template-root-package', title: 'Web app workspace package', path: 'package.json', content: JSON.stringify({ name: templatePackageName, private: true, type: 'module', packageManager: 'npm@10.8.2', scripts: { dev: 'concurrently -k "npm run dev -w web" "npm run dev -w api"', lint: 'eslint .', typecheck: 'tsc --noEmit', unit: 'vitest run', build: 'npm run build -w web', smoke: 'node scripts/smoke.mjs', quality: qualityScript(blueprint) }, workspaces: ['apps/web', 'apps/api'], devDependencies: { '@eslint/js': '^9.26.0', '@types/node': '^22.15.3', '@types/react': '^19.1.2', '@types/react-dom': '^19.1.2', '@vitejs/plugin-react': '^4.4.1', concurrently: '^9.1.0', eslint: '^9.26.0', globals: '^16.0.0', typescript: '^5.8.3', 'typescript-eslint': '^8.32.0', vite: '^7.3.6', vitest: '^3.1.3' } }, null, 2) + '\n' },
     // `vite/client` is required, not cosmetic: the web entrypoint reads `import.meta.env`, so
     // without it the generated baseline cannot pass its own typecheck.
-    { id: 'template-root-tsconfig', title: 'Web SaaS TypeScript configuration', path: 'tsconfig.json', content: JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', jsx: 'react-jsx', strict: true, noEmit: true, skipLibCheck: true, types: ['node', 'vite/client'] }, include: ['apps/web/src', 'apps/api/src', 'vite.config.ts', 'eslint.config.js'] }, null, 2) + '\n' },
+    { id: 'template-root-tsconfig', title: 'Web app TypeScript configuration', path: 'tsconfig.json', content: JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', jsx: 'react-jsx', strict: true, noEmit: true, skipLibCheck: true, types: ['node', 'vite/client'] }, include: ['apps/web/src', 'apps/api/src', 'vite.config.ts', 'eslint.config.js'] }, null, 2) + '\n' },
     { id: 'template-eslint-config', title: 'ESLint flat configuration', path: 'eslint.config.js', content: `import eslint from '@eslint/js';\nimport globals from 'globals';\nimport tseslint from 'typescript-eslint';\n\nexport default tseslint.config(\n  { ignores: ['**/dist/**', '**/node_modules/**'] },\n  eslint.configs.recommended,\n  ...tseslint.configs.recommended,\n  // typescript-eslint disables no-undef for TypeScript, but plain .mjs tooling scripts still need\n  // the Node globals declared or \`console\` and \`process\` are reported as undefined.\n  { files: ['scripts/**/*.mjs'], languageOptions: { globals: globals.node } },\n);\n` },
     { id: 'template-smoke-script', title: 'Post-build smoke check', path: 'scripts/smoke.mjs', content: `import { readFile } from 'node:fs/promises';\n\n// The deployed artifact is the built bundle, not the source. This asserts the build produced an\n// entry document and that it still carries the meta tag the API base URL is injected into.\nconst entry = 'apps/web/dist/index.html';\nconst html = await readFile(entry, 'utf8').catch(() => {\n  throw new Error('smoke: ' + entry + ' is missing. Run the build before the smoke check.');\n});\nif (!html.includes('name="api-base-url"')) {\n  throw new Error('smoke: ' + entry + ' lost the api-base-url meta tag, so the API URL cannot be injected.');\n}\nconsole.log('smoke: ' + entry + ' is present and injectable.');\n` },
     { id: 'template-vite-config', title: 'Vite React configuration', path: 'vite.config.ts', content: `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\n\nexport default defineConfig({ plugins: [react()] });\n` },
-    { id: 'template-readme', title: 'Web SaaS template README', path: 'README.md', content: `# ${markdown(blueprint.metadata.name)}\n\n${templateHeader}\n\nThis is the Agent-Dev fixed Web SaaS Golden Path. The web app deploys to Cloudflare Pages and the Hono API deploys to Vercel Functions.\n\n## Local commands\n\n- \`npm install\` (first materialization; creates the lock file)\n- \`npm run quality\`\n- \`npm run dev\`\n\n\`package-lock.json\` is committed by the first install, and CI runs \`npm ci\` against it.\n\n## Environment\n\nUse \`config/env.contract.yaml\` as the source of truth. Never commit secret values.\n` },
+    { id: 'template-readme', title: 'Web app template README', path: 'README.md', content: `# ${markdown(blueprint.metadata.name)}\n\n${templateHeader}\n\nThis is the Agent-Dev fixed Web app Golden Path. The web app deploys to Cloudflare Pages and the Hono API deploys to Vercel Functions.\n\n## Local commands\n\n- \`npm install\` (first materialization; creates the lock file)\n- \`npm run quality\`\n- \`npm run dev\`\n\n\`package-lock.json\` is committed by the first install, and CI runs \`npm ci\` against it.\n\n## Environment\n\nUse \`config/env.contract.yaml\` as the source of truth. Never commit secret values.\n` },
     { id: 'template-web-package', title: 'Web application package', path: 'apps/web/package.json', content: JSON.stringify({ name: 'web', private: true, type: 'module', scripts: { dev: 'vite', build: 'vite build' }, dependencies: { react: '^19.1.0', 'react-dom': '^19.1.0' }, devDependencies: { '@vitejs/plugin-react': '^4.4.1', vite: '^7.3.6', typescript: '^5.8.3' } }, null, 2) + '\n' },
     { id: 'template-web-index', title: 'Vite web entry', path: 'apps/web/index.html', content: `<!doctype html>
 <html lang="en">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="api-base-url" content="%VITE_API_BASE_URL%" />${analyticsSnippet(blueprint)}<title>Agent-Dev Web SaaS</title></head>
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="api-base-url" content="%VITE_API_BASE_URL%" />${analyticsSnippet(blueprint)}<title>Agent-Dev Web app</title></head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
 </html>
 ` },
-    { id: 'template-web-main', title: 'Web application entrypoint', path: 'apps/web/src/main.tsx', content: `import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport './styles.css';\n\nconst apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '';\n\nfunction App() {\n  const [apiStatus, setApiStatus] = React.useState('checking');\n  React.useEffect(() => {\n    if (!apiBaseUrl) return setApiStatus('not configured');\n    fetch(\`\${apiBaseUrl}/api/health\`)\n      .then(response => response.json())\n      .then(body => setApiStatus(body.status ?? 'unknown'))\n      .catch(() => setApiStatus('unreachable'));\n  }, []);\n  return <main><p className="eyebrow">Agent-Dev Web SaaS</p><h1>${markdown(blueprint.metadata.name)}</h1><p>${markdown(blueprint.metadata.productIntent || 'Your product baseline is ready for the next feature.')}</p><span className="status">API {apiBaseUrl || 'unset'} health: {apiStatus}</span></main>;\n}\n\ncreateRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);\n` },
+    { id: 'template-web-main', title: 'Web application entrypoint', path: 'apps/web/src/main.tsx', content: `import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport './styles.css';\n\nconst apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '';\n\nfunction App() {\n  const [apiStatus, setApiStatus] = React.useState('checking');\n  React.useEffect(() => {\n    if (!apiBaseUrl) return setApiStatus('not configured');\n    fetch(\`\${apiBaseUrl}/api/health\`)\n      .then(response => response.json())\n      .then(body => setApiStatus(body.status ?? 'unknown'))\n      .catch(() => setApiStatus('unreachable'));\n  }, []);\n  return <main><p className="eyebrow">Agent-Dev Web app</p><h1>${markdown(blueprint.metadata.name)}</h1><p>${markdown(blueprint.metadata.productIntent || 'Your product baseline is ready for the next feature.')}</p><span className="status">API {apiBaseUrl || 'unset'} health: {apiStatus}</span></main>;\n}\n\ncreateRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);\n` },
     { id: 'template-web-styles', title: 'Web application styles', path: 'apps/web/src/styles.css', content: ':root { font-family: Inter, system-ui, sans-serif; color: #1d2823; background: #f6f7f3; } body { margin: 0; min-width: 320px; } main { max-width: 720px; margin: 16vh auto; padding: 32px; } h1 { font-size: clamp(32px, 7vw, 64px); margin: 0 0 16px; } p { line-height: 1.6; } .eyebrow { color: #286b43; font-size: 12px; font-weight: 700; text-transform: uppercase; } .status { display: inline-block; margin-top: 20px; padding: 8px 10px; border-radius: 4px; color: #286b43; background: #e5f2e8; font-size: 13px; }\n' },
     { id: 'template-api-package', title: 'API application package', path: 'apps/api/package.json', content: JSON.stringify({ name: 'api', private: true, type: 'module', scripts: { dev: 'tsx src/index.ts' }, dependencies: { '@hono/node-server': '^1.14.1', hono: '^4.7.7' }, devDependencies: { tsx: '^4.19.3', typescript: '^5.8.3' } }, null, 2) + '\n' },
     { id: 'template-api-index', title: 'Hono API entrypoint', path: 'apps/api/src/index.ts', content: `import { serve } from '@hono/node-server';\nimport { Hono } from 'hono';\nimport { cors } from 'hono/cors';\nimport { handle } from 'hono/vercel';\n\nexport const app = new Hono();\n\napp.use('/api/*', cors({ origin: process.env.ALLOWED_ORIGIN ?? '*' }));\napp.get('/api/health', context => context.json({ service: '${markdown(blueprint.metadata.name)}', status: 'ok' }));\n\n// Vercel treats a default export as the legacy \`(req, res)\` signature and discards a returned\n// Response, so the fetch-style handler must be exported per HTTP method instead.\nconst handler = handle(app);\nexport const GET = handler;\nexport const POST = handler;\nexport const OPTIONS = handler;\n\nif (!process.env.VERCEL && !process.env.VITEST) serve({ fetch: app.fetch, port: Number(process.env.PORT ?? 8787) });\n` },
@@ -724,7 +724,7 @@ function buildApiTool(blueprint: ProductBlueprint): GeneratedArtifact[] {
 
 export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifact[] {
   switch (blueprint.spec.product.type) {
-    case 'web-saas':
+    case 'web-app':
       return [...buildGovernanceArtifacts(blueprint), ...buildWebSaaS(blueprint)];
     case 'landing-page':
       return [...buildGovernanceArtifacts(blueprint), ...buildLandingPage(blueprint)];
