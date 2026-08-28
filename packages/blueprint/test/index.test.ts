@@ -343,4 +343,17 @@ describe('ProductBlueprint', () => {
     expect(path('index.html')).toBeUndefined();
     expect(path('generated/DISTRIBUTION.md')!.content).toContain('claude_desktop_config.json');
   });
+
+  // The banner's inline style once carried two display declarations; the trailing display:flex
+  // won, so the banner rendered on every page load even after the visitor had already chosen.
+  // Hidden must stay the initial state: only the consent script may flip it to flex.
+  it('keeps the analytics consent banner hidden until the consent script shows it', () => {
+    const blueprint = createBlueprint('Receipt Desk', { analyticsProviders: ['ga4', 'clarity'] }, 1);
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    const banner = artifacts.find(a => a.content.includes('analytics-consent-banner'));
+    expect(banner).toBeDefined();
+    const style = banner!.content.match(/id="analytics-consent-banner" style="([^"]+)"/)![1];
+    expect(style.match(/display:/g)).toHaveLength(1);
+    expect(style.startsWith('display:none')).toBe(true);
+  });
 });
