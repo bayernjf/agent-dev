@@ -676,4 +676,131 @@ describe('daemon API', () => {
     expect(again.status).toBe(409);
     await store.close();
   }, 30_000);
+
+  it('delivers a product without a hosted deployment target through a manually confirmed distribution', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const releaseCalls: unknown[] = [];
+    const { app } = createDaemonApp(store, undefined, {
+      deployRelease: async options => {
+        releaseCalls.push(options);
+        throw new Error('A manual distribution must not trigger a deploy.');
+      },
+    });
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Receipt Rules',
+        answers: { mode: 'professional', productType: 'api-tool', githubOwner: 'acme' },
+      }),
+    });
+    expect(created.status).toBe(201);
+    const { project } = await created.json() as { project: { id: string } };
+    await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
+    });
+    const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+    expect(applied.status).toBe(200);
+    const { run } = await applied.json() as { run: { workspacePath: string } };
+
+    // A manual-distribution product sees a single confirmation step and no production origin.
+    const plan = await app.request(`http://localhost/api/projects/${project.id}/release/plan`);
+    expect(plan.status).toBe(200);
+    const planPayload = await plan.json() as { manualDistribution: boolean; corsOrigin?: string; steps: { id: string }[]; source: unknown };
+    expect(planPayload).toMatchObject({
+      manualDistribution: true,
+      steps: [{ id: 'confirm-manual-distribution' }],
+      source: null,
+    });
+    expect(planPayload.corsOrigin).toBeUndefined();
+
+    await store.advanceDelivery(project.id, [
+      { type: 'START_IMPLEMENTATION' }, { type: 'IMPLEMENTATION_COMPLETE' },
+      { type: 'VERIFY_COMPLETE' }, { type: 'PR_CREATED' },
+    ]);
+
+    // The same prerequisites as a hosted release: a recorded repository and an accepted commit.
+    const withoutSource = await app.request(`http://localhost/api/projects/${project.id}/release/request`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
+    });
+    expect(withoutSource.status).toBe(409);
+    await expect(withoutSource.json()).resolves.toMatchObject({ error: expect.stringContaining('No repository is recorded') });
+
+    await recordReleasePrerequisites(run.workspacePath);
+    const requested = await app.request(`http://localhost/api/projects/${project.id}/release/request`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
+    });
+    expect(requested.status).toBe(200);
+    await expect(requested.json()).resolves.toMatchObject({ state: 'AWAITING_APPROVAL' });
+
+    const approved = await app.request(`http://localhost/api/projects/${project.id}/release/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'APPROVE_RELEASE', approvedBy: 'test-user', summary: 'Distribute revision 1.' }),
+    });
+    expect(approved.status).toBe(200);
+    // Nothing was deployed: the run completes by journalling the confirmation, no provider call.
+    expect(releaseCalls).toHaveLength(0);
+    await expect(approved.json()).resolves.toMatchObject({
+      releaseRun: { status: 'completed', approvedBy: 'test-user', steps: [{ id: 'confirm-manual-distribution', status: 'completed', detail: 'Distribute revision 1.' }] },
+      evidence: {
+        distribution: 'manual',
+        approvedBy: 'test-user',
+        observations: { distribution: 'manual', repository: RELEASE_REPOSITORY, branch: 'main', acceptedCommit: ACCEPTED_COMMIT },
+      },
+    });
+
+    const state = await app.request(`http://localhost/api/projects/${project.id}/release`);
+    await expect(state.json()).resolves.toMatchObject({ state: 'DELIVERED', releaseRun: { status: 'completed' } });
+
+    // A manual distribution has no automated steps, so there is nothing a retry could resume.
+    const retried = await app.request(`http://localhost/api/projects/${project.id}/release/retry`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RETRY_RELEASE' }),
+    });
+    expect(retried.status).toBe(409);
+    await store.close();
+  }, 30_000);
+
+  it('keeps hosted products on the preview gate before a release request', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const { app } = createDaemonApp(store, undefined, {
+      deployRelease: async () => { throw new Error('The preview-first guard must stop before any deploy.'); },
+    });
+    const created = await app.request('http://localhost/api/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Receipt Desk',
+        answers: { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' },
+      }),
+    });
+    const { project } = await created.json() as { project: { id: string } };
+    await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
+    });
+    const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+    });
+    const { run } = await applied.json() as { run: { workspacePath: string } };
+    await recordReleasePrerequisites(run.workspacePath);
+    await store.advanceDelivery(project.id, [
+      { type: 'START_IMPLEMENTATION' }, { type: 'IMPLEMENTATION_COMPLETE' },
+      { type: 'VERIFY_COMPLETE' }, { type: 'PR_CREATED' },
+    ]);
+
+    // The PR_OPEN shortcut exists only for products without a hosted deployment target: a hosted
+    // product with a recorded repository and accepted commit still cannot skip the preview gate.
+    const premature = await app.request(`http://localhost/api/projects/${project.id}/release/request`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
+    });
+    expect(premature.status).toBe(409);
+    await expect(premature.json()).resolves.toMatchObject({ error: expect.stringContaining('preview gate') });
+    expect(store.getProject(project.id)?.state).toBe('PR_OPEN');
+    await store.close();
+  }, 30_000);
 });

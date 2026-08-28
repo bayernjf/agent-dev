@@ -13,6 +13,12 @@
   },
   "dependencies": {
     "@agent-dev/daemon": "file:../daemon",
-    "@agent-dev/policy": "file:../../packages/policy"
+    "@agent-dev/policy": "file:../../packages/policy",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@agent-dev/storage": "^0.1.0-alpha.0",
+    "@hono/node-server": "^1.19.17"
   }
 }
