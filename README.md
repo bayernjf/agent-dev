@@ -49,6 +49,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目暴露的缺陷、架构规则、模型选型与环境前提。
 - [Studio 双主题设计方案](docs/studio-theme-design.md)：Studio 深/浅双主题 token 化视觉方案，已实施（`90696d4`）。
 - [Studio i18n 设计方案](docs/studio-i18n-design.md)：Studio 中/英双语方案，默认英文、术语保留英文，已实施（`90696d4`）。
+- [外部 Pilot 招募](docs/pilot-recruiting.md)：v0.2 外部 Pilot 参与条件、流程、激励与隐私边界，申请/反馈走仓库 Issue 模板。
 - [项目交接](handoff.md)：当前分支、硬约束、已完成工作和下一步。
 
 ## 当前状态
