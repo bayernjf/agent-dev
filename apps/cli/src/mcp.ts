@@ -167,6 +167,85 @@ export function createAgentDevMcpServer(options: McpBridgeOptions): McpServer {
     annotations: READ_ONLY,
   }, args => callDaemon('GET', `/api/projects/${encodeURIComponent(args.projectId)}/feature-task`).then(toResult));
 
+  server.registerTool('agent_dev_get_apply', {
+    title: 'Get Apply run',
+    description: 'Get the latest Local Apply run of a project: status, workspace and generated artifacts.',
+    inputSchema: projectIdSchema,
+    annotations: READ_ONLY,
+  }, args => callDaemon('GET', `/api/projects/${encodeURIComponent(args.projectId)}/apply`).then(toResult));
+
+  server.registerTool('agent_dev_get_quality_gate', {
+    title: 'Get quality gate',
+    description: 'Get the latest Quality Gate result of a project, if one has run.',
+    inputSchema: projectIdSchema,
+    annotations: READ_ONLY,
+  }, args => callDaemon('GET', `/api/projects/${encodeURIComponent(args.projectId)}/quality-gate`).then(toResult));
+
+  server.registerTool('agent_dev_get_acceptance', {
+    title: 'Get acceptance',
+    description: 'Get the current acceptance submission of a project, if one exists.',
+    inputSchema: projectIdSchema,
+    annotations: READ_ONLY,
+  }, args => callDaemon('GET', `/api/projects/${encodeURIComponent(args.projectId)}/acceptance`).then(toResult));
+
+  server.registerTool('agent_dev_get_delivery_report', {
+    title: 'Get delivery report',
+    description: 'Get the consolidated delivery report of a project: Apply, feature task, runtime, quality, acceptance and Git evidence in one read.',
+    inputSchema: projectIdSchema,
+    annotations: READ_ONLY,
+  }, args => callDaemon('GET', `/api/projects/${encodeURIComponent(args.projectId)}/delivery-report`).then(toResult));
+
+  server.registerTool('agent_dev_get_baseline_plan', {
+    title: 'Get baseline plan',
+    description: 'Get the baseline resource plan of a project: which cloud resources the Blueprint requires and their approval state.',
+    inputSchema: projectIdSchema,
+    annotations: READ_ONLY,
+  }, args => callDaemon('GET', `/api/projects/${encodeURIComponent(args.projectId)}/baseline-plan`).then(toResult));
+
+  server.registerTool('agent_dev_get_release_plan', {
+    title: 'Get release plan',
+    description: 'Get the production release plan of a project: step list, idempotency key and current release run.',
+    inputSchema: projectIdSchema,
+    annotations: READ_ONLY,
+  }, args => callDaemon('GET', `/api/projects/${encodeURIComponent(args.projectId)}/release/plan`).then(toResult));
+
+  server.registerTool('agent_dev_get_runtime', {
+    title: 'Get agent runtimes',
+    description: 'Get the discovered agent runtime catalog and any custom runtime profiles on this machine.',
+    annotations: READ_ONLY,
+  }, async () => {
+    const catalog = await callDaemon('GET', '/api/runtime/catalog');
+    if (!catalog.ok) return toResult(catalog);
+    const profiles = await callDaemon('GET', '/api/runtime/profiles');
+    if (!profiles.ok) return toResult(profiles);
+    return jsonResult({ ...(catalog.body as Record<string, unknown>), ...(profiles.body as Record<string, unknown>) });
+  });
+
+  server.registerTool('agent_dev_get_connectors', {
+    title: 'Get connector readiness',
+    description: 'Get connector preflight (installed CLIs and auth) and discovered cloud accounts. Explains why a deploy or provider step is blocked.',
+    // Discovery queries cloud accounts, so this read intentionally looks at the outside world.
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, async () => {
+    const preflight = await callDaemon('GET', '/api/connectors/preflight');
+    if (!preflight.ok) return toResult(preflight);
+    const discovery = await callDaemon('GET', '/api/connectors/discovery');
+    if (!discovery.ok) return toResult(discovery);
+    return jsonResult({ preflight: preflight.body, discovery: discovery.body });
+  });
+
+  server.registerTool('agent_dev_get_credentials_meta', {
+    title: 'Get credential metadata',
+    description: 'Get metadata about stored credentials: which keys are set and when they were updated. Secret values are never returned.',
+    annotations: READ_ONLY,
+  }, () => callDaemon('GET', '/api/credentials').then(toResult));
+
+  server.registerTool('agent_dev_check_update', {
+    title: 'Check for updates',
+    description: 'Check whether this Agent-Dev checkout is behind its Git upstream. Runs a git fetch; does not update anything.',
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  }, () => callDaemon('GET', '/api/update/check').then(toResult));
+
   server.registerTool('agent_dev_create_project', {
     title: 'Create project',
     description: 'Create a project from a name and Blueprint answers. No external system is touched.',
@@ -186,6 +265,46 @@ export function createAgentDevMcpServer(options: McpBridgeOptions): McpServer {
     },
     annotations: ADDITIVE,
   }, args => callDaemon('PUT', `/api/projects/${encodeURIComponent(args.projectId)}/blueprint`, { answers: args.answers }).then(toResult));
+
+  server.registerTool('agent_dev_create_feature_task', {
+    title: 'Create feature task',
+    description: 'Define the next feature task for a project: title, objective and acceptance criteria. The task starts as a draft; approving it is a human act in Studio. Requires a completed Local Apply.',
+    inputSchema: {
+      ...projectIdSchema,
+      title: z.string().trim().min(3).max(120).describe('Short task title, 3-120 characters.'),
+      objective: z.string().trim().min(10).max(2000).describe('What the feature should achieve, 10-2000 characters.'),
+      acceptanceCriteria: z.array(z.string().trim().min(3).max(500)).min(1).max(20).describe('1-20 verifiable acceptance criteria.'),
+    },
+    annotations: ADDITIVE,
+  }, async args => {
+    // The daemon requires the task to target the current revision; read it here so callers never
+    // have to track revision numbers.
+    const project = await callDaemon('GET', `/api/projects/${encodeURIComponent(args.projectId)}`);
+    if (!project.ok) return toResult(project);
+    const revision = (project.body as { project?: { blueprint?: { metadata?: { revision?: number } } } })
+      ?.project?.blueprint?.metadata?.revision;
+    if (typeof revision !== 'number') return errorResult('Could not determine the current Blueprint revision from the project.');
+    return callDaemon('POST', `/api/projects/${encodeURIComponent(args.projectId)}/feature-task`, {
+      blueprintRevision: revision,
+      title: args.title,
+      objective: args.objective,
+      acceptanceCriteria: args.acceptanceCriteria,
+    }).then(toResult);
+  });
+
+  server.registerTool('agent_dev_submit_acceptance', {
+    title: 'Submit acceptance',
+    description: 'Submit the acceptance record for a delivered feature: a summary and whether the acceptance criteria are met. This only records the submission; approving the delivery is a human act in Studio.',
+    inputSchema: {
+      ...projectIdSchema,
+      summary: z.string().trim().min(10).max(2000).describe('What was delivered and how it was verified, 10-2000 characters.'),
+      criteriaConfirmed: z.boolean().describe('True only if every acceptance criterion of the approved feature task is verifiably met.'),
+    },
+    annotations: ADDITIVE,
+  }, args => callDaemon('POST', `/api/projects/${encodeURIComponent(args.projectId)}/acceptance`, {
+    summary: args.summary,
+    criteriaConfirmed: args.criteriaConfirmed,
+  }).then(toResult));
 
   server.registerTool('agent_dev_dry_run', {
     title: 'Dry run',
