@@ -1,10 +1,15 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-28
-> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；同日新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾
+> 更新时间：2026-08-29
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **agent-dev MCP 桥完成化：可启动、省 token、扩至 21 工具（2026-08-29）**：08-28 首版（提交 `f5bb602`，9 工具）之后连走三步，当前工具面与设计见 [mcp-bridge.md](docs/mcp-bridge.md)。
+  - **可启动入口 + token 经济 + 超时预算 + 工具注解（提交 `2051e29`）**：全仓 noEmit 无构建产物，新增 `apps/cli/bin/agent-dev.mjs` shebang launcher——注册 tsx 后直接执行 TS 源码（不打 bundle：storage 用 `require.resolve` 定位 sql.js 的 wasm，ESM 打包会断），外部客户端从此有了可用入口（`node .../agent-dev.mjs mcp`）。`dry_run` 默认只回清单 `{id,title,path,bytes}` + `artifactCount`，传 `artifactId` 才回单文件全文；实测四种产品类型 revision-1 计划 9.6–17.8 KB → 3.7–6.1 KB（省 60–75%）。全部工具带 MCP annotations（`readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`），客户端据此决定是否要求人工确认。daemon 调用预算 30 秒（`AbortSignal.timeout`），「不可达」与「接受请求但不响应」分成两种错误文案；服务器版本号从 `apps/cli/package.json` 读取，不再是占位。
+  - **设计文档落档（提交 `0ef61d9`）**：新建 `docs/mcp-bridge.md`，记录定位、客户端配置（mcpServers JSON）、工具清单、刻意不暴露清单与测试方式。
+  - **工具面 9 → 21（提交 `a267b88`）**：新增 10 个只读工具——交付中间态 `get_apply`/`get_quality_gate`/`get_acceptance`/`get_delivery_report`（后者是 markdown 最终报告）与资源环境 `get_baseline_plan`/`get_release_plan`/`get_runtime`（catalog+profiles 合并）/`get_connectors`（preflight+discovery 合并）/`get_credentials_meta`（只抛 key 名，凭据值不出本机）/`check_update`（只跑 git fetch）；新增 2 个推进工具——`create_feature_task`（bridge 先 GET 项目取当前 `blueprintRevision` 注入，客户端无法伪造版本号）与 `submit_acceptance`（summary + criteriaConfirmed；验收不是批准，`approve` 类依旧一个不暴露）。`run_quality_gate` 刻意不做——它触发真实 runtime 执行，属外部副作用，与 Apply/Preview 部署同类。基线审批、Apply、Preview 部署、生产批准、凭据写入仍不走 MCP；`REQUEST_RELEASE` 确认字面量继续写死在 bridge 服务端。文档随本提交同步为 21 工具版；测试仍是真实 HTTP + 真实 daemon app + `InMemoryTransport` 全链路，断言工具清单不含 `approve` 类。
 
 - **v0.2 P2-4 闭环 + agent-dev MCP + 类型重命名与主题收尾（2026-08-28）**：
   - **P2-4 无托管部署类型的交付状态机闭环（提交 `1436742`）**：08-27 项目 4 暴露的缺口正式用正常 API 关闭——状态机保持类型无关，`PR_OPEN` 增加 `REQUEST_RELEASE` 转移；daemon 校验只有无托管部署目标的蓝图可走捷径（托管产品在 PR_OPEN 仍被 preview gate 拒绝），此前 `preview/deploy` 与 `release/request`/`release/approve` 对 api-tool/landing-page 会因 `noHostedDeploymentReason` 返回 409。此类产品的 release 走 manual distribution：记录 single confirmation step（确认 generated/DISTRIBUTION.md 的人工分发步骤），evidence `distribution: "manual"`（无 URL、无 deploy 调用），请求/批准分离与署名批准人等人闸门保持原样。新增 127 行测试。至此无需再手动 `store.advanceDelivery` 推进。
