@@ -55,24 +55,41 @@ describe('agent-dev MCP bridge', () => {
     const { tools } = await client.listTools();
     const names = tools.map(tool => tool.name).sort();
     expect(names).toEqual([
+      'agent_dev_check_update',
+      'agent_dev_create_feature_task',
       'agent_dev_create_project',
       'agent_dev_doctor',
       'agent_dev_dry_run',
+      'agent_dev_get_acceptance',
+      'agent_dev_get_apply',
+      'agent_dev_get_baseline_plan',
+      'agent_dev_get_connectors',
+      'agent_dev_get_credentials_meta',
+      'agent_dev_get_delivery_report',
       'agent_dev_get_feature_task',
       'agent_dev_get_project',
+      'agent_dev_get_quality_gate',
       'agent_dev_get_release',
+      'agent_dev_get_release_plan',
+      'agent_dev_get_runtime',
       'agent_dev_list_projects',
       'agent_dev_request_release',
       'agent_dev_revise_blueprint',
+      'agent_dev_submit_acceptance',
     ]);
-    expect(names.some(name => name.includes('approve') || name.includes('accept'))).toBe(false);
+    // Acceptance submissions are exposed by design; the approval acts never are.
+    expect(names.some(name => name.includes('approve'))).toBe(false);
 
     // Clients decide whether to ask a human before running a tool from these hints alone.
     expect(tools.every(tool => tool.annotations !== undefined)).toBe(true);
     const byName = new Map(tools.map(tool => [tool.name, tool]));
     expect(byName.get('agent_dev_list_projects')?.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: false });
     expect(byName.get('agent_dev_dry_run')?.annotations).toMatchObject({ readOnlyHint: true });
+    expect(byName.get('agent_dev_get_connectors')?.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: true });
+    expect(byName.get('agent_dev_check_update')?.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: true });
     expect(byName.get('agent_dev_request_release')?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(byName.get('agent_dev_create_feature_task')?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(byName.get('agent_dev_submit_acceptance')?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
 
     expect(client.getServerVersion()).toMatchObject({ name: 'agent-dev', version: packageJson.version });
   });
@@ -116,6 +133,31 @@ describe('agent-dev MCP bridge', () => {
     expect(featureTask.isError).toBeFalsy();
     expect(JSON.parse(textOf(featureTask))).toMatchObject({ task: null });
 
+    const apply = await client.callTool({ name: 'agent_dev_get_apply', arguments: { projectId: project.id } });
+    expect(apply.isError).toBeFalsy();
+    expect(JSON.parse(textOf(apply))).toMatchObject({ run: null });
+
+    const quality = await client.callTool({ name: 'agent_dev_get_quality_gate', arguments: { projectId: project.id } });
+    expect(quality.isError).toBeFalsy();
+    expect(JSON.parse(textOf(quality))).toMatchObject({ result: null });
+
+    const acceptance = await client.callTool({ name: 'agent_dev_get_acceptance', arguments: { projectId: project.id } });
+    expect(acceptance.isError).toBeFalsy();
+    expect(JSON.parse(textOf(acceptance))).toMatchObject({ acceptance: null });
+
+    const report = await client.callTool({ name: 'agent_dev_get_delivery_report', arguments: { projectId: project.id } });
+    expect(report.isError).toBeFalsy();
+    expect(textOf(report)).toContain('MCP Probe Final Delivery Report');
+
+    const baselinePlan = await client.callTool({ name: 'agent_dev_get_baseline_plan', arguments: { projectId: project.id } });
+    expect(baselinePlan.isError).toBeFalsy();
+    expect(JSON.parse(textOf(baselinePlan))).toMatchObject({ plan: { noExternalChanges: true } });
+
+    const credentialsMeta = await client.callTool({ name: 'agent_dev_get_credentials_meta', arguments: {} });
+    expect(credentialsMeta.isError).toBeFalsy();
+    const meta = JSON.parse(textOf(credentialsMeta)) as { meta: { keys: string[] } };
+    expect(Array.isArray(meta.meta.keys)).toBe(true);
+
     const unknown = await client.callTool({ name: 'agent_dev_get_project', arguments: { projectId: 'missing' } });
     expect(unknown.isError).toBe(true);
     expect(textOf(unknown)).toContain('HTTP 404');
@@ -133,6 +175,22 @@ describe('agent-dev MCP bridge', () => {
     const blockedText = textOf(blocked);
     expect(blockedText).toContain('HTTP 409');
     expect(blockedText).toContain('Studio');
+
+    // The same gates protect the two progress tools: a feature task needs a completed Apply, and
+    // acceptance needs an approved feature task. The bridge must refuse both, not forge them.
+    const taskBlocked = await client.callTool({
+      name: 'agent_dev_create_feature_task',
+      arguments: { projectId: project.id, title: 'Add receipt list', objective: 'Show saved receipts to the user.', acceptanceCriteria: ['The list renders saved receipts.'] },
+    });
+    expect(taskBlocked.isError).toBe(true);
+    expect(textOf(taskBlocked)).toContain('HTTP 409');
+
+    const acceptanceBlocked = await client.callTool({
+      name: 'agent_dev_submit_acceptance',
+      arguments: { projectId: project.id, summary: 'Everything works as specified.', criteriaConfirmed: true },
+    });
+    expect(acceptanceBlocked.isError).toBe(true);
+    expect(textOf(acceptanceBlocked)).toContain('HTTP 409');
   });
 
   it('explains how to reach the daemon when it is not running', async () => {
