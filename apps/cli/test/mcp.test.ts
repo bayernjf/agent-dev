@@ -7,6 +7,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { AgentDevStore } from '@agent-dev/storage';
 import { createDaemonApp } from '@agent-dev/daemon';
 import { afterEach, describe, expect, it } from 'vitest';
+import packageJson from '../package.json';
 import { createAgentDevMcpServer } from '../src/mcp.js';
 
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -65,6 +66,15 @@ describe('agent-dev MCP bridge', () => {
       'agent_dev_revise_blueprint',
     ]);
     expect(names.some(name => name.includes('approve') || name.includes('accept'))).toBe(false);
+
+    // Clients decide whether to ask a human before running a tool from these hints alone.
+    expect(tools.every(tool => tool.annotations !== undefined)).toBe(true);
+    const byName = new Map(tools.map(tool => [tool.name, tool]));
+    expect(byName.get('agent_dev_list_projects')?.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: false });
+    expect(byName.get('agent_dev_dry_run')?.annotations).toMatchObject({ readOnlyHint: true });
+    expect(byName.get('agent_dev_request_release')?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+
+    expect(client.getServerVersion()).toMatchObject({ name: 'agent-dev', version: packageJson.version });
   });
 
   it('creates and reads a project through the daemon', async () => {
@@ -86,6 +96,21 @@ describe('agent-dev MCP bridge', () => {
     const dryRun = await client.callTool({ name: 'agent_dev_dry_run', arguments: { projectId: project.id } });
     expect(dryRun.isError).toBeFalsy();
     expect(JSON.parse(textOf(dryRun))).toMatchObject({ plan: { noExternalChanges: true } });
+    type Manifest = { plan: { artifactCount: number; artifacts: { id: string; path: string; bytes: number; content?: string }[] } };
+    const manifest = JSON.parse(textOf(dryRun)) as Manifest;
+    expect(manifest.plan.artifactCount).toBeGreaterThan(0);
+    expect(manifest.plan.artifacts.every(artifact => artifact.content === undefined)).toBe(true);
+
+    const artifactId = manifest.plan.artifacts[0].id;
+    const fullArtifact = await client.callTool({ name: 'agent_dev_dry_run', arguments: { projectId: project.id, artifactId } });
+    expect(fullArtifact.isError).toBeFalsy();
+    const content = JSON.parse(textOf(fullArtifact)) as { plan: { artifact: { id: string; path: string; content: string } } };
+    expect(content.plan.artifact.id).toBe(artifactId);
+    expect(content.plan.artifact.content.length).toBeGreaterThan(0);
+
+    const missingArtifact = await client.callTool({ name: 'agent_dev_dry_run', arguments: { projectId: project.id, artifactId: 'no-such-file' } });
+    expect(missingArtifact.isError).toBe(true);
+    expect(textOf(missingArtifact)).toContain('no-such-file');
 
     const featureTask = await client.callTool({ name: 'agent_dev_get_feature_task', arguments: { projectId: project.id } });
     expect(featureTask.isError).toBeFalsy();
@@ -124,5 +149,26 @@ describe('agent-dev MCP bridge', () => {
     const result = await client.callTool({ name: 'agent_dev_doctor', arguments: {} });
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('agent-dev start');
+  });
+
+  it('gives up on a daemon that accepts the request but never answers', async () => {
+    // A hung process looks exactly like a slow one to fetch, so the bridge owns the deadline.
+    const fetchImpl = ((_input: unknown, init?: { signal?: AbortSignal }) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      })) as unknown as typeof fetch;
+    const mcpServer = createAgentDevMcpServer({ daemonBaseUrl: 'http://127.0.0.1:3737', fetchImpl, timeoutMs: 50 });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await mcpServer.connect(serverTransport);
+    const client = new Client({ name: 'vitest', version: '0.0.0' });
+    await client.connect(clientTransport);
+    cleanups.push(async () => {
+      await client.close();
+      await mcpServer.close();
+    });
+
+    const result = await client.callTool({ name: 'agent_dev_doctor', arguments: {} });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('did not answer within 50 ms');
   });
 });
