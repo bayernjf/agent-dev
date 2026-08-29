@@ -803,4 +803,109 @@ describe('daemon API', () => {
     expect(store.getProject(project.id)?.state).toBe('PR_OPEN');
     await store.close();
   }, 30_000);
+
+  describe('agent profile API', () => {
+    async function openProfileStore() {
+      const directory = await mkdtemp(join(tmpdir(), 'agent-dev-profiles-'));
+      directories.push(directory);
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { app } = createDaemonApp(store, undefined, {});
+      return { store, app };
+    }
+
+    const json = (body: unknown) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+    it('creates, lists, reads, updates and deletes a profile', async () => {
+      const { store, app } = await openProfileStore();
+      try {
+        const created = await app.request('http://localhost/api/runtime/profiles', json({
+          name: 'Frontend Expert', baseAgentId: 'codex',
+          overrides: { temperature: 0.3, systemPrompt: 'You are a React expert.' },
+        }));
+        expect(created.status).toBe(201);
+        const { profile } = await created.json() as { profile: { id: string; baseAgentId: string; overrides: { temperature: number; systemPrompt: string } } };
+        expect(profile.id).toBe('frontend-expert');
+        expect(profile.baseAgentId).toBe('codex');
+
+        const list = await app.request('http://localhost/api/runtime/profiles');
+        expect(list.status).toBe(200);
+        await expect(list.json()).resolves.toMatchObject({ profiles: [expect.objectContaining({ id: 'frontend-expert' })] });
+
+        const get = await app.request('http://localhost/api/runtime/profiles/frontend-expert');
+        expect(get.status).toBe(200);
+        await expect(get.json()).resolves.toMatchObject({ profile: expect.objectContaining({ name: 'Frontend Expert' }) });
+
+        const updated = await app.request('http://localhost/api/runtime/profiles/frontend-expert', {
+          ...json({ name: 'Frontend Expert v2' }), method: 'PUT',
+        });
+        expect(updated.status).toBe(200);
+        await expect(updated.json()).resolves.toMatchObject({ profile: expect.objectContaining({ name: 'Frontend Expert v2' }) });
+
+        const deleted = await app.request('http://localhost/api/runtime/profiles/frontend-expert', { method: 'DELETE' });
+        expect(deleted.status).toBe(200);
+        await expect(deleted.json()).resolves.toEqual({ deleted: true });
+
+        expect((await app.request('http://localhost/api/runtime/profiles/frontend-expert')).status).toBe(404);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('assigns a unique id when a slug is already taken', async () => {
+      const { store, app } = await openProfileStore();
+      try {
+        const first = await app.request('http://localhost/api/runtime/profiles', json({ name: 'Codex Expert', baseAgentId: 'codex' }));
+        expect(first.status).toBe(201);
+        const second = await app.request('http://localhost/api/runtime/profiles', json({ name: 'Codex Expert', baseAgentId: 'codex' }));
+        expect(second.status).toBe(201);
+        await expect(second.json()).resolves.toMatchObject({ profile: expect.objectContaining({ id: 'codex-expert-2' }) });
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('rejects a profile whose base agent is not verified', async () => {
+      const { store, app } = await openProfileStore();
+      try {
+        const res = await app.request('http://localhost/api/runtime/profiles', json({ name: 'Claude Variant', baseAgentId: 'claude-code' }));
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining('not verified') });
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('rejects unsafe env keys during creation', async () => {
+      const { store, app } = await openProfileStore();
+      try {
+        const res = await app.request('http://localhost/api/runtime/profiles', json({ name: 'Unsafe', baseAgentId: 'codex', overrides: { env: { DATABASE_URL: 'postgres://x' } } }));
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toMatchObject({ details: expect.arrayContaining([expect.stringContaining('Unsafe environment variable keys')]) });
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('rejects invalid create input', async () => {
+      const { store, app } = await openProfileStore();
+      try {
+        const res = await app.request('http://localhost/api/runtime/profiles', json({ name: '', baseAgentId: 'codex' }));
+        expect(res.status).toBe(400);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('returns 404 for reads, updates and deletes of a missing profile', async () => {
+      const { store, app } = await openProfileStore();
+      try {
+        expect((await app.request('http://localhost/api/runtime/profiles/nope')).status).toBe(404);
+        const update = await app.request('http://localhost/api/runtime/profiles/nope', { ...json({ name: 'X' }), method: 'PUT' });
+        expect(update.status).toBe(404);
+        expect((await app.request('http://localhost/api/runtime/profiles/nope', { method: 'DELETE' })).status).toBe(404);
+      } finally {
+        await store.close();
+      }
+    });
+  });
 });
