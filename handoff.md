@@ -1,10 +1,17 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-27
-> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3 已完成，P0-1（Claude Runtime 验证）为唯一剩余 P0
+> 更新时间：2026-08-28
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；同日新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **v0.2 P2-4 闭环 + agent-dev MCP + 类型重命名与主题收尾（2026-08-28）**：
+  - **P2-4 无托管部署类型的交付状态机闭环（提交 `1436742`）**：08-27 项目 4 暴露的缺口正式用正常 API 关闭——状态机保持类型无关，`PR_OPEN` 增加 `REQUEST_RELEASE` 转移；daemon 校验只有无托管部署目标的蓝图可走捷径（托管产品在 PR_OPEN 仍被 preview gate 拒绝），此前 `preview/deploy` 与 `release/request`/`release/approve` 对 api-tool/landing-page 会因 `noHostedDeploymentReason` 返回 409。此类产品的 release 走 manual distribution：记录 single confirmation step（确认 generated/DISTRIBUTION.md 的人工分发步骤），evidence `distribution: "manual"`（无 URL、无 deploy 调用），请求/批准分离与署名批准人等人闸门保持原样。新增 127 行测试。至此无需再手动 `store.advanceDelivery` 推进。
+  - **agent-dev MCP（提交 `f5bb602`）**：`apps/cli/src/mcp.ts` 新增 stdio bridge 到 daemon API，外部 Agent 可经 MCP 驱动 Agent-Dev 而不绕过其闸门。只暴露只读与进度工具；daemon 确认字面量在 bridge 服务端持有，任何客户端都无法伪造；批准/验收动作保持 Studio 人工；gate 冲突返回引导到 Studio 而非静默失败；凭据与部署端点不通过 MCP 上抛。133 行实现 + 128 行测试。
+  - **web-saas → web-app 产品类型重命名 + 存量迁移（提交 `af9f83a` / `e99e912`）**：「Web SaaS」暗示的是商业模式而非交付表面，改名为「Web app」（Web 端），与 desktop/mobile 命名一致。enum id 改动覆盖 blueprint 生成、质量检查、provider 规划、Studio 文案与失败消息；新增 storage 迁移重写已持久化的 projects 与 blueprint revisions，保证 strict zod parsing 在存量库上继续工作（迁移测试 50 行）。同步更新 `docs/blueprint-spec.md`、`docs/multi-product-delivery-plan.md` 与 handoff 的引用，dated 规划文档保留 web-saas 原措辞作为历史记录。
+  - **Studio 主题收尾（提交 `4c13d55` / `f425f33`）**：原生 input/select/textarea 此前没有共享样式、以浏览器默认渲染，且若干内联样式引用了设计系统里不存在的 token。现统一从 token 调色板取样式、select 使用 token 色 chevron，替换未定义的 `--error`/`--bg-secondary`/`--text-secondary` 引用；agent 徽章、diff 卡片、导入结果条、retryable 失败 pill 的硬编码 hex 颜色接入既有 color-mix pill 模式（暗色主题下生效），删除三个指向系统外颜色的死 `var()` 兜底。
+  - **Analytics consent banner 默认隐藏（提交 `f40e1d4`）**：banner 内联样式带两条 `display` 声明，尾部 `display:flex` 生效导致每次加载都渲染（即使用户已接受或拒绝）。删除第二条声明，banner 初始隐藏、仅 consent 脚本可显示；新增生成 index.html 的回归测试。
 
 - **v0.2 四项功能完成 + 项目 4 端到端交付（2026-08-27）**：
   - **P0-3 失败分类完善**：新增 7 种失败分类模式（生产分支不匹配、工作区需恢复、schema 迁移、云资源不匹配、外部 symlink 拦截、依赖安装失败、Node 版本），修复 agent CLI 模式双向匹配，新增 24 个单元测试，全量 155 测试通过。
@@ -292,6 +299,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 | Analytics 默认 | 待确认 | 默认关闭，隐私确认后再接入 |
 | GitHub Ruleset | 待确认 | 支持则自动计划；权限/套餐不足时生成 Manual Action |
 | Blueprint 开源 | 待确认 | v0.1 稳定后再发布 v1alpha1 |
+| Local Claude Runtime 验证 | 已推迟（2026-08-29） | v0.2 P0-1 暂缓；`claude-code` adapter 保持 `candidate`，不进 verified 列表。当前 Runtime 主力为 OpenCode 2.0 + `nemotron-3-ultra-free`。恢复触发条件：出现主力用 Claude 的 Pilot 用户 / 外部用户明确要求 / 免费模型额度或可用性出问题 |
 
 ## 10. 交接完成定义
 
