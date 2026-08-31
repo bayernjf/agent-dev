@@ -1,10 +1,17 @@
 # Agent-Dev 项目交接
 
 > 更新时间：2026-08-31
-> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**（S1 绑定回环、§6.1-2 本机 token 鉴权、§6.1-3 URL scheme 白名单、§6.1-4 移除自更新端点）、**P1 状态机 §6.2 全部 3 项**（advanceDelivery 事务化+非法事件显式抛错+重放幂等、runtime 路由 zod schema、persist await）、**P2 §6.3 清理全部 6 项**（secret-backend 移除路由保留库、install.sh 双入口消除、死代码清理、确认字面量收敛 `@agent-dev/policy` CONFIRMATIONS 单一事实源、文档版本对齐+版本号升 0.2.0、`rm -rf` 改 fs/promises）与 **P3 §6.4 Windows 兼容全部 3 项**（npm/npx shell 处理、信号断言、symlink skip，Windows 测试首次全绿）已于同日完成，全仓 211 例测试全绿，剩余整改仅 §6.5 P4 测试补齐，方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**、**P1 状态机 §6.2 全部 3 项**、**P2 §6.3 清理全部 6 项**与 **P3 §6.4 Windows 兼容全部 3 项**已于同日完成，**P4 §6.5 测试补齐全部 4 项已于同日完成**（storage pipeline resume/isStepApproved 4 例并修复 resume 未落盘缺陷、MCP 桥 20 工具全覆盖 +2 例、Studio 渲染冒烟 3 例 + vitest include/子路径 alias 收敛），**审计整改全部完成，全仓 220 例测试全绿**，方案与验收见 [审计文档](docs/audit-2026-08-31.md)
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **审计整改 §6.5：P4 测试补齐全部 4 项（2026-08-31）**：审计整改全部完成。
+  - **§6.5-1 storage pipeline 执行测试**：新增「feature task pipeline execution」describe（`packages/storage/test/index.test.ts`）4 例——requiresApproval 步骤暂停且不执行（证明 `isStepApproved` 未批准时拦截）、resume 清除审批门并跑到 completed（断言项目状态推进 VERIFYING）、非 paused 状态 resume 抛错、步骤失败且 continueOnFailure 未设时 pipeline 失败且后续步骤不执行。**测试驱动修复真实缺陷**：`resumeFeatureTaskPipeline` 清除内存 step 的 `requiresApproval` 后未落盘，`executeFeatureTaskPipeline` 重读磁盘仍见审批门导致 resume 无法恢复——现已先 `saveFeatureTask` 落盘再执行。
+  - **§6.5-2 MCP 桥 20 工具全覆盖**：新增 2 例覆盖此前仅注解检查的 5 个工具（`get_runtime`、`get_connectors`[注入 stub dependencies 避免真实 CLI 探测]、`get_release`、`get_release_plan`[409 门禁透传]、`revise_blueprint`[revision 2 + 404 透传]），20 工具全部有行为断言。
+  - **§6.5-3 advanceDelivery 回归**：非法事件被拒 + 重放幂等此前已有，本轮完成其余项确认事务保障。
+  - **§6.5-4 Studio 渲染冒烟**：新增 `apps/studio/test/smoke.test.tsx` 3 例——`renderToString` 渲染真实 `App`（包 ThemeProvider+I18nProvider），断言品牌/Projects/Loading/表头/New Blueprint；内存 `localStorage` stub 满足无 DOM 初始渲染。同步 vitest include 加 `.tsx`，补 `@agent-dev/policy/confirmations`、`@agent-dev/agent-runtime/failure-classification` 两个子路径 alias。
+  - **验证**：全仓 typecheck 0 错误；`npm test` 全量 **220/220 全绿**（新增 9 例）；`npm run build` 通过。
 
 - **审计整改 §6.3：清理与一致性剩余 5 项（2026-08-31）**：P2 除 secret-backend 外全部完成。
   - **§6.3-2 install.sh 双入口**：根目录遗留副本（153 行、无任何文档引用）删除，唯一入口收敛为 `scripts/install-macos.sh`。
@@ -337,7 +344,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
     - **P1 状态机与校验**：`advanceDelivery` 事务化 + 非法事件显式抛错（`packages/storage/src/index.ts:1555-1573`，即「最近进度」生产交付路径条目记录的未验证边界）；4 条 runtime 门禁路由补 zod（`app.ts:819/850/863/876`）。
     - **P2 清理与一致性（已完成，见「最近进度」§6.3 条目）**：secret-backend 移除路由保留库（用户拍板）；根目录遗留 `install.sh` 已删除；确认字面量已收敛到 `@agent-dev/policy` 的 `CONFIRMATIONS` 单一事实源；ReleaseComposer 步数表述已修正（9 步）、`/api/health` 版本号已改为从 package.json 读取；死代码已清理、`rm -rf` 已改 fs/promises；版本号已升 `0.2.0`（用户拍板）。
     - **P3 Windows 兼容**：`npm`/`npx` 调用处理 `.cmd`（`storage/src/index.ts:777`、`:844`、`agent-runtime/src/doctor.ts`）；信号与符号链接用例按平台适配。
-    - **P4 测试补齐**：storage pipeline 执行、MCP 20 工具、`advanceDelivery` 回归、Studio 冒烟。
+    - **P4 测试补齐（已完成，见「最近进度」§6.5 条目）**：storage pipeline 执行（含 resume 未落盘缺陷修复）、MCP 20 工具全覆盖、`advanceDelivery` 回归、Studio 渲染冒烟。
     - 用户决策均已落定：secret-backend「移除路由、保留库」（2026-08-31）；版本号升 `0.2.0`（2026-08-31）。
 
 ## 9. 用户决策
