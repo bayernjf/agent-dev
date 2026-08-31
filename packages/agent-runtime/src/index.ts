@@ -31,7 +31,6 @@ export {
   resolvePipelinePrompt,
   getNextPipelineStep,
   isPipelineComplete,
-  isPipelineBlocked,
 } from './pipeline.js';
 export {
   type FailureCategory,
@@ -103,22 +102,6 @@ export function probeCodexRuntime(): CodexRuntimeProbe {
     version: output ? output.split('\n')[0] : null,
     executionVerified: false,
     reason: result.error ? 'Codex CLI is not available on PATH.' : 'CLI presence is detected, but authenticated write execution is not verified.',
-  };
-}
-
-export function buildCodexExecutionPlan(task: ApprovedTask, workspacePath: string, options: { execute?: boolean } = {}): CodexExecutionPlan {
-  const execute = options.execute === true;
-  const prompt = buildTaskPrompt(task);
-  return {
-    mode: execute ? 'execute' : 'dry-run',
-    taskId: task.id,
-    workspacePath,
-    command: ['codex', 'exec', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--cd', workspacePath, prompt],
-    forbiddenPaths: ['.env', '.env.*', '.git/config', '~/.codex', '~/.ssh', 'production secrets'],
-    acceptanceCriteria: task.acceptanceCriteria,
-    noExternalChanges: !execute,
-    executionAllowed: execute,
-    baseAgentId: 'codex',
   };
 }
 

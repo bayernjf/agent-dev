@@ -138,13 +138,3 @@ export function isPipelineComplete(steps: PipelineStep[], results: PipelineStepR
   });
 }
 
-/** Check if the pipeline has any failed step that blocks continuation. */
-export function isPipelineBlocked(steps: PipelineStep[], results: PipelineStepResult[]): boolean {
-  return results.some(r => r.status === 'failed') &&
-    !steps.every(step => {
-      const result = results.find(r => r.stepId === step.id);
-      if (!result) return false;
-      if (result.status === 'failed') return step.continueOnFailure === true;
-      return result.status === 'completed' || result.status === 'skipped';
-    });
-}
