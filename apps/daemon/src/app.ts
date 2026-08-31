@@ -6,7 +6,7 @@ import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { baselineProvidersFor, blueprintAnswersSchema, createBaselinePlan, createBlueprint, createDryRunPlan, getBlueprintDecisions, type ProductBlueprint } from '@agent-dev/blueprint';
 import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
-import { runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
+import { CONFIRMATIONS, runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore, type ReleaseStep } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, runDoctor, type CustomAgentInput, type AgentProfile, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
@@ -47,34 +47,34 @@ const reviseBlueprintSchema = z.object({
 
 const approveBaselineSchema = z.object({
   blueprintRevision: z.number().int().positive(),
-  confirmation: z.literal('APPROVE_BASELINE'),
+  confirmation: z.literal(CONFIRMATIONS.APPROVE_BASELINE),
   approvedBy: z.string().trim().min(1).max(120),
 });
 
 const applyBaselineSchema = z.object({
   blueprintRevision: z.number().int().positive(),
-  confirmation: z.literal('APPLY_BASELINE'),
+  confirmation: z.literal(CONFIRMATIONS.APPLY_BASELINE),
   noExternalChanges: z.boolean().optional(),
   /** Optional: HTTPS URL of an existing Git repository to import instead of generating from scratch. */
   importRepositoryUrl: httpUrlSchema('importRepositoryUrl').optional(),
 });
 
 const retryApplySchema = z.object({
-  confirmation: z.literal('RETRY_APPLY'),
+  confirmation: z.literal(CONFIRMATIONS.RETRY_APPLY),
 });
 
 const recoverApplySchema = z.object({
-  confirmation: z.literal('RECOVER_WORKSPACE'),
+  confirmation: z.literal(CONFIRMATIONS.RECOVER_WORKSPACE),
 });
 
 const qualityGateSchema = z.object({
   blueprintRevision: z.number().int().positive(),
-  confirmation: z.literal('RUN_QUALITY_GATE'),
+  confirmation: z.literal(CONFIRMATIONS.RUN_QUALITY_GATE),
 });
 
 const dependencyInstallSchema = z.object({
   blueprintRevision: z.number().int().positive(),
-  confirmation: z.literal('INSTALL_DEPENDENCIES'),
+  confirmation: z.literal(CONFIRMATIONS.INSTALL_DEPENDENCIES),
 });
 
 const featureTaskSchema = z.object({
@@ -97,7 +97,7 @@ const featureTaskSchema = z.object({
 
 const featureTaskApprovalSchema = z.object({
   blueprintRevision: z.number().int().positive(),
-  confirmation: z.literal('APPROVE_FEATURE_TASK'),
+  confirmation: z.literal(CONFIRMATIONS.APPROVE_FEATURE_TASK),
   approvedBy: z.string().trim().min(1).max(120),
 });
 
@@ -107,28 +107,28 @@ const acceptanceSchema = z.object({
 });
 
 const acceptanceApprovalSchema = z.object({
-  confirmation: z.literal('APPROVE_DELIVERY'),
+  confirmation: z.literal(CONFIRMATIONS.APPROVE_DELIVERY),
   approvedBy: z.string().trim().min(1).max(120),
 });
 
 // Runtime routes historically parsed bodies by hand; these schemas match that contract while
 // constraining agentId the way every other identifier in the API is constrained (audit §6.2-2).
 const runtimePrepareSchema = z.object({
-  confirmation: z.literal('PREPARE_RUNTIME_RUN'),
+  confirmation: z.literal(CONFIRMATIONS.PREPARE_RUNTIME_RUN),
   agentId: z.string().trim().min(1).max(120).optional(),
 });
-const runtimeExecuteSchema = z.object({ confirmation: z.literal('EXECUTE_RUNTIME_RUN') });
-const runtimeRetrySchema = z.object({ confirmation: z.literal('RETRY_RUNTIME_RUN') });
-const runtimeCancelSchema = z.object({ confirmation: z.literal('CANCEL_RUNTIME_RUN') });
+const runtimeExecuteSchema = z.object({ confirmation: z.literal(CONFIRMATIONS.EXECUTE_RUNTIME_RUN) });
+const runtimeRetrySchema = z.object({ confirmation: z.literal(CONFIRMATIONS.RETRY_RUNTIME_RUN) });
+const runtimeCancelSchema = z.object({ confirmation: z.literal(CONFIRMATIONS.CANCEL_RUNTIME_RUN) });
 
 const prEvidenceSchema = z.object({
-  confirmation: z.literal('RECORD_PR_EVIDENCE'),
+  confirmation: z.literal(CONFIRMATIONS.RECORD_PR_EVIDENCE),
   url: httpUrlSchema('url'),
   checks: z.array(z.string().trim().min(1).max(300)).min(1).max(20),
 });
 
 const previewEvidenceSchema = z.object({
-  confirmation: z.literal('RECORD_PREVIEW_EVIDENCE'),
+  confirmation: z.literal(CONFIRMATIONS.RECORD_PREVIEW_EVIDENCE),
   apiUrl: httpUrlSchema('apiUrl'),
   webUrl: httpUrlSchema('webUrl'),
   smokeTest: z.string().trim().min(10).max(2000),
@@ -310,7 +310,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const projectId = context.req.param('projectId');
     const parsed = z.object({
       blueprint: z.record(z.unknown()),
-      confirmation: z.literal('REVISE_BLUEPRINT'),
+      confirmation: z.literal(CONFIRMATIONS.REVISE_BLUEPRINT),
     }).safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Revise requires a blueprint object and confirmation REVISE_BLUEPRINT.' }, 400);
     const project = store.getProject(projectId);
@@ -831,7 +831,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.post('/api/projects/:projectId/delivery/pull-request', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
-    const parsed = z.object({ confirmation: z.literal('OPEN_PULL_REQUEST') }).safeParse(await context.req.json().catch(() => null));
+    const parsed = z.object({ confirmation: z.literal(CONFIRMATIONS.OPEN_PULL_REQUEST) }).safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Opening a pull request requires confirmation OPEN_PULL_REQUEST.' }, 400);
     const run = store.getLatestApplyRun(project.id, project.blueprint.metadata.revision);
     if (!run || run.status !== 'completed') return context.json({ error: 'A completed Local Apply run is required before opening a pull request.' }, 409);
@@ -973,7 +973,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.post('/api/projects/:projectId/provider-plan/apply', async context => {
     const projectId = context.req.param('projectId');
-    const parsed = z.object({ confirmation: z.literal('APPLY_FAKE_PROVIDERS') }).safeParse(await context.req.json().catch(() => null));
+    const parsed = z.object({ confirmation: z.literal(CONFIRMATIONS.APPLY_FAKE_PROVIDERS) }).safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Fake Provider Apply requires confirmation APPLY_FAKE_PROVIDERS.' }, 400);
     const project = store.getProject(projectId);
     if (!project) return context.json({ error: 'Project not found.' }, 404);
@@ -1008,7 +1008,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.post('/api/projects/:projectId/providers/apply', async context => {
     const projectId = context.req.param('projectId');
-    const parsed = z.object({ confirmation: z.literal('APPLY_REAL_PROVIDERS') }).safeParse(await context.req.json().catch(() => null));
+    const parsed = z.object({ confirmation: z.literal(CONFIRMATIONS.APPLY_REAL_PROVIDERS) }).safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Real Provider Apply requires confirmation APPLY_REAL_PROVIDERS.' }, 400);
     const project = store.getProject(projectId);
     if (!project) return context.json({ error: 'Project not found.' }, 404);
@@ -1067,7 +1067,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   };
 
   const previewSchema = z.object({
-    confirmation: z.literal('DEPLOY_PREVIEW'),
+    confirmation: z.literal(CONFIRMATIONS.DEPLOY_PREVIEW),
     previewBranch: z.string().trim().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Branch name must be lowercase alphanumeric with hyphens.').optional(),
     pullRequestNumber: z.number().int().positive().optional(),
   }).refine(data => Boolean(data.previewBranch || data.pullRequestNumber), 'A previewBranch or pullRequestNumber is required.');
@@ -1127,7 +1127,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.post('/api/projects/:projectId/preview/cleanup', async context => {
     const projectId = context.req.param('projectId');
-    const parsed = z.object({ confirmation: z.literal('CLEANUP_PREVIEW'), vercelProject: z.string().optional(), cloudflareProject: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
+    const parsed = z.object({ confirmation: z.literal(CONFIRMATIONS.CLEANUP_PREVIEW), vercelProject: z.string().optional(), cloudflareProject: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Preview cleanup requires confirmation CLEANUP_PREVIEW.' }, 400);
     const project = store.getProject(projectId);
     if (!project) return context.json({ error: 'Project not found.' }, 404);
@@ -1251,7 +1251,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.post('/api/projects/:projectId/release/request', async context => {
     const projectId = context.req.param('projectId');
-    const parsed = z.object({ confirmation: z.literal('REQUEST_RELEASE') }).safeParse(await context.req.json().catch(() => null));
+    const parsed = z.object({ confirmation: z.literal(CONFIRMATIONS.REQUEST_RELEASE) }).safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Requesting a release requires confirmation REQUEST_RELEASE.' }, 400);
     const resolved = await resolveReleaseContext(projectId);
     if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);
@@ -1274,7 +1274,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.post('/api/projects/:projectId/release/approve', async context => {
     const projectId = context.req.param('projectId');
     const parsed = z.object({
-      confirmation: z.literal('APPROVE_RELEASE'),
+      confirmation: z.literal(CONFIRMATIONS.APPROVE_RELEASE),
       approvedBy: z.string().trim().min(1).max(120),
       summary: z.string().trim().min(1).max(2000),
     }).safeParse(await context.req.json().catch(() => null));
@@ -1341,7 +1341,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.post('/api/projects/:projectId/release/retry', async context => {
     const projectId = context.req.param('projectId');
-    const parsed = z.object({ confirmation: z.literal('RETRY_RELEASE') }).safeParse(await context.req.json().catch(() => null));
+    const parsed = z.object({ confirmation: z.literal(CONFIRMATIONS.RETRY_RELEASE) }).safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Retrying a release requires confirmation RETRY_RELEASE.' }, 400);
     const resolved = await resolveReleaseContext(projectId);
     if ('error' in resolved) return context.json({ error: resolved.error }, resolved.statusCode);

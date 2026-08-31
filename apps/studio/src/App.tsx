@@ -5,7 +5,7 @@ import { useI18n, type KeyPath } from './i18n/i18n';
 import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
 import { baselineProvidersFor, getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
-import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
+import { CONFIRMATIONS, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { FailureDisplay } from './components/FailureDisplay';
 import type {
   Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyStep, ApplyRun, DependencyReadiness,
@@ -279,7 +279,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/release/request`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmation: 'REQUEST_RELEASE' }),
+        body: JSON.stringify({ confirmation: CONFIRMATIONS.REQUEST_RELEASE }),
       });
       const payload = await response.json() as { state?: string; error?: string };
       if (!response.ok) throw new Error(payload.error ?? t('errors.requestRelease'));
@@ -304,7 +304,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/release/approve`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmation: 'APPROVE_RELEASE', approvedBy, summary: releaseSummary.trim() }),
+        body: JSON.stringify({ confirmation: CONFIRMATIONS.APPROVE_RELEASE, approvedBy, summary: releaseSummary.trim() }),
       });
       const payload = await response.json() as { releaseRun?: ReleaseRun; evidence?: ReleaseEvidence; error?: string };
       if (payload.error) throw new Error(payload.error);
@@ -325,7 +325,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/release/retry`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmation: 'RETRY_RELEASE' }),
+        body: JSON.stringify({ confirmation: CONFIRMATIONS.RETRY_RELEASE }),
       });
       const payload = await response.json() as { releaseRun?: ReleaseRun; evidence?: ReleaseEvidence; error?: string };
       if (payload.error) throw new Error(payload.error);
@@ -347,7 +347,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/apply/recover`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmation: 'RECOVER_WORKSPACE' }),
+        body: JSON.stringify({ confirmation: CONFIRMATIONS.RECOVER_WORKSPACE }),
       });
       const payload = await response.json() as { run?: ApplyRun; abandoned?: { workspacePath: string }; error?: string };
       if (!payload.run) throw new Error(payload.error ?? t('errors.recoverWorkspace'));
@@ -464,7 +464,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/delivery/pull-request`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmation: 'OPEN_PULL_REQUEST' }),
+        body: JSON.stringify({ confirmation: CONFIRMATIONS.OPEN_PULL_REQUEST }),
       });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? t('errors.openPullRequest'));
@@ -482,7 +482,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/delivery/preview-evidence`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmation: 'RECORD_PREVIEW_EVIDENCE', apiUrl: previewApiUrl.trim(), webUrl: previewWebUrl.trim(), smokeTest: previewSmokeTest.trim() }),
+        body: JSON.stringify({ confirmation: CONFIRMATIONS.RECORD_PREVIEW_EVIDENCE, apiUrl: previewApiUrl.trim(), webUrl: previewWebUrl.trim(), smokeTest: previewSmokeTest.trim() }),
       });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? t('errors.recordPreviewEvidence'));
@@ -992,7 +992,7 @@ export function App() {
       const response = await fetch(`/api/projects/${selected.id}/baseline-plan/approve`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ blueprintRevision: baselinePlan.blueprintRevision, confirmation: 'APPROVE_BASELINE', approvedBy }),
+        body: JSON.stringify({ blueprintRevision: baselinePlan.blueprintRevision, confirmation: CONFIRMATIONS.APPROVE_BASELINE, approvedBy }),
       });
       const payload = await response.json() as { approval?: BaselineApproval; error?: string };
       if (!response.ok || !payload.approval) throw new Error(payload.error ?? t('errors.baselineApproverRequired'));
@@ -1015,7 +1015,7 @@ export function App() {
       const response = await fetch(`/api/projects/${selected.id}/apply`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ blueprintRevision: baselinePlan.blueprintRevision, confirmation: 'APPLY_BASELINE' }),
+        body: JSON.stringify({ blueprintRevision: baselinePlan.blueprintRevision, confirmation: CONFIRMATIONS.APPLY_BASELINE }),
       });
       const payload = await response.json() as { run?: ApplyRun; error?: string };
       if (!response.ok || !payload.run) throw new Error(payload.error ?? t('errors.loadApplyRun'));
@@ -1036,7 +1036,7 @@ export function App() {
       const response = await fetch(`/api/projects/${selected.id}/apply/retry`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmation: 'RETRY_APPLY' }),
+        body: JSON.stringify({ confirmation: CONFIRMATIONS.RETRY_APPLY }),
       });
       const payload = await response.json() as { run?: ApplyRun; error?: string };
       if (!response.ok || !payload.run) throw new Error(payload.error ?? t('errors.loadApplyRun'));
@@ -1056,7 +1056,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/quality-gate`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ blueprintRevision: applyRun.blueprintRevision, confirmation: 'RUN_QUALITY_GATE' }),
+        body: JSON.stringify({ blueprintRevision: applyRun.blueprintRevision, confirmation: CONFIRMATIONS.RUN_QUALITY_GATE }),
       });
       const payload = await response.json() as { result?: QualityGateResult; error?: string };
       if (!payload.result) throw new Error(payload.error ?? t('errors.loadQualityGate'));
@@ -1077,7 +1077,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/dependencies/install`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ blueprintRevision: applyRun.blueprintRevision, confirmation: 'INSTALL_DEPENDENCIES' }),
+        body: JSON.stringify({ blueprintRevision: applyRun.blueprintRevision, confirmation: CONFIRMATIONS.INSTALL_DEPENDENCIES }),
       });
       const payload = await response.json() as { result?: DependencyInstallResult; error?: string };
       if (!payload.result) throw new Error(payload.error ?? t('errors.installDependencies'));
@@ -1101,7 +1101,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/preview/deploy`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmation: 'DEPLOY_PREVIEW', previewBranch }),
+        body: JSON.stringify({ confirmation: CONFIRMATIONS.DEPLOY_PREVIEW, previewBranch }),
       });
       const payload = await response.json() as { result?: PreviewDeploymentResult; error?: string };
       if (!payload.result) throw new Error(payload.error ?? t('errors.deployPreview'));
@@ -1121,7 +1121,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/preview/cleanup`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmation: 'CLEANUP_PREVIEW', vercelProject: previewResult.cleanupRequired.vercel, cloudflareProject: previewResult.cleanupRequired.cloudflare }),
+        body: JSON.stringify({ confirmation: CONFIRMATIONS.CLEANUP_PREVIEW, vercelProject: previewResult.cleanupRequired.vercel, cloudflareProject: previewResult.cleanupRequired.cloudflare }),
       });
       const payload = await response.json() as { cleanup?: { vercel: boolean; cloudflare: boolean; errors: { provider: string; project: string; detail: string }[] }; error?: string };
       if (!payload.cleanup) throw new Error(payload.error ?? t('errors.cleanupPreview'));
@@ -1170,7 +1170,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/feature-task/approve`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ blueprintRevision: featureTask.blueprintRevision, confirmation: 'APPROVE_FEATURE_TASK', approvedBy }),
+        body: JSON.stringify({ blueprintRevision: featureTask.blueprintRevision, confirmation: CONFIRMATIONS.APPROVE_FEATURE_TASK, approvedBy }),
       });
       const payload = await response.json() as { task?: FeatureTask; error?: string };
       if (!response.ok || !payload.task) throw new Error(payload.error ?? t('errors.approveFeatureTask'));
@@ -1253,7 +1253,7 @@ export function App() {
     setPreparingRuntime(true);
     try {
       const response = await fetch(`/api/projects/${selected.id}/runtime/run`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'PREPARE_RUNTIME_RUN', agentId: selectedAgentId }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.PREPARE_RUNTIME_RUN, agentId: selectedAgentId }),
       });
       const payload = await response.json() as { run?: RuntimeRun; error?: string };
       if (!response.ok || !payload.run) throw new Error(payload.error ?? t('errors.prepareRuntime'));
@@ -1272,7 +1272,7 @@ export function App() {
     setPreparingRuntime(true);
     try {
       const response = await fetch(`/api/projects/${selected.id}/runtime/cancel`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'CANCEL_RUNTIME_RUN' }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.CANCEL_RUNTIME_RUN }),
       });
       const payload = await response.json() as { run?: RuntimeRun; error?: string };
       if (!response.ok || !payload.run) throw new Error(payload.error ?? t('errors.cancelRuntime'));
@@ -1292,7 +1292,7 @@ export function App() {
     setPreparingRuntime(true);
     try {
       const response = await fetch(`/api/projects/${selected.id}/runtime/execute`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'EXECUTE_RUNTIME_RUN' }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.EXECUTE_RUNTIME_RUN }),
       });
       const payload = await response.json() as { run?: RuntimeRun; error?: string };
       if (!payload.run) throw new Error(payload.error ?? t('errors.executeRuntime'));
@@ -1312,7 +1312,7 @@ export function App() {
     setPreparingRuntime(true);
     try {
       const response = await fetch(`/api/projects/${selected.id}/runtime/retry`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'RETRY_RUNTIME_RUN' }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.RETRY_RUNTIME_RUN }),
       });
       const payload = await response.json() as { run?: RuntimeRun; error?: string };
       if (!payload.run) throw new Error(payload.error ?? t('errors.retryRuntime'));
@@ -1357,7 +1357,7 @@ export function App() {
     setSubmittingAcceptance(true);
     try {
       const response = await fetch(`/api/projects/${selected.id}/acceptance/approve`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'APPROVE_DELIVERY', approvedBy }),
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.APPROVE_DELIVERY, approvedBy }),
       });
       const payload = await response.json() as { acceptance?: AcceptanceRecord; error?: string };
       if (!response.ok || !payload.acceptance) throw new Error(payload.error ?? t('errors.approveDelivery'));
@@ -1379,7 +1379,7 @@ export function App() {
     try {
       const response = await fetch(`/api/projects/${selected.id}/provider-plan/apply`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirmation: 'APPLY_FAKE_PROVIDERS' }),
+        body: JSON.stringify({ confirmation: CONFIRMATIONS.APPLY_FAKE_PROVIDERS }),
       });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? t('errors.applyFakeProviders'));
