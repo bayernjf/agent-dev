@@ -1,10 +1,17 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-08-29
-> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具
+> 更新时间：2026-08-31
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具；2026-08-31 完成全仓安全与质量审计，发现 4 条高危安全缺口（核心是 daemon 无鉴权监听所有网卡），整改方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **全仓安全与质量审计完成，4 条高危缺口与整改方案落档（2026-08-31）**：三路并行——客观检查、安全审计、代码质量审计；安全高危结论逐一复核过源码，全文见 [审计文档](docs/audit-2026-08-31.md)。
+  - **客观检查**：`npm run typecheck` 9 个工作区全部通过；`npm test` 199 例中 196 通过，3 个失败全是 Windows 平台问题（其中真问题：`execFileAsync('npm')` 未加 `shell: true` 导致质量门在 Windows 误判，`packages/storage/src/index.ts:777`）。
+  - **四条高危（未认证 + 网络可达，Pilot 阻断项）**：① daemon 无鉴权监听 `0.0.0.0`（`apps/daemon/src/index.ts:45` `serve()` 未传 hostname，全文件无 auth 中间件）；② `POST /api/update` 直接 `git pull` + `npm install` + `build` 的未认证 RCE（`app.ts:257-279`）；③ `importRepositoryUrl` 仅 `z.string().url()` 校验后原样传给 `git clone`，`ext::` 协议可执行任意命令（`app.ts:41`、`:608`）；④ `GET /api/secret-backend/:key` 无鉴权返回凭证明文及历史版本（`app.ts:330-341`），直接违反"凭证不出本机"设计。这四条使确认字面量、审批门等上层设计在网络层失效；另有中危：审批门不验身份、`/api/runtime/catalog` 可注册任意命令被探测执行、`javascript:` URL 存储型 XSS。
+  - **确认干净的面**：全库无硬编码密钥、无 eval/shell 拼接、无路径穿越/SSRF；所有子进程均为参数数组；MCP 21 工具边界（不暴露 approve 类、确认字面量服务端写死、凭证值不出本机）经逐工具核对与 `docs/mcp-bridge.md` 一致。
+  - **质量发现**：`advanceDelivery` 非法事件静默吞掉且两表写入非事务（`storage/src/index.ts:1555-1573`，即此前「生产交付路径」条目记录的未验证边界）；4 条 runtime 门禁路由绕过 zod（`app.ts:819/850/863/876`）；secret-backend 子系统孤儿化（约 615 行 + 9 条路由，无 Studio/MCP/测试消费者，零测试，且是高危 ④ 的载体）；根目录 `install.sh` 与 `scripts/install-macos.sh` 双入口、前者无文档引用；`handoff.md` 称 ReleaseComposer 7 步、实为 9 步。
+  - **整改方案**：五批（P0 网络边界 → P1 状态机与校验 → P2 清理一致性 → P3 Windows 兼容 → P4 测试补齐）含验收标准见审计文档 §6-7。**P0 完成前不把安装脚本分发给外部用户**。需用户决策：secret-backend 去留（默认建议移除）、版本号是否升 0.2.0。
 
 - **agent-dev MCP 桥完成化：可启动、省 token、扩至 21 工具（2026-08-29）**：08-28 首版（提交 `f5bb602`，9 工具）之后连走三步，当前工具面与设计见 [mcp-bridge.md](docs/mcp-bridge.md)。
   - **可启动入口 + token 经济 + 超时预算 + 工具注解（提交 `2051e29`）**：全仓 noEmit 无构建产物，新增 `apps/cli/bin/agent-dev.mjs` shebang launcher——注册 tsx 后直接执行 TS 源码（不打 bundle：storage 用 `require.resolve` 定位 sql.js 的 wasm，ESM 打包会断），外部客户端从此有了可用入口（`node .../agent-dev.mjs mcp`）。`dry_run` 默认只回清单 `{id,title,path,bytes}` + `artifactCount`，传 `artifactId` 才回单文件全文；实测四种产品类型 revision-1 计划 9.6–17.8 KB → 3.7–6.1 KB（省 60–75%）。全部工具带 MCP annotations（`readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`），客户端据此决定是否要求人工确认。daemon 调用预算 30 秒（`AbortSignal.timeout`），「不可达」与「接受请求但不响应」分成两种错误文案；服务器版本号从 `apps/cli/package.json` 读取，不再是占位。
@@ -256,6 +263,7 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 11. [通用开发 SOP](ai-agent-development-sop.md)
 12. [Agent Runtime Catalog](docs/agent-runtime-catalog.md)
 13. [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目与模板引擎暴露的 23 个缺陷、架构规则、免费模型选型、环境前提与遗留资源
+14. [安全与质量审计（2026-08-31）](docs/audit-2026-08-31.md)：全仓审计发现（含 4 条高危安全缺口）与五批整改方案
 
 市场判断和长期范围见 [市场分析](docs/market-analysis.md) 与 [路线图](docs/roadmap.md)。现有项目事实依据见 [项目组合复盘](portfolio-development-review.md)。
 
@@ -293,6 +301,13 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 8. 多产品形态六种类型全部生成真实模板（web-saas / landing-page / browser-extension / desktop 双 shell / mobile / api-tool），每一类的生成物都在本地真跑过自己的 quality gate，desktop-tauri 还真产出了未签名的 .app/.dmg。签名、公证与商店提交按设计仍是人工步骤，模板内附 `generated/DISTRIBUTION.md`。七种生成物的 quality gate 已按工作流声明的步骤在真实 Linux 容器里复现全绿（六类于 linux/amd64，与 `ubuntu-latest` 同架构；desktop-tauri 于 linux/arm64，`cargo check` 冷编译 10m30s），tauri 工作流的 apt 依赖清单也在 `ubuntu:24.04` 上验证过仍可安装。生成的工作流也已在**真实 GitHub Actions** 上执行：`bayernjf/receipt-test` 的 PR #2–#7 分别推入六类生成物，`quality` 全绿（landing-page 13s / browser-extension 23s / api-tool 42s / desktop-electron 46s / mobile 1m8s / desktop-tauri 3m45s）；web-saas 早在 2026-08-23 的 PR #1 就已绿。未做：Electron 窗口/Expo 模拟器/EAS Build 未真跑、部署平台可组合（M2）。tauri 工作流已加 `Swatinem/rust-cache@v2`（`workspaces: src-tauri`），同分支两次真跑量出 `quality` 96s → 6s、整个 job 3m12s → 1m23s。
 9. **非 web-saas 类型的端到端真实交付（已完成，2026-08-27）**。选 `api-tool`（项目 `397d8de0-06f6-4773-bf7b-9c26c13ff009`「MCP Word Tools」）因为它只需要 GitHub、不碰云端供给。两个阻塞缺陷（24 / 25）已修掉。全流程已跑通：Blueprint → 基线审批 → GitHub 仓库创建（`bayernjf/mcp-word-tools`）→ Apply → Feature Task（Add count_tokens tool）→ Runtime 执行 → Quality Gate（5/5 测试通过）→ Acceptance（approved by feng）→ PR #2 合并到 dev → dev 合并到 main → **DELIVERED**。
    - **已知设计缺口（已于 2026-08-28 闭环）**：对于 api-tool / landing-page 等无托管部署类型的项目，状态机曾无法通过正常 API 推进到 DELIVERED（当时通过直接调用 store 的 `advanceDelivery` 手动推进）。现在状态机保持类型无关、`PR_OPEN` 接受 `REQUEST_RELEASE`，daemon 只允许无托管部署目标的产品走该捷径（托管产品在 PR_OPEN 仍被 preview gate 拒绝），此类产品的发布审批记录 "manual distribution" 证据，人工双闸门不变。
+10. **审计整改（2026-08-31 审计产出，发现与验收标准以 [审计文档](docs/audit-2026-08-31.md) 为准）**。按五批执行，**P0 是外部 Pilot 阻断项——完成前不分发安装脚本**：
+    - **P0 网络边界**：`serve()` 绑回 `127.0.0.1`（`apps/daemon/src/index.ts:45`）；全部 `/api/*` 加本机随机 token 鉴权（daemon 启动生成、写入仅当前用户可读文件，Studio 与 MCP 桥携带）；`importRepositoryUrl` 与证据 URL 限制 `http(s)`（封 `ext::`/`file://`/`javascript:`）；移除或门控 `POST /api/update` 与 `GET /api/update/check`。
+    - **P1 状态机与校验**：`advanceDelivery` 事务化 + 非法事件显式抛错（`packages/storage/src/index.ts:1555-1573`，即「最近进度」生产交付路径条目记录的未验证边界）；4 条 runtime 门禁路由补 zod（`app.ts:819/850/863/876`）。
+    - **P2 清理与一致性**：决策 secret-backend 去留（默认建议移除——孤儿化、零测试且是凭证泄露通道载体）；删除根目录遗留 `install.sh`；确认字面量收敛单一事实源；修正 ReleaseComposer 步数表述、版本号改为从 package.json 读取。
+    - **P3 Windows 兼容**：`npm`/`npx` 调用处理 `.cmd`（`storage/src/index.ts:777`、`:844`、`agent-runtime/src/doctor.ts`）；信号与符号链接用例按平台适配。
+    - **P4 测试补齐**：storage pipeline 执行、MCP 21 工具、`advanceDelivery` 回归、Studio 冒烟。
+    - 需用户决策：secret-backend 去留、版本号是否升 `0.2.0`。
 
 ## 9. 用户决策
 
