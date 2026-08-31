@@ -5,7 +5,10 @@ import { useI18n, type KeyPath } from './i18n/i18n';
 import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
 import { baselineProvidersFor, getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
-import { CONFIRMATIONS, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
+// Import CONFIRMATIONS from the sub-path: the policy package's top-level entry re-exports
+// node-only modules (connectors) that break the Vite browser build. This file is a pure constant.
+import { CONFIRMATIONS } from '@agent-dev/policy/confirmations';
+import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
 import { FailureDisplay } from './components/FailureDisplay';
 import type {
   Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyStep, ApplyRun, DependencyReadiness,

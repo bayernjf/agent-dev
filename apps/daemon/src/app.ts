@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
@@ -196,6 +197,19 @@ function diffBlueprints(oldBp: Record<string, unknown>, newBp: Record<string, un
   }
   return changes;
 }
+
+// Read the daemon version from this package's package.json. Resolving from
+// import.meta.url keeps the path correct regardless of the daemon's cwd.
+const daemonVersion: string = (() => {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+    ) as { version?: string };
+    return manifest.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 export type DaemonAppOptions = {
   /** When set, every /api/* route except the explicit exempt list requires
