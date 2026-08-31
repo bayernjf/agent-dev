@@ -12,6 +12,8 @@ const appsDir = resolve(__dirname, 'apps');
 function collectWorkspaceAliases(): Array<{ find: string; replacement: string }> {
   const subpaths: Array<{ find: string; replacement: string }> = [
     { find: '@agent-dev/blueprint/workspace', replacement: join(packagesDir, 'blueprint', 'src', 'workspace.ts') },
+    { find: '@agent-dev/policy/confirmations', replacement: join(packagesDir, 'policy', 'src', 'confirmations.ts') },
+    { find: '@agent-dev/agent-runtime/failure-classification', replacement: join(packagesDir, 'agent-runtime', 'src', 'failure-classification.ts') },
   ];
   const packages: Array<{ find: string; replacement: string }> = [];
   for (const dir of [packagesDir, appsDir]) {
@@ -29,7 +31,7 @@ export default defineConfig({
     alias: collectWorkspaceAliases(),
   },
   test: {
-    include: ['packages/**/test/**/*.test.ts', 'apps/**/test/**/*.test.ts'],
+    include: ['packages/**/test/**/*.test.{ts,tsx}', 'apps/**/test/**/*.test.{ts,tsx}'],
     // Runtime catalog tests probe real local CLIs; parallel files can starve
     // synchronous child-process probes and create false timeout failures.
     fileParallelism: false,

@@ -49,6 +49,59 @@ async function startBridge(): Promise<Client> {
   return client;
 }
 
+// Connector preflight/account discovery spawn real CLIs by default, which is too slow and
+// environment-dependent for a unit test. Stub the two connector routes so the read tools' wiring
+// is still exercised end to end without probing the machine.
+async function startBridgeWithStubbedConnectors(): Promise<Client> {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-dev-mcp-'));
+  const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+  const { app } = createDaemonApp(store, undefined, {
+    runPreflight: async () => ({
+      checkedAt: new Date().toISOString(),
+      localOnly: true as const,
+      readyForAccountDiscovery: true,
+      connectors: [{
+        id: 'github',
+        title: 'GitHub',
+        command: 'gh',
+        status: 'available',
+        version: '1.0.0',
+        detail: 'fixture',
+        nextAction: 'none',
+      }],
+    }),
+    runAccountDiscovery: async () => ({
+      checkedAt: new Date().toISOString(),
+      readOnly: true as const,
+      accounts: [{
+        id: 'github',
+        title: 'GitHub',
+        status: 'authenticated',
+        identity: 'fixture',
+        detail: 'fixture',
+        nextAction: 'none',
+      }],
+    }),
+  });
+  const httpServer = serve({ fetch: app.fetch, port: 0 });
+  await new Promise<void>(resolve => httpServer.once('listening', resolve));
+  const address = httpServer.address();
+  if (!address || typeof address === 'string') throw new Error('The test daemon did not bind a port.');
+  const mcpServer = createAgentDevMcpServer({ daemonBaseUrl: `http://127.0.0.1:${address.port}` });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await mcpServer.connect(serverTransport);
+  const client = new Client({ name: 'vitest', version: '0.0.0' });
+  await client.connect(clientTransport);
+  cleanups.push(async () => {
+    await client.close();
+    await mcpServer.close();
+    await new Promise<void>((resolve, reject) => httpServer.close(error => (error ? reject(error) : resolve())));
+    await store.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  return client;
+}
+
 describe('agent-dev MCP bridge', () => {
   it('exposes read and progress tools only, never the human gates', async () => {
     const client = await startBridge();
@@ -226,5 +279,64 @@ describe('agent-dev MCP bridge', () => {
     const result = await client.callTool({ name: 'agent_dev_doctor', arguments: {} });
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('did not answer within 50 ms');
+  });
+
+  it('covers the remaining read tools: runtime, connectors, release, release plan', async () => {
+    const client = await startBridgeWithStubbedConnectors();
+    const created = await client.callTool({ name: 'agent_dev_create_project', arguments: { name: 'Read Probe', answers: { mode: 'beginner' } } });
+    const { project } = JSON.parse(textOf(created)) as { project: { id: string; state: string } };
+
+    // Runtime catalog + profiles are a single combined read from the bridge.
+    const runtime = await client.callTool({ name: 'agent_dev_get_runtime', arguments: {} });
+    expect(runtime.isError).toBeFalsy();
+    const runtimeBody = JSON.parse(textOf(runtime)) as { agents?: unknown[]; profiles?: unknown[] };
+    expect(Array.isArray(runtimeBody.agents)).toBe(true);
+    expect(Array.isArray(runtimeBody.profiles)).toBe(true);
+
+    // Connector preflight + account discovery are combined into one read.
+    const connectors = await client.callTool({ name: 'agent_dev_get_connectors', arguments: {} });
+    expect(connectors.isError).toBeFalsy();
+    const connectorBody = JSON.parse(textOf(connectors)) as { preflight?: unknown; discovery?: unknown };
+    expect(connectorBody.preflight).toBeDefined();
+    expect(connectorBody.discovery).toBeDefined();
+
+    // Release state is a read of the current run + evidence; a fresh project has none.
+    const release = await client.callTool({ name: 'agent_dev_get_release', arguments: { projectId: project.id } });
+    expect(release.isError).toBeFalsy();
+    const releaseBody = JSON.parse(textOf(release)) as { state: string; releaseRun: unknown; evidence: unknown };
+    expect(releaseBody.state).toBe('NEEDS_INPUT');
+    expect(releaseBody.releaseRun).toBeNull();
+    expect(releaseBody.evidence).toBeNull();
+
+    // Release plan requires a completed Apply; the bridge must surface the 409 gate, not forge a plan.
+    const releasePlan = await client.callTool({ name: 'agent_dev_get_release_plan', arguments: { projectId: project.id } });
+    expect(releasePlan.isError).toBe(true);
+    expect(textOf(releasePlan)).toContain('HTTP 409');
+
+    // Unknown project for release read -> 404 surfaced as an error.
+    const missing = await client.callTool({ name: 'agent_dev_get_release', arguments: { projectId: 'missing' } });
+    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toContain('HTTP 404');
+  });
+
+  it('revises a Blueprint through the bridge and surfaces invalid answers', async () => {
+    const client = await startBridge();
+    const created = await client.callTool({ name: 'agent_dev_create_project', arguments: { name: 'Revise Probe', answers: { mode: 'beginner' } } });
+    const { project } = JSON.parse(textOf(created)) as { project: { id: string; blueprint: { metadata: { revision: number } } } };
+    expect(project.blueprint.metadata.revision).toBe(1);
+
+    // Revising with the full answers creates the next revision without touching any external system.
+    const revised = await client.callTool({
+      name: 'agent_dev_revise_blueprint',
+      arguments: { projectId: project.id, answers: { mode: 'professional' } },
+    });
+    expect(revised.isError).toBeFalsy();
+    const revisedBody = JSON.parse(textOf(revised)) as { project: { blueprint: { metadata: { revision: number } } } };
+    expect(revisedBody.project.blueprint.metadata.revision).toBe(2);
+
+    // A project that does not exist is reported as a 404, never silently ignored.
+    const missing = await client.callTool({ name: 'agent_dev_revise_blueprint', arguments: { projectId: 'missing', answers: { mode: 'professional' } } });
+    expect(missing.isError).toBe(true);
+    expect(textOf(missing)).toContain('HTTP 404');
   });
 });
