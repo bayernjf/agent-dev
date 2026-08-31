@@ -10,6 +10,10 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+// On Windows, npm/npx are .cmd shims and Node (since the CVE-2024-27980 fix) refuses to spawn
+// them without a shell. All call sites pass fixed literal arguments, so shell: true is safe.
+const npmSpawnOptions = process.platform === 'win32' ? { shell: true } : {};
+
 export type DoctorCheckStatus = 'pass' | 'fail' | 'warning' | 'unknown';
 
 export type DoctorCheck = {
@@ -68,7 +72,7 @@ async function checkNodeVersion(): Promise<DoctorCheck> {
 
 async function checkNpmVersion(): Promise<DoctorCheck> {
   try {
-    const { stdout } = await execFileAsync('npm', ['--version']);
+    const { stdout } = await execFileAsync('npm', ['--version'], npmSpawnOptions);
     return { id: 'npm-version', category: 'node', title: 'npm version', status: 'pass', message: `npm ${stdout.trim()} detected`, details: { version: stdout.trim() } };
   } catch {
     return { id: 'npm-version', category: 'node', title: 'npm version', status: 'fail', message: 'npm is not available', remediation: ['Reinstall Node.js (npm comes bundled with Node.js)'] };
@@ -118,7 +122,7 @@ async function checkVercelAuth(): Promise<DoctorCheck> {
 
 async function checkCloudflareWrangler(): Promise<DoctorCheck> {
   try {
-    const { stdout } = await execFileAsync('npx', ['wrangler', '--version']);
+    const { stdout } = await execFileAsync('npx', ['wrangler', '--version'], npmSpawnOptions);
     return { id: 'cloudflare-wrangler', category: 'platform', title: 'Cloudflare Wrangler', status: 'pass', message: `Wrangler ${stdout.trim()} available via npx`, details: { version: stdout.trim() } };
   } catch {
     return { id: 'cloudflare-wrangler', category: 'platform', title: 'Cloudflare Wrangler', status: 'warning', message: 'Cloudflare Wrangler is not available — Pages deployment will require manual steps', remediation: ['Wrangler is usually installed as a project dependency', 'If needed globally: `npm install -g wrangler`'] };
