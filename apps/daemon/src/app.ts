@@ -15,8 +15,26 @@ import type { ReleaseSource } from '@agent-dev/deployment-composer';
 import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin, releaseIdempotencyKey, releaseStepPlan } from '@agent-dev/deployment-composer';
 import type { CleanupResult, PreviewDeploymentResult, ReleaseResult } from '@agent-dev/deployment-composer';
 import { DaemonEventBus } from './events.js';
+import { createTokenAuthMiddleware } from './auth.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
 import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
+
+// `z.string().url()` accepts any scheme, including `ext::` (executes arbitrary commands when
+// handed to git), `file://` (reads local repositories) and `javascript:` (stored XSS when rendered
+// as a link). Every URL that reaches git or the UI must be http(s) (docs/audit-2026-08-31.md, S3/S7).
+function httpUrlSchema(label: string) {
+  return z.string().url().refine(
+    value => {
+      try {
+        const protocol = new URL(value).protocol;
+        return protocol === 'http:' || protocol === 'https:';
+      } catch {
+        return false;
+      }
+    },
+    { message: `${label} must be an http:// or https:// URL.` },
+  );
+}
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -168,11 +186,20 @@ function diffBlueprints(oldBp: Record<string, unknown>, newBp: Record<string, un
   return changes;
 }
 
-export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}, dataDirectory?: string) {
+export type DaemonAppOptions = {
+  /** When set, every /api/* route except the explicit exempt list requires
+   * `Authorization: Bearer <token>` (docs/audit-2026-08-31.md §6.1-2). `startDaemon`
+   * always sets this; omitting it keeps the app open for direct test usage. */
+  authToken?: string;
+};
+
+export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}, dataDirectory?: string, options: DaemonAppOptions = {}) {
   const app = new Hono();
   const customAgents: CustomAgentInput[] = dataDirectory ? loadCustomAgents(dataDirectory) : [];
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
+  // Registered before all routes so nothing slips past the check.
+  if (options.authToken) app.use('/api/*', createTokenAuthMiddleware(options.authToken));
   const fakeProviders = new FakeProviderRegistry();
   const realProviders = new RealProviderRegistry({
     resolveContext: async (projectId: string) => {
