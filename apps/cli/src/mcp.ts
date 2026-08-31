@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { CONFIRMATIONS } from '@agent-dev/policy';
 
 export type McpBridgeOptions = {
   daemonBaseUrl: string;
@@ -27,9 +28,10 @@ const projectIdSchema = {
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
 const ADDITIVE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
 
-// The daemon's POST routes require literal confirmation strings. Keeping them on this side of the
-// bridge means no MCP client — and no model driving one — can forge, alter, or omit them.
-const REQUEST_RELEASE_BODY = { confirmation: 'REQUEST_RELEASE' } as const;
+// The daemon's POST routes require literal confirmation strings. The literal comes from the shared
+// CONFIRMATIONS constant (@agent-dev/policy, audit §6.3-4) and is fixed at this call site, so no
+// MCP client — and no model driving one — can forge, alter, or omit it.
+const REQUEST_RELEASE_BODY = { confirmation: CONFIRMATIONS.REQUEST_RELEASE } as const;
 
 function errorMessage(body: unknown): string {
   return body && typeof body === 'object' && 'error' in body
