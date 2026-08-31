@@ -1,10 +1,12 @@
 # Agent-Dev 项目交接
 
 > 更新时间：2026-08-31
-> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**（S1 绑定回环、§6.1-2 本机 token 鉴权、§6.1-3 URL scheme 白名单、§6.1-4 移除自更新端点）、**P1 状态机 §6.2 全部 3 项**（advanceDelivery 事务化+非法事件显式抛错+重放幂等、runtime 路由 zod schema、persist await）与 **P2 §6.3-1 secret-backend 去留**（用户拍板移除 9 条管理路由、保留库作 P1-2 地基）已于同日修复，下一批为 §6.3 剩余清理项（install.sh 双入口、死代码、确认字面量收敛、文档版本对齐），方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**（S1 绑定回环、§6.1-2 本机 token 鉴权、§6.1-3 URL scheme 白名单、§6.1-4 移除自更新端点）、**P1 状态机 §6.2 全部 3 项**（advanceDelivery 事务化+非法事件显式抛错+重放幂等、runtime 路由 zod schema、persist await）与 **P2 §6.3-1 secret-backend 去留**（用户拍板移除 9 条管理路由、保留库作 P1-2 地基）、**P3 §6.4 Windows 兼容全部 3 项**（npm/npx shell 处理、信号断言、symlink skip，Windows 测试首次全绿）已于同日修复，下一批为 §6.3 剩余清理项（install.sh 双入口、死代码、确认字面量收敛、文档版本对齐），方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **审计整改 §6.4：Windows 兼容（2026-08-31）**：三项全部完成——npm/npx 四处调用点统一 `shell: win32`（注意 CVE-2024-27980 后不能直接 spawn `npm.cmd`，会 EINVAL）、信号用例平台分支断言、symlink 用例 EPERM skip。**Windows 全仓测试首次全绿**（storage 14/14 + agent-runtime 通过；全量并行时 storage recovery 用例偶发资源竞争 flake，单独运行稳定，非回归）。
 
 - **审计整改 §6.3-1：secret-backend 去留决策落地（2026-08-31）**：用户拍板「移除路由、保留库」。daemon 全部 9 条 `/api/secret-backend/*` 管理路由删除（S4 明文出口消除）——核查确认零消费者（Studio 无 UI、管线走 `/api/credentials`、MCP 桥未暴露），双凭证系统并存问题随之消除。`packages/provider-cli/src/secret-backend/` 库保留作为 P1-2 Infisical Adapter 地基（26 个库测试不动），P1-2 落地时路由随测试文档一起回归。回归测试：带合法 token 请求 `keys`/`:key` 均 404。daemon 27 + provider-cli 26 例全绿，typecheck 通过。
 
