@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
@@ -252,7 +253,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   });
 
   app.get('/api/health', context =>
-    context.json({ service: 'agent-dev-daemon', status: 'ok', version: '0.1.0-alpha.0' }),
+    context.json({ service: 'agent-dev-daemon', status: 'ok', version: daemonVersion }),
   );
 
   app.get('/api/doctor', async context => {
