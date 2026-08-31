@@ -47,8 +47,14 @@ describe('Local Codex Runtime', () => {
     const plan = buildCodexExecutionPlan({ id: 'task-5', title: 'Ignore signals', objective: 'Keep working.', acceptanceCriteria: ['Never finishes.'] }, process.cwd(), { execute: true });
     const ignoresSigterm = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
     const result = await executeCodexPlan({ ...plan, command: ['node', '-e', ignoresSigterm] }, runCodexProcess, 500);
+    // The assertion is "the process was terminated", not which signal did it: on Windows
+    // child.kill() terminates the process without POSIX signals, so signal stays null.
     expect(result.timedOut).toBe(true);
-    expect(result.signal).toBe('SIGKILL');
+    if (process.platform === 'win32') {
+      expect(result.exitCode).not.toBe(0);
+    } else {
+      expect(result.signal).toBe('SIGKILL');
+    }
   }, 20_000);
 
   it('gives a real feature task more than three minutes by default', async () => {

@@ -242,7 +242,14 @@ describe('AgentDevStore', () => {
       // guard has to catch a link under any other, non-ignored name.
       outside = await mkdtemp(join(tmpdir(), 'agent-dev-outside-'));
       await mkdir(join(outside, 'vendor'), { recursive: true });
-      await symlink(join(outside, 'vendor'), join(applied.workspacePath, 'vendor'));
+      try {
+        await symlink(join(outside, 'vendor'), join(applied.workspacePath, 'vendor'));
+      } catch (error) {
+        // Windows without Developer Mode / admin rejects symlink creation with EPERM —
+        // the guard itself is platform-independent, so skip rather than fail.
+        if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+        throw error;
+      }
       const run = await store.executeRuntimeRun(created.id, 1, async () => ({ exitCode: 0, signal: null, timedOut: false, output: 'wrote the feature', startedAt: new Date().toISOString(), completedAt: new Date().toISOString() }));
 
       expect(run.status).toBe('failed');
