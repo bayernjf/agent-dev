@@ -269,124 +269,13 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   // and GET /api/update/check executed `git fetch` on a nominally read-only route. Updating the
   // checkout is now a deliberate human act: stop the daemon, `git pull`, restart.
 
-  // Secret Backend management
-  app.get('/api/secret-backend/status', async context => {
-    try {
-      const { getActiveBackend } = await import('@agent-dev/provider-cli');
-      const backend = getActiveBackend();
-      const status = await backend.isAvailable();
-      return context.json({ type: backend.type, ...status });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Secret backend status check failed' }, 500);
-    }
-  });
-
-  app.get('/api/secret-backend/keys', async context => {
-    try {
-      const { getActiveBackend } = await import('@agent-dev/provider-cli');
-      const backend = getActiveBackend();
-      const keys = await backend.listKeys();
-      return context.json({ type: backend.type, keys });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Failed to list secret keys' }, 500);
-    }
-  });
-
-  app.post('/api/secret-backend/set', async context => {
-    const parsed = z.object({ key: z.string().min(1).max(100), value: z.string().min(1) }).safeParse(await context.req.json().catch(() => null));
-    if (!parsed.success) return context.json({ error: 'Secret key and value are required.' }, 400);
-    try {
-      const { getActiveBackend } = await import('@agent-dev/provider-cli');
-      const backend = getActiveBackend();
-      await backend.set(parsed.data.key, parsed.data.value);
-      return context.json({ ok: true, key: parsed.data.key });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Failed to set secret' }, 500);
-    }
-  });
-
-  app.delete('/api/secret-backend/:key', async context => {
-    const key = context.req.param('key');
-    try {
-      const { getActiveBackend } = await import('@agent-dev/provider-cli');
-      const backend = getActiveBackend();
-      await backend.delete(key);
-      return context.json({ ok: true, key });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Failed to delete secret' }, 500);
-    }
-  });
-
-  // Get full secret with metadata and version history
-  app.get('/api/secret-backend/:key', async context => {
-    const key = context.req.param('key');
-    try {
-      const { getActiveBackend } = await import('@agent-dev/provider-cli');
-      const backend = getActiveBackend();
-      const secret = await backend.getSecret(key);
-      if (!secret) return context.json({ error: 'Secret not found' }, 404);
-      return context.json({ type: backend.type, secret });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Failed to get secret' }, 500);
-    }
-  });
-
-  // Rotate a secret (create new version)
-  app.post('/api/secret-backend/:key/rotate', async context => {
-    const key = context.req.param('key');
-    const parsed = z.object({ newValue: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
-    try {
-      const { getActiveBackend } = await import('@agent-dev/provider-cli');
-      const backend = getActiveBackend();
-      const secret = await backend.rotate(key, parsed.data?.newValue);
-      return context.json({ ok: true, secret });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Failed to rotate secret' }, 500);
-    }
-  });
-
-  // Approve a secret version
-  app.post('/api/secret-backend/:key/approve', async context => {
-    const key = context.req.param('key');
-    const parsed = z.object({ version: z.number().int().positive(), approver: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
-    if (!parsed.success) return context.json({ error: 'Version number is required.' }, 400);
-    try {
-      const { getActiveBackend } = await import('@agent-dev/provider-cli');
-      const backend = getActiveBackend();
-      const secret = await backend.approve(key, parsed.data.version, parsed.data.approver);
-      return context.json({ ok: true, secret });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Failed to approve secret' }, 500);
-    }
-  });
-
-  // Reject a secret version
-  app.post('/api/secret-backend/:key/reject', async context => {
-    const key = context.req.param('key');
-    const parsed = z.object({ version: z.number().int().positive(), reason: z.string().optional() }).safeParse(await context.req.json().catch(() => null));
-    if (!parsed.success) return context.json({ error: 'Version number is required.' }, 400);
-    try {
-      const { getActiveBackend } = await import('@agent-dev/provider-cli');
-      const backend = getActiveBackend();
-      const secret = await backend.reject(key, parsed.data.version, parsed.data.reason);
-      return context.json({ ok: true, secret });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Failed to reject secret' }, 500);
-    }
-  });
-
-  // Get version history for a secret
-  app.get('/api/secret-backend/:key/history', async context => {
-    const key = context.req.param('key');
-    try {
-      const { getActiveBackend } = await import('@agent-dev/provider-cli');
-      const backend = getActiveBackend();
-      const history = await backend.getHistory(key);
-      return context.json({ type: backend.type, key, history });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Failed to get secret history' }, 500);
-    }
-  });
+  // The /api/secret-backend/* management routes (status/keys/set/get/delete/rotate/approve/
+  // reject/history) were removed for the Pilot (docs/audit-2026-08-31.md §6.3-1, S4): nothing
+  // consumed them — Studio had no UI, the delivery pipeline uses the credentials system, and the
+  // MCP bridge never exposed them — while GET /:key returned secret plaintext over HTTP. The
+  // SecretBackend library itself stays in @agent-dev/provider-cli as groundwork for the planned
+  // Infisical adapter (docs/implementation-plan-v0.2.md P1-2); if that lands, the routes come
+  // back together with tests and documentation, not before.
 
   // Blueprint export/import/diff/revisions
   app.get('/api/projects/:projectId/blueprint/export', context => {
