@@ -1,10 +1,16 @@
 # Agent-Dev 项目交接
 
 > 更新时间：2026-08-31
-> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**（S1 绑定回环、§6.1-2 本机 token 鉴权、§6.1-3 URL scheme 白名单、§6.1-4 移除自更新端点）已于同日修复，下一批为 §6.2 状态机/§6.3 secret-backend 决策，方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**（S1 绑定回环、§6.1-2 本机 token 鉴权、§6.1-3 URL scheme 白名单、§6.1-4 移除自更新端点）与 **P1 状态机 §6.2 全部 3 项**（advanceDelivery 事务化+非法事件显式抛错+重放幂等、runtime 路由 zod schema、persist await）已于同日修复，下一批为 §6.3 P2 清理（含 secret-backend 去留决策），方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **审计整改 §6.2：状态机与校验一致性（2026-08-31）**：P1 三项全部完成。
+  - **`advanceDelivery`（§6.2-1）**：`deliveryRuns` + `projects` 两表写入包进同一 SQLite 事务；逐事件比较 send 前后状态——非法事件显式抛 `Event X is not allowed in delivery state Y`，不再被 xstate 静默吞掉。**重放幂等例外**：事件目标状态已是当前状态（恢复路径上 `BASELINE_CREATED` 重发）不抛错——实施中发现并修复了一个连带回归：恢复场景重放曾导致步骤全绿但 run 被误标 `failed`。新增 `workflow` 包 `isEventReplay()`（事件→目标状态映射，`PAUSE`/`RESUME`/`FAIL`/`RETRY` 不参与重放判定）。回归测试：非法事件拒绝且状态不变、重放幂等。
+  - **runtime 路由 schema（§6.2-2）**：`runtime/run|execute|retry|cancel` 四条路由改用 zod schema + 确认字面量，`agentId` 加 trim/长度约束，手写 body 解析移除。
+  - **未 await 的 persist（§6.2-3）**：`reviseBlueprint` 改 async 并 await persist（原先落库从未被等待），daemon 两处调用点补 await。
+  - **验证**：daemon 27 例全绿、storage 新增状态机回归通过（storage 另有 2 例 Windows 符号链接权限失败为已知环境问题，见审计 §6.4-3）、typecheck 0 错误。审计文档补回了上次 commit 丢失的 §6.1-3/4 完成标记。
 
 - **审计整改 §6.1-4：移除 daemon 自更新端点（2026-08-31）**：`POST /api/update`（`git pull` + `npm install` + `build` 的 RCE 面，S2/S12）与 `GET /api/update/check`（名义只读路由上执行 `git fetch`）整体删除，更新本仓库改为用户显式动作（停 daemon → `git pull` → 重启）。MCP 桥 `agent_dev_check_update` 工具随端点一并移除（21 → 20 工具），`docs/mcp-bridge.md` 工具清单与说明同步；Studio 确认无消费点、无需改动。daemon 测试新增「带合法 token 两路由均 404」回归（证明是移除而非仅靠 token 门控），MCP 工具清单断言同步；daemon 27 例 + MCP 5 例全绿，typecheck 通过。**至此审计 P0 网络边界（§6.1 全部 4 项）整改完成**；secret-backend 去留（§6.3-1）仍待决策。
 
