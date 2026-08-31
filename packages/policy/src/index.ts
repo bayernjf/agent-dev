@@ -1,3 +1,4 @@
+export { CONFIRMATIONS, type ConfirmationLiteral } from './confirmations.js';
 export {
   runConnectorPreflight,
   runLocalCommand,
