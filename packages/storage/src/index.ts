@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
-import { lstat, readlink, access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, readlink, access, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/sql-js';
@@ -687,7 +687,7 @@ export class AgentDevStore {
           // A retry may leave files from a previous failed run (e.g. DELIVERY_REPORT.md), and
           // `write-manifest` always creates apply-manifest.json. Wipe everything so `git clone ... .`
           // has an empty directory, then re-create the manifest after the clone.
-          await execFileAsync('rm', ['-rf', run.workspacePath]);
+          await rm(run.workspacePath, { recursive: true, force: true });
           await mkdir(run.workspacePath, { recursive: true });
           await execFileAsync('git', ['clone', '--branch', 'dev', '--depth', '1', remoteUrl, '.'], { cwd: run.workspacePath });
           const manifestPath = join(run.workspacePath, 'apply-manifest.json');
