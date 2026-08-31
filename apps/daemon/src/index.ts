@@ -42,7 +42,8 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
   const dataDirectory = dirname(databasePath);
   const store = await AgentDevStore.open(databasePath);
   const { app, events } = createDaemonApp(store, new DaemonEventBus(), {}, dataDirectory);
-  const server = serve({ fetch: app.fetch, port });
+  // Loopback only, on purpose: the API is unauthenticated (see docs/audit-2026-08-31.md, S1).
+  const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' });
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
       server.off('listening', onListening);
