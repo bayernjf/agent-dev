@@ -38,7 +38,8 @@
 | `agent_dev_get_runtime` | 只读 | 运行时目录 + 自定义 runtime profile（合并两个 daemon 路由） |
 | `agent_dev_get_connectors` | 只读·外网 | 连接器预检 + 云账号发现（合并两个路由；会查外部云账号） |
 | `agent_dev_get_credentials_meta` | 只读 | 凭证元数据：哪些 key 已设置、更新时间；**永不返回密钥值** |
-| `agent_dev_check_update` | 只读·外网 | 检查本仓库是否落后 Git 上游（只跑 `git fetch`，不更新） |
+
+> 曾有 `agent_dev_check_update` 工具（2026-08-31 移除）：它依赖的 `GET /api/update/check` 会执行 `git fetch`，与 daemon 侧移除自更新端点一并删除（docs/audit-2026-08-31.md §6.1-4）。
 
 **项目与交付状态（只读）**
 
@@ -68,13 +69,13 @@
 
 `dry_run` 默认只回清单：daemon 的 dry-run 响应把每个产物的全文塞在 `plan.artifacts` 里，实测 4 种 productType 的 revision-1 计划为 9.6–17.8 KB，清单化后降到 3.7–6.1 KB（省 60–75%）；项目 revision 越高、文件越多，绝对节省越大。传 `artifactId`（清单里的 id 或 path）才返回单个文件全文。
 
-`agent_dev_get_connectors` 与 `agent_dev_check_update` 的 `openWorldHint` 为 true，因为它们会访问外部世界（云账号 / Git 上游）；客户端可据此决定是否先征求用户同意。
+`agent_dev_get_connectors` 的 `openWorldHint` 为 true，因为它会访问外部世界（云账号）；客户端可据此决定是否先征求用户同意。
 
 daemon 调用超时预算 30 秒，超时报 `did not answer within 30000 ms` 而不是挂住连接；最慢的 `agent_dev_doctor` 实测约 9 秒（本机 8 个 CLI 探测 + 连接器预检）。
 
 ## 4. 刻意不暴露的能力
 
-Baseline 审批、Feature Task 审批、Apply 执行、Preview 部署、Runtime 执行、验收批准、发布批准、凭证写入、自更新（`POST /api/update`）——全部不注册为 MCP 工具。这些是人工闸门或真实外部副作用，必须由人在 Studio 里按。
+Baseline 审批、Feature Task 审批、Apply 执行、Preview 部署、Runtime 执行、验收批准、发布批准、凭证写入——全部不注册为 MCP 工具。这些是人工闸门或真实外部副作用，必须由人在 Studio 里按。daemon 的自更新端点（`POST /api/update`、`GET /api/update/check`）已于 2026-08-31 整体移除（docs/audit-2026-08-31.md §6.1-4），更新本仓库是用户在终端里的显式动作。
 
 注意区分：`submit_acceptance` / `create_feature_task` 只是**提交记录**，批准（`acceptance/approve`、`feature-task/approve`）依然不暴露。凡是带 `approve` 的动作一律不在工具清单里。
 

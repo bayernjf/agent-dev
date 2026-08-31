@@ -144,6 +144,37 @@ export function createDeliveryActor(input: Pick<DeliveryContext, 'projectId' | '
   return createActor(deliveryMachine, { input }).start();
 }
 
+/**
+ * The single forward state each event transitions to on the happy path (ignoring guard
+ * variants like PAUSE/FAIL/RETRY). An event whose target state is already the current
+ * state is a replay of a transition already taken — idempotent on recovery paths, not
+ * an error. Events absent from this map (PAUSE/RESUME/FAIL/RETRY) never replay: their
+ * whole point is to leave the happy path, so a no-op send is a genuine bug.
+ */
+const eventTargetStates: Partial<Record<DeliveryEvent['type'], DeliveryState>> = {
+  REQUEST_INPUT: 'NEEDS_INPUT',
+  PLAN_COMPLETE: 'PLAN_READY',
+  APPROVE_PROVISIONING: 'PROVISIONING',
+  BASELINE_CREATED: 'BASELINE_READY',
+  START_IMPLEMENTATION: 'IMPLEMENTING',
+  IMPLEMENTATION_COMPLETE: 'VERIFYING',
+  VERIFY_COMPLETE: 'LOCAL_ACCEPTED',
+  PR_CREATED: 'PR_OPEN',
+  PREVIEW_AVAILABLE: 'PREVIEW_READY',
+  REQUEST_RELEASE: 'AWAITING_APPROVAL',
+  APPROVE_RELEASE: 'RELEASING',
+  RELEASE_COMPLETE: 'DELIVERED',
+};
+
+/**
+ * Whether a no-op send of `eventType` in `state` is a replay of an already-taken
+ * transition (idempotent, e.g. BASELINE_CREATED on a recovered workspace that already
+ * reached BASELINE_READY) as opposed to an event the state genuinely has no rule for.
+ */
+export function isEventReplay(state: DeliveryState, eventType: DeliveryEvent['type']): boolean {
+  return eventTargetStates[eventType] === state;
+}
+
 export type DeliverySnapshot = ReturnType<ReturnType<typeof createDeliveryActor>['getPersistedSnapshot']>;
 
 export function restoreDeliveryActor(input: Pick<DeliveryContext, 'projectId' | 'runId'>, snapshot: DeliverySnapshot) {

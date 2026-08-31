@@ -55,7 +55,6 @@ describe('agent-dev MCP bridge', () => {
     const { tools } = await client.listTools();
     const names = tools.map(tool => tool.name).sort();
     expect(names).toEqual([
-      'agent_dev_check_update',
       'agent_dev_create_feature_task',
       'agent_dev_create_project',
       'agent_dev_doctor',
@@ -86,7 +85,6 @@ describe('agent-dev MCP bridge', () => {
     expect(byName.get('agent_dev_list_projects')?.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: false });
     expect(byName.get('agent_dev_dry_run')?.annotations).toMatchObject({ readOnlyHint: true });
     expect(byName.get('agent_dev_get_connectors')?.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: true });
-    expect(byName.get('agent_dev_check_update')?.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: true });
     expect(byName.get('agent_dev_request_release')?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(byName.get('agent_dev_create_feature_task')?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(byName.get('agent_dev_submit_acceptance')?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
