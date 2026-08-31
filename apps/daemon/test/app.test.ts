@@ -908,4 +908,101 @@ describe('daemon API', () => {
       }
     });
   });
+  describe('daemon token auth', () => {
+    const TOKEN = 'test-daemon-token';
+
+    async function openAuthedStore() {
+      const directory = await mkdtemp(join(tmpdir(), 'agent-dev-auth-'));
+      directories.push(directory);
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { app } = createDaemonApp(store, undefined, {}, undefined, { authToken: TOKEN });
+      return { store, app };
+    }
+
+    const authed = (init: RequestInit = {}) => ({ ...init, headers: { ...init.headers, authorization: `Bearer ${TOKEN}` } });
+
+    it('rejects /api/* without a token, with a wrong token, and with a malformed header', async () => {
+      const { store, app } = await openAuthedStore();
+      try {
+        expect((await app.request('http://localhost/api/projects')).status).toBe(401);
+        expect((await app.request('http://localhost/api/projects', { headers: { authorization: 'Bearer wrong-token' } })).status).toBe(401);
+        expect((await app.request('http://localhost/api/projects', { headers: { authorization: TOKEN } })).status).toBe(401);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('admits /api/* requests carrying the correct bearer token', async () => {
+      const { store, app } = await openAuthedStore();
+      try {
+        const response = await app.request('http://localhost/api/projects', authed());
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({ projects: [] });
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('keeps credential and secret routes behind the token (S4 regression)', async () => {
+      const { store, app } = await openAuthedStore();
+      try {
+        expect((await app.request('http://localhost/api/credentials')).status).toBe(401);
+        expect((await app.request('http://localhost/api/secret-backend/keys')).status).toBe(401);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('exempts /api/health from the token check', async () => {
+      const { store, app } = await openAuthedStore();
+      try {
+        const response = await app.request('http://localhost/api/health');
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({ status: 'ok' });
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('exempts the GitHub webhook route from the bearer check (it authenticates by HMAC signature)', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'agent-dev-auth-'));
+      directories.push(directory);
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { app } = createDaemonApp(store, undefined, { resolveGitHubWebhookSecret: () => 'test-webhook-secret' }, undefined, { authToken: TOKEN });
+      try {
+        const body = '{}';
+        const signature = `sha256=${createHmac('sha256', 'test-webhook-secret').update(body).digest('hex')}`;
+        // A signed webhook without a bearer token passes the token gate; the payload then fails
+        // schema validation and is ignored with 202. The 401 path of this route means a bad
+        // signature, never a missing bearer token.
+        const response = await app.request('http://localhost/api/github/webhooks', {
+          method: 'POST', headers: { 'content-type': 'application/json', 'x-github-event': 'pull_request', 'x-hub-signature-256': signature }, body,
+        });
+        expect(response.status).toBe(202);
+      } finally {
+        await store.close();
+      }
+    });
+  });
+
+  describe('daemon token file', () => {
+    it('creates the token once with user-only permissions and reuses it on later starts', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'agent-dev-token-'));
+      directories.push(directory);
+      const tokenPath = join(directory, 'daemon-token');
+      const previous = process.env.AGENT_DEV_DAEMON_TOKEN_PATH;
+      process.env.AGENT_DEV_DAEMON_TOKEN_PATH = tokenPath;
+      try {
+        const { loadOrCreateDaemonToken } = await import('../src/auth.js');
+        const first = loadOrCreateDaemonToken();
+        expect(first).toMatch(/^[0-9a-f]{64}$/);
+        expect((await readFile(tokenPath, 'utf8')).trim()).toBe(first);
+        // A daemon restart must reuse the same token: Studio and the MCP bridge cache it at startup.
+        expect(loadOrCreateDaemonToken()).toBe(first);
+      } finally {
+        if (previous === undefined) delete process.env.AGENT_DEV_DAEMON_TOKEN_PATH;
+        else process.env.AGENT_DEV_DAEMON_TOKEN_PATH = previous;
+      }
+    });
+  });
 });
