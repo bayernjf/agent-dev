@@ -1,9 +1,12 @@
 {
   "name": "@agent-dev/policy",
-  "version": "0.1.0-alpha.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./confirmations": "./src/confirmations.ts"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"

@@ -943,11 +943,14 @@ describe('daemon API', () => {
       }
     });
 
-    it('keeps credential and secret routes behind the token (S4 regression)', async () => {
+    it('keeps credential routes behind the token and secret-backend routes gone (S4 regression)', async () => {
       const { store, app } = await openAuthedStore();
       try {
         expect((await app.request('http://localhost/api/credentials')).status).toBe(401);
-        expect((await app.request('http://localhost/api/secret-backend/keys')).status).toBe(401);
+        // §6.3-1: the /api/secret-backend/* management routes were removed entirely — with a
+        // valid token they are 404s, not plaintext secret endpoints gated only by the token.
+        expect((await app.request('http://localhost/api/secret-backend/keys', authed())).status).toBe(404);
+        expect((await app.request('http://localhost/api/secret-backend/MY_KEY', authed())).status).toBe(404);
       } finally {
         await store.close();
       }

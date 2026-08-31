@@ -47,14 +47,19 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 - [Phase 0 技术 Spike 状态](docs/spikes/README.md)：本机实测证据、阻塞项和进入工程阶段的 Gate。
 - [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目暴露的缺陷、架构规则、模型选型与环境前提。
+- [v0.2 实施计划](docs/implementation-plan-v0.2.md)：v0.2 的目标、工程拆解与完成定义。
+- [Agent Profile 自定义方案](docs/custom-agent-profiles.md)：Runtime 的 Profile 化配置、校验与合并规则，已实施。
+- [凭证管理](docs/credential-management.md)：本地凭证文件、连接元数据、`.env` 生成器与 Studio 引导面板。
+- [对外 MCP 桥接](docs/mcp-bridge.md)：`agent-dev mcp` 的 20 工具清单、闸门边界与客户端配置。
 - [Studio 双主题设计方案](docs/studio-theme-design.md)：Studio 深/浅双主题 token 化视觉方案，已实施（`90696d4`）。
 - [Studio i18n 设计方案](docs/studio-i18n-design.md)：Studio 中/英双语方案，默认英文、术语保留英文，已实施（`90696d4`）。
 - [外部 Pilot 招募](docs/pilot-recruiting.md)：v0.2 外部 Pilot 参与条件、流程、激励与隐私边界，申请/反馈走仓库 Issue 模板。
+- [安全与质量审计 2026-08-31](docs/audit-2026-08-31.md)：全仓审计发现与整改方案（P0–P4），整改进度以此为准。
 - [项目交接](handoff.md)：当前分支、硬约束、已完成工作和下一步。
 
 ## 当前状态
 
-当前仓库处于 `v0.1` 的本地实验阶段，不是可用于生产的稳定版本。
+当前仓库处于 `v0.2` Pilot 阶段（版本 `0.2.0`）：四个真实项目已通过 BluePrint → Preview → Production 全周期交付上线，2026-08-31 完成全仓安全与质量审计并落地 P0–P3 整改（回环绑定 + token 鉴权、状态机事务化、清理一致性、Windows 兼容），剩余 P4 测试补齐。不是可用于生产的稳定版本。
 
 本地可运行能力：
 
@@ -100,7 +105,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 身份发现只读取本机 CLI 已有登录状态；资源基线计划只显示阻塞项和待批准的创建意图。审批当前只是一条本地审计记录；Apply Simulator 只写入本仓库忽略的本地工作区，绝不写入 GitHub、Supabase、Vercel 或 Cloudflare。
 
-已实现本地生成物物化、Provider 计划与真实 CLI Adapter、凭证连接、模板代码生成、受控 Codex 执行、Dual Preview 编排和交付报告。真实云端全链路已于 2026-08-23 跑通一次：`Receipt Test` 从 Blueprint 走到 `DELIVERED`，PR 经 GitHub Actions 质量门禁后合并，生产 API 与页面均对外可访问并在平台报告之外独立复验。这一轮暴露的两处架构缺口随后修掉：生产改为从记录仓库的生产分支 checkout 后发布（并要求该分支已带上被验收的提交），每个人工闸门都必须具名。两处修复的验证放在第二个项目 `Workspace Verify Fresh`，目前已推进到 PR + Preview：具名闸门已通过 API 走通（基线/Feature Task/交付验收三处 `feng`），「从生产分支发布」的生产阶段停在人工批准前。项目 2 还暴露并修掉第 7 个真实缺陷——Agent 以 workspace 外部符号链接绕过产物提交拦截（`commitAgentChanges` 新增外部 symlink 守卫，生成器 `.gitignore` 改用 `node_modules` 同时匹配目录/文件/symlink）。
+已实现本地生成物物化、Provider 计划与真实 CLI Adapter、凭证连接、模板代码生成、受控 Codex 执行、Dual Preview 编排和交付报告。真实云端全链路已于 2026-08-23 跑通：`Receipt Test` 从 Blueprint 走到 `DELIVERED`，PR 经 GitHub Actions 质量门禁后合并，生产 API 与页面均对外可访问并在平台报告之外独立复验。这一轮暴露的两处架构缺口（生产须从记录仓库的生产分支 checkout 后发布、每个人工闸门必须具名）随后修掉并在第二个项目验证。截至目前四个真实项目全部完整交付上线：`Receipt Test`（1/4，web-saas）、`Workspace Verify Fresh`（2/4，验证具名闸门与生产分支发布修复）、`Link Vault`（3/4）、`MCP Word Tools`（4/4，首个非 web-saas 类型）。项目 2 还暴露并修掉第 7 个真实缺陷——Agent 以 workspace 外部符号链接绕过产物提交拦截（`commitAgentChanges` 新增外部 symlink 守卫，生成器 `.gitignore` 改用 `node_modules` 同时匹配目录/文件/symlink）。
 
 已经取得本地 Evidence：
 
