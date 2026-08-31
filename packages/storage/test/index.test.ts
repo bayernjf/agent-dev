@@ -383,6 +383,37 @@ describe('AgentDevStore', () => {
     }
   }, 30_000);
 
+  it('rejects delivery events the machine has no transition for and leaves the state untouched', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const created = await store.createProject({
+        name: 'Illegal Transition',
+        blueprint: createBlueprint('illegal-transition', { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' }),
+      });
+      // xstate silently drops events with no transition; the audit requires an explicit error
+      // (§6.2-1). A fresh project sits in NEEDS_INPUT, where START_IMPLEMENTATION has no transition.
+      const before = store.getProject(created.id)!;
+      await expect(store.advanceDelivery(created.id, [{ type: 'START_IMPLEMENTATION' }])).rejects.toThrow('Event START_IMPLEMENTATION is not allowed in delivery state NEEDS_INPUT.');
+      const after = store.getProject(created.id)!;
+      expect(after.state).toBe(before.state);
+      expect(after.updatedAt).toBe(before.updatedAt);
+      // A legal multi-event batch still lands on the last state.
+      const advanced = await store.advanceDelivery(created.id, [
+        { type: 'PLAN_COMPLETE' }, { type: 'APPROVE_PROVISIONING' },
+      ]);
+      expect(advanced.state).toBe('PROVISIONING');
+      // A replay of an already-taken transition is idempotent (recovery paths rely on this):
+      // BASELINE_CREATED re-sent once the run already reached BASELINE_READY keeps the state.
+      await store.advanceDelivery(created.id, [{ type: 'BASELINE_CREATED' }, { type: 'BASELINE_CREATED' }]);
+      const settled = await store.advanceDelivery(created.id, [{ type: 'BASELINE_CREATED' }]);
+      expect(settled.state).toBe('BASELINE_READY');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 30_000);
+
   it('pushes and opens the pull request itself once the delivery is accepted', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
     try {

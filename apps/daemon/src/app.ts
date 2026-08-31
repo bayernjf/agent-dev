@@ -15,8 +15,26 @@ import type { ReleaseSource } from '@agent-dev/deployment-composer';
 import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin, releaseIdempotencyKey, releaseStepPlan } from '@agent-dev/deployment-composer';
 import type { CleanupResult, PreviewDeploymentResult, ReleaseResult } from '@agent-dev/deployment-composer';
 import { DaemonEventBus } from './events.js';
+import { createTokenAuthMiddleware } from './auth.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
 import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
+
+// `z.string().url()` accepts any scheme, including `ext::` (executes arbitrary commands when
+// handed to git), `file://` (reads local repositories) and `javascript:` (stored XSS when rendered
+// as a link). Every URL that reaches git or the UI must be http(s) (docs/audit-2026-08-31.md, S3/S7).
+function httpUrlSchema(label: string) {
+  return z.string().url().refine(
+    value => {
+      try {
+        const protocol = new URL(value).protocol;
+        return protocol === 'http:' || protocol === 'https:';
+      } catch {
+        return false;
+      }
+    },
+    { message: `${label} must be an http:// or https:// URL.` },
+  );
+}
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -37,8 +55,8 @@ const applyBaselineSchema = z.object({
   blueprintRevision: z.number().int().positive(),
   confirmation: z.literal('APPLY_BASELINE'),
   noExternalChanges: z.boolean().optional(),
-  /** Optional: URL of an existing Git repository to import instead of generating from scratch. */
-  importRepositoryUrl: z.string().url().optional(),
+  /** Optional: HTTPS URL of an existing Git repository to import instead of generating from scratch. */
+  importRepositoryUrl: httpUrlSchema('importRepositoryUrl').optional(),
 });
 
 const retryApplySchema = z.object({
@@ -93,16 +111,26 @@ const acceptanceApprovalSchema = z.object({
   approvedBy: z.string().trim().min(1).max(120),
 });
 
+// Runtime routes historically parsed bodies by hand; these schemas match that contract while
+// constraining agentId the way every other identifier in the API is constrained (audit §6.2-2).
+const runtimePrepareSchema = z.object({
+  confirmation: z.literal('PREPARE_RUNTIME_RUN'),
+  agentId: z.string().trim().min(1).max(120).optional(),
+});
+const runtimeExecuteSchema = z.object({ confirmation: z.literal('EXECUTE_RUNTIME_RUN') });
+const runtimeRetrySchema = z.object({ confirmation: z.literal('RETRY_RUNTIME_RUN') });
+const runtimeCancelSchema = z.object({ confirmation: z.literal('CANCEL_RUNTIME_RUN') });
+
 const prEvidenceSchema = z.object({
   confirmation: z.literal('RECORD_PR_EVIDENCE'),
-  url: z.string().url(),
+  url: httpUrlSchema('url'),
   checks: z.array(z.string().trim().min(1).max(300)).min(1).max(20),
 });
 
 const previewEvidenceSchema = z.object({
   confirmation: z.literal('RECORD_PREVIEW_EVIDENCE'),
-  apiUrl: z.string().url(),
-  webUrl: z.string().url(),
+  apiUrl: httpUrlSchema('apiUrl'),
+  webUrl: httpUrlSchema('webUrl'),
   smokeTest: z.string().trim().min(10).max(2000),
 });
 
@@ -168,11 +196,20 @@ function diffBlueprints(oldBp: Record<string, unknown>, newBp: Record<string, un
   return changes;
 }
 
-export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}, dataDirectory?: string) {
+export type DaemonAppOptions = {
+  /** When set, every /api/* route except the explicit exempt list requires
+   * `Authorization: Bearer <token>` (docs/audit-2026-08-31.md §6.1-2). `startDaemon`
+   * always sets this; omitting it keeps the app open for direct test usage. */
+  authToken?: string;
+};
+
+export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}, dataDirectory?: string, options: DaemonAppOptions = {}) {
   const app = new Hono();
   const customAgents: CustomAgentInput[] = dataDirectory ? loadCustomAgents(dataDirectory) : [];
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
+  // Registered before all routes so nothing slips past the check.
+  if (options.authToken) app.use('/api/*', createTokenAuthMiddleware(options.authToken));
   const fakeProviders = new FakeProviderRegistry();
   const realProviders = new RealProviderRegistry({
     resolveContext: async (projectId: string) => {
@@ -227,56 +264,10 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
-  // Auto-update
-  app.get('/api/update/check', async context => {
-    try {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      // Fetch latest
-      await execFileAsync('git', ['fetch', 'origin'], { timeout: 15_000 });
-      // Check if behind
-      const local = (await execFileAsync('git', ['rev-parse', 'HEAD'])).stdout.trim();
-      const remote = (await execFileAsync('git', ['rev-parse', '@{u}'])).stdout.trim();
-      const base = (await execFileAsync('git', ['merge-base', 'HEAD', '@{u}'])).stdout.trim();
-      const upToDate = local === remote;
-      const behind = upToDate ? 0 : parseInt((await execFileAsync('git', ['rev-list', '--count', `HEAD..@{u}`])).stdout.trim(), 10);
-      const diverged = local !== base && !upToDate;
-      // Get recent commits if behind
-      let commits: string[] = [];
-      if (behind > 0) {
-        const log = (await execFileAsync('git', ['log', '--oneline', `HEAD..@{u}`])).stdout.trim();
-        commits = log ? log.split('\n') : [];
-      }
-      return context.json({ upToDate, behind, diverged, commits, local, remote });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Update check failed', upToDate: true, behind: 0 }, 500);
-    }
-  });
-
-  app.post('/api/update', async context => {
-    try {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      // Check for uncommitted changes
-      try {
-        await execFileAsync('git', ['diff', '--quiet']);
-        await execFileAsync('git', ['diff', '--cached', '--quiet']);
-      } catch {
-        return context.json({ error: 'Uncommitted changes detected. Please commit or stash before updating.' }, 409);
-      }
-      // Pull
-      await execFileAsync('git', ['pull', '--ff-only'], { timeout: 60_000 });
-      // Install dependencies
-      await execFileAsync('npm', ['install'], { timeout: 120_000 });
-      // Build
-      await execFileAsync('npm', ['run', 'build'], { timeout: 120_000 });
-      return context.json({ ok: true, message: 'Update complete. Restart the daemon to apply changes.' });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Update failed' }, 500);
-    }
-  });
+  // Auto-update endpoints were removed for the Pilot (docs/audit-2026-08-31.md §6.1-4): the old
+  // POST /api/update ran `git pull` + `npm install` + `npm run build` behind no meaningful gate,
+  // and GET /api/update/check executed `git fetch` on a nominally read-only route. Updating the
+  // checkout is now a deliberate human act: stop the daemon, `git pull`, restart.
 
   // Secret Backend management
   app.get('/api/secret-backend/status', async context => {
@@ -440,7 +431,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       const validated = productBlueprintSchema.parse(parsed.data.blueprint);
       const previousRevision = project.blueprint.metadata.revision;
       const previousBlueprint = project.blueprint;
-      const updated = store.reviseBlueprint(projectId, validated);
+      const updated = await store.reviseBlueprint(projectId, validated);
       // Auto-generate diff for upgrade review
       const changes = diffBlueprints(
         previousBlueprint as unknown as Record<string, unknown>,
@@ -478,7 +469,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       const { productBlueprintSchema } = await import('@agent-dev/blueprint');
       const validated = productBlueprintSchema.parse(parsed.data.blueprint);
       // Create a new revision with the imported blueprint.
-      const updated = store.reviseBlueprint(projectId, validated);
+      const updated = await store.reviseBlueprint(projectId, validated);
       return context.json({ project: updated, imported: true });
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Failed to import blueprint' }, 400);
@@ -816,8 +807,9 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.post('/api/projects/:projectId/runtime/run', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
-    const body = await context.req.json().catch(() => null) as { confirmation?: string; agentId?: string } | null;
-    if (body?.confirmation !== 'PREPARE_RUNTIME_RUN') return context.json({ error: 'Runtime preparation requires confirmation PREPARE_RUNTIME_RUN.' }, 400);
+    const parsed = runtimePrepareSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) return context.json({ error: 'Runtime preparation requires confirmation PREPARE_RUNTIME_RUN.' }, 400);
+    const body = parsed.data;
     if (body.agentId) {
       const catalog = discoverAgentRuntimes(customAgents);
       // Check if the agentId refers to an Agent Profile first.
@@ -847,8 +839,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.post('/api/projects/:projectId/runtime/execute', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
-    const body = await context.req.json().catch(() => null) as { confirmation?: string } | null;
-    if (body?.confirmation !== 'EXECUTE_RUNTIME_RUN') return context.json({ error: 'Runtime execution requires confirmation EXECUTE_RUNTIME_RUN.' }, 400);
+    if (!runtimeExecuteSchema.safeParse(await context.req.json().catch(() => null)).success) return context.json({ error: 'Runtime execution requires confirmation EXECUTE_RUNTIME_RUN.' }, 400);
     try {
       const run = await store.executeRuntimeRun(project.id, project.blueprint.metadata.revision);
       return context.json({ run }, run.status === 'completed' ? 200 : 422);
@@ -860,8 +851,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.post('/api/projects/:projectId/runtime/retry', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
-    const body = await context.req.json().catch(() => null) as { confirmation?: string } | null;
-    if (body?.confirmation !== 'RETRY_RUNTIME_RUN') return context.json({ error: 'Runtime retry requires confirmation RETRY_RUNTIME_RUN.' }, 400);
+    if (!runtimeRetrySchema.safeParse(await context.req.json().catch(() => null)).success) return context.json({ error: 'Runtime retry requires confirmation RETRY_RUNTIME_RUN.' }, 400);
     try {
       const run = await store.retryRuntimeRun(project.id, project.blueprint.metadata.revision);
       return context.json({ run }, run.status === 'completed' ? 200 : 422);
@@ -873,8 +863,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   app.post('/api/projects/:projectId/runtime/cancel', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
-    const body = await context.req.json().catch(() => null) as { confirmation?: string } | null;
-    if (body?.confirmation !== 'CANCEL_RUNTIME_RUN') return context.json({ error: 'Runtime cancellation requires confirmation CANCEL_RUNTIME_RUN.' }, 400);
+    if (!runtimeCancelSchema.safeParse(await context.req.json().catch(() => null)).success) return context.json({ error: 'Runtime cancellation requires confirmation CANCEL_RUNTIME_RUN.' }, 400);
     try {
       return context.json({ run: await store.cancelRuntimeRun(project.id, project.blueprint.metadata.revision) });
     } catch (error) {
