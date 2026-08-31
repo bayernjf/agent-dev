@@ -1,10 +1,23 @@
 # Agent-Dev 项目交接
 
 > 更新时间：2026-08-31
-> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具；2026-08-31 完成全仓安全与质量审计，发现 4 条高危安全缺口（核心是 daemon 无鉴权监听所有网卡），整改方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**（S1 绑定回环、§6.1-2 本机 token 鉴权、§6.1-3 URL scheme 白名单、§6.1-4 移除自更新端点）已于同日修复，下一批为 §6.2 状态机/§6.3 secret-backend 决策，方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **审计整改 §6.1-4：移除 daemon 自更新端点（2026-08-31）**：`POST /api/update`（`git pull` + `npm install` + `build` 的 RCE 面，S2/S12）与 `GET /api/update/check`（名义只读路由上执行 `git fetch`）整体删除，更新本仓库改为用户显式动作（停 daemon → `git pull` → 重启）。MCP 桥 `agent_dev_check_update` 工具随端点一并移除（21 → 20 工具），`docs/mcp-bridge.md` 工具清单与说明同步；Studio 确认无消费点、无需改动。daemon 测试新增「带合法 token 两路由均 404」回归（证明是移除而非仅靠 token 门控），MCP 工具清单断言同步；daemon 27 例 + MCP 5 例全绿，typecheck 通过。**至此审计 P0 网络边界（§6.1 全部 4 项）整改完成**；secret-backend 去留（§6.3-1）仍待决策。
+
+- **审计整改 §6.1-3：URL scheme 白名单落地（2026-08-31）**：堵死 S3（`importRepositoryUrl` 经 `ext::` 协议的命令执行）与 S7（PR 证据 `javascript:` URL 存储型 XSS）。
+  - **实现**：`app.ts` 新增 `httpUrlSchema(label)`——`z.string().url()` 之上用 `new URL()` 解析仅放行 `http:`/`https:`；套用到全部四处到达 git 或 UI 的 URL 输入：`importRepositoryUrl`（apply 导入）、PR 证据 `url`、Preview 证据 `apiUrl`/`webUrl`。daemon 源码不再有裸 `z.string().url()`；Studio 其余 `a.href` 核实均为 blob 下载链接，非注入面。
+  - **关键顺序保证**：apply 路由 schema parse 在 `git clone` 之前，恶意 scheme 在 400 被拒、任何副作用都不发生。
+  - **验证**：新增 4 个契约测试（`ext::`/`file://`/`git@`/`ssh://` 导入 URL 400、http(s) 通过 schema、`javascript:`/`data:` PR 证据 400 而 https 走到交付闸门 409、preview 证据双向拒绝）；daemon 26 例全绿、typecheck 通过。
+
+- **审计整改 §6.1-2：本机 token 鉴权落地（2026-08-31）**：daemon 全部 `/api/*` 路由现要求 `Authorization: Bearer <token>`，未认证请求 401——关闭审计 S2/S3/S4 的「未认证」前提（路由本身仍需按 §6.1-3/4 整改），并缓解 S5 与浏览器 CSRF。
+  - **token 生命周期**：`apps/daemon/src/auth.ts` 的 `loadOrCreateDaemonToken()`——首启生成 64 位 hex 随机数，持久化 `~/.agent-dev/daemon-token`（0600、目录 0700，`AGENT_DEV_DAEMON_TOKEN_PATH` 可覆盖）；token 复用不轮换，daemon 重启后 Studio/MCP 不需重新读取。
+  - **中间件**：`createDaemonApp` 新增 `authToken` 选项（`startDaemon` 恒传入；不传则不启用，供测试直连 app）；timingSafeEqual 比较；显式豁免仅 `/api/health` 与 `/api/github/webhooks`（后者走自身 HMAC 签名），`/events` SSE 在 `/api/*` 之外（EventSource 无法带自定义头，仅承载事件元数据）。
+  - **客户端接入**：Studio——`vite.config.ts` 启动时读 token 文件注入 `__DAEMON_TOKEN__` 常量，`src/daemon-auth.ts` 包装 `window.fetch` 对 `/api/*` 统一附加头（一处覆盖全部现有与未来调用点）；MCP 桥——`callDaemon` 携带 `authorization` 头，token 取自 `AGENT_DEV_DAEMON_TOKEN` 环境变量或同一 token 文件。
+  - **验证**：新增 6 个契约测试（无/错/畸形 token 401、合法 token 200、credentials/secret-backend/update 路由 401 回归、health/webhook 豁免走确定性 HMAC 路径、token 文件创建与复用）；daemon 22 例全绿、cli MCP 5 例全绿、全仓 typecheck 通过。注意：Studio 需在 daemon 首启之后再启动才能读到 token 文件（此前 proxy 也会失败，无新增约束）。
 
 - **全仓安全与质量审计完成，4 条高危缺口与整改方案落档（2026-08-31）**：三路并行——客观检查、安全审计、代码质量审计；安全高危结论逐一复核过源码，全文见 [审计文档](docs/audit-2026-08-31.md)。
   - **客观检查**：`npm run typecheck` 9 个工作区全部通过；`npm test` 199 例中 196 通过，3 个失败全是 Windows 平台问题（其中真问题：`execFileAsync('npm')` 未加 `shell: true` 导致质量门在 Windows 误判，`packages/storage/src/index.ts:777`）。
