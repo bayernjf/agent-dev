@@ -1,10 +1,14 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
 export type McpBridgeOptions = {
   daemonBaseUrl: string;
+  /** Bearer token for the daemon's /api/* routes (docs/audit-2026-08-31.md §6.1-2). */
+  authToken?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 };
@@ -96,7 +100,10 @@ export function createAgentDevMcpServer(options: McpBridgeOptions): McpServer {
     try {
       response = await fetchImpl(`${options.daemonBaseUrl}${path}`, {
         method,
-        headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+        headers: {
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...(options.authToken ? { authorization: `Bearer ${options.authToken}` } : {}),
+        },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -240,12 +247,6 @@ export function createAgentDevMcpServer(options: McpBridgeOptions): McpServer {
     annotations: READ_ONLY,
   }, () => callDaemon('GET', '/api/credentials').then(toResult));
 
-  server.registerTool('agent_dev_check_update', {
-    title: 'Check for updates',
-    description: 'Check whether this Agent-Dev checkout is behind its Git upstream. Runs a git fetch; does not update anything.',
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-  }, () => callDaemon('GET', '/api/update/check').then(toResult));
-
   server.registerTool('agent_dev_create_project', {
     title: 'Create project',
     description: 'Create a project from a name and Blueprint answers. No external system is touched.',
@@ -329,8 +330,18 @@ export function createAgentDevMcpServer(options: McpBridgeOptions): McpServer {
   return server;
 }
 
+// The daemon requires a bearer token on every /api/* route (docs/audit-2026-08-31.md §6.1-2). The
+// daemon persists it at ~/.agent-dev/daemon-token (override with AGENT_DEV_DAEMON_TOKEN).
+function readDaemonTokenFile(): string | undefined {
+  const path = process.env.AGENT_DEV_DAEMON_TOKEN_PATH ?? join(homedir(), '.agent-dev', 'daemon-token');
+  if (!existsSync(path)) return undefined;
+  const token = readFileSync(path, 'utf8').trim();
+  return token || undefined;
+}
+
 export async function runAgentDevMcp(): Promise<void> {
   const daemonBaseUrl = process.env.AGENT_DEV_DAEMON_URL ?? 'http://127.0.0.1:3737';
-  const server = createAgentDevMcpServer({ daemonBaseUrl });
+  const authToken = process.env.AGENT_DEV_DAEMON_TOKEN ?? readDaemonTokenFile();
+  const server = createAgentDevMcpServer({ daemonBaseUrl, authToken });
   await server.connect(new StdioServerTransport());
 }
