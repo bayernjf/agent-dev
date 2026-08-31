@@ -344,7 +344,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
     - **P1 状态机与校验**：`advanceDelivery` 事务化 + 非法事件显式抛错（`packages/storage/src/index.ts:1555-1573`，即「最近进度」生产交付路径条目记录的未验证边界）；4 条 runtime 门禁路由补 zod（`app.ts:819/850/863/876`）。
     - **P2 清理与一致性（已完成，见「最近进度」§6.3 条目）**：secret-backend 移除路由保留库（用户拍板）；根目录遗留 `install.sh` 已删除；确认字面量已收敛到 `@agent-dev/policy` 的 `CONFIRMATIONS` 单一事实源；ReleaseComposer 步数表述已修正（9 步）、`/api/health` 版本号已改为从 package.json 读取；死代码已清理、`rm -rf` 已改 fs/promises；版本号已升 `0.2.0`（用户拍板）。
     - **P3 Windows 兼容**：`npm`/`npx` 调用处理 `.cmd`（`storage/src/index.ts:777`、`:844`、`agent-runtime/src/doctor.ts`）；信号与符号链接用例按平台适配。
-    - **P4 测试补齐**：storage pipeline 执行、MCP 20 工具、`advanceDelivery` 回归、Studio 冒烟。
+    - **P4 测试补齐（已完成，见「最近进度」§6.5 条目）**：storage pipeline 执行（含 resume 未落盘缺陷修复）、MCP 20 工具全覆盖、`advanceDelivery` 回归、Studio 渲染冒烟。
     - 用户决策均已落定：secret-backend「移除路由、保留库」（2026-08-31）；版本号升 `0.2.0`（2026-08-31）。
 
 ## 9. 用户决策
