@@ -1,14 +1,14 @@
 # 对外 MCP 桥接（agent-dev mcp）
 
 > 创建时间：2026-08-29
-> 状态：已实现（`apps/cli`），21 个工具，stdio 传输
+> 状态：已实现（`apps/cli`），20 个工具，stdio 传输
 > 前置依赖：daemon HTTP API（`agent-dev start`，默认 `http://127.0.0.1:3737`）
 
 ## 1. 定位
 
 把已有的 daemon API 桥接成一个 stdio MCP server，让外部 agent 客户端（Claude Desktop、Cursor、Qoder 等）能查询项目与交付中间态、创建项目、修订 Blueprint、定义 Feature Task、预览 Apply 产物、提交验收，并申请生产发布。
 
-桥接层不落自己的业务规则：daemon 是唯一事实源，MCP 工具一一对应 daemon 路由。唯一由桥接层持有的东西是发布确认字面量 `REQUEST_RELEASE`——它写在 `apps/cli/src/mcp.ts` 里，因此调用方（包括驱动它的模型）无法伪造、改写或省略。`create_feature_task` 还会自行读取当前 Blueprint revision 后再投递，避免调用方维护版本号。
+桥接层不落自己的业务规则：daemon 是唯一事实源，MCP 工具一一对应 daemon 路由。唯一由桥接层持有的东西是发布确认字面量 `REQUEST_RELEASE`——它来自 `@agent-dev/policy` 的共享常量 `CONFIRMATIONS`（daemon/Studio/桥接三处同一事实源，docs/audit-2026-08-31.md §6.3-4），并固定在 `apps/cli/src/mcp.ts` 的调用点，因此调用方（包括驱动它的模型）无法伪造、改写或省略。`create_feature_task` 还会自行读取当前 Blueprint revision 后再投递，避免调用方维护版本号。
 
 ## 2. 启动与客户端配置
 
@@ -83,5 +83,5 @@ Baseline 审批、Feature Task 审批、Apply 执行、Preview 部署、Runtime 
 
 ## 5. 测试
 
-`apps/cli/test/mcp.test.ts` 用真实 HTTP 监听 + 真实 daemon app + `InMemoryTransport` 跑完整链路：21 工具清单（断言不含 `approve`）、annotations、创建与读取、各中间态只读工具、dry_run 清单/单文件、409 引导文案（含 create_feature_task 与 submit_acceptance 的闸门）、daemon 不可达与超时提示。
+`apps/cli/test/mcp.test.ts` 用真实 HTTP 监听 + 真实 daemon app + `InMemoryTransport` 跑完整链路：20 工具清单（断言不含 `approve`）、annotations、创建与读取、各中间态只读工具、dry_run 清单/单文件、409 引导文案（含 create_feature_task 与 submit_acceptance 的闸门）、daemon 不可达与超时提示。
 
