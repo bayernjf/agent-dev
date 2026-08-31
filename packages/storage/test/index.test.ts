@@ -554,3 +554,137 @@ describe('migrations', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Feature Task pipeline execution (§6.5-1 audit remediation: resume / isStepApproved)
+// ---------------------------------------------------------------------------
+
+/** Fixture runner: captures invocation and returns a scripted result. */
+function fakeRunner(script: Array<{ exitCode: number | null; timedOut?: boolean; output?: string }>) {
+  let call = 0;
+  return async () => {
+    const step = script[Math.min(call, script.length - 1)];
+    call += 1;
+    const now = new Date().toISOString();
+    return {
+      exitCode: step.exitCode,
+      signal: null,
+      timedOut: step.timedOut ?? false,
+      output: step.output ?? 'fixture output',
+      startedAt: now,
+      completedAt: now,
+    };
+  };
+}
+
+/** Build an approved, applied project with a feature task and a two-step pipeline on a verified profile. */
+async function seedPipelinedProject(store: AgentDevStore): Promise<{ projectId: string; revision: number; workspacePath: string }> {
+  const created = await store.createProject({
+    name: 'Pipeline Desk',
+    blueprint: createBlueprint('pipeline-desk', { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme' }),
+  });
+  await store.approveBaseline(created.id, 1, 'test-user');
+  const applied = await store.executeApplyRun((await store.createApplyRun(created.id, 1)).id);
+  const { profile } = await store.profiles.createProfile({ name: 'Codex Default', description: 'fixture', baseAgentId: 'codex' });
+  // The pipeline can only be configured while the task is in draft status, so create the task,
+  // attach its pipeline, and only then approve it.
+  await store.createFeatureTask({ projectId: created.id, blueprintRevision: 1, title: 'Build the list', objective: 'Show saved receipts.', acceptanceCriteria: ['The list renders.'] });
+  await store.updateFeatureTaskPipeline(created.id, 1, [
+    { id: 'step-1', name: 'Scaffold list', profileId: profile.id, prompt: 'Build the list view.' },
+    { id: 'step-2', name: 'Wire data', profileId: profile.id, prompt: 'Connect the list to data.' },
+  ]);
+  await store.approveFeatureTask(created.id, 1, 'test-user');
+  return { projectId: created.id, revision: 1, workspacePath: applied.workspacePath };
+}
+
+/** Mark the first pipeline step as requiring human approval by editing the authoritative feature-task.json. */
+async function requireApprovalForFirstStep(workspacePath: string): Promise<void> {
+  const filePath = join(workspacePath, 'feature-task.json');
+  const task = JSON.parse(await readFile(filePath, 'utf8')) as {
+    pipeline: { steps: Array<{ id: string; requiresApproval?: boolean }> };
+  };
+  task.pipeline.steps[0].requiresApproval = true;
+  await writeFile(filePath, JSON.stringify(task, null, 2) + '\n', 'utf8');
+}
+
+describe('feature task pipeline execution', () => {
+  it('pauses before a step that requires approval and does not execute it', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-pipeline-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { projectId, revision, workspacePath } = await seedPipelinedProject(store);
+      await requireApprovalForFirstStep(workspacePath);
+
+      const task = await store.executeFeatureTaskPipeline(projectId, revision, fakeRunner([{ exitCode: 0 }, { exitCode: 0 }]));
+
+      // The approval-gated step must pause the pipeline without running it: isStepApproved() returns
+      // false for any requiresApproval step until an explicit approval API exists.
+      expect(task.pipeline?.status).toBe('paused');
+      expect(task.pipeline?.currentStepIndex).toBe(0);
+      expect(task.pipeline?.results).toHaveLength(0);
+      expect(store.getProject(projectId)?.state).toBe('IMPLEMENTING');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 30_000);
+
+  it('resume clears the approval gate and runs the pipeline to completion', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-pipeline-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { projectId, revision, workspacePath } = await seedPipelinedProject(store);
+      await requireApprovalForFirstStep(workspacePath);
+      await store.executeFeatureTaskPipeline(projectId, revision, fakeRunner([{ exitCode: 0 }, { exitCode: 0 }]));
+
+      const resumed = await store.resumeFeatureTaskPipeline(projectId, revision, fakeRunner([{ exitCode: 0 }, { exitCode: 0 }]));
+
+      expect(resumed.pipeline?.status).toBe('completed');
+      expect(resumed.pipeline?.results).toHaveLength(2);
+      expect(resumed.pipeline?.results.every(result => result.status === 'completed')).toBe(true);
+      // The approval gate on the resumed step is cleared so the next run does not re-pause.
+      expect(resumed.pipeline?.steps[0].requiresApproval).toBe(false);
+      // IMPLEMENTATION_COMPLETE advances the delivery state machine to VERIFYING.
+      expect(store.getProject(projectId)?.state).toBe('VERIFYING');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 30_000);
+
+  it('rejects a resume when the pipeline is not paused', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-pipeline-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { projectId, revision } = await seedPipelinedProject(store);
+      // Never paused: run straight through to completion first.
+      const completed = await store.executeFeatureTaskPipeline(projectId, revision, fakeRunner([{ exitCode: 0 }, { exitCode: 0 }]));
+      expect(completed.pipeline?.status).toBe('completed');
+
+      await expect(store.resumeFeatureTaskPipeline(projectId, revision, fakeRunner([{ exitCode: 0 }]))).rejects.toThrow('Pipeline is not paused.');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 30_000);
+
+  it('fails the pipeline when a step fails and continueOnFailure is unset', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-pipeline-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { projectId, revision } = await seedPipelinedProject(store);
+
+      const task = await store.executeFeatureTaskPipeline(projectId, revision, fakeRunner([{ exitCode: 1, output: 'fixture failure' }]));
+
+      expect(task.pipeline?.status).toBe('failed');
+      expect(task.pipeline?.results).toHaveLength(1);
+      expect(task.pipeline?.results[0]).toMatchObject({ stepId: 'step-1', status: 'failed' });
+      // The failed step stops the run: the second step must not execute.
+      expect(task.pipeline?.results.some(result => result.stepId === 'step-2')).toBe(false);
+      expect(store.getProject(projectId)?.state).toBe('IMPLEMENTING');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 30_000);
+});
