@@ -1,10 +1,12 @@
 # Agent-Dev 项目交接
 
 > 更新时间：2026-08-31
-> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**（S1 绑定回环、§6.1-2 本机 token 鉴权、§6.1-3 URL scheme 白名单、§6.1-4 移除自更新端点）与 **P1 状态机 §6.2 全部 3 项**（advanceDelivery 事务化+非法事件显式抛错+重放幂等、runtime 路由 zod schema、persist await）已于同日修复，下一批为 §6.3 P2 清理（含 secret-backend 去留决策），方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**（S1 绑定回环、§6.1-2 本机 token 鉴权、§6.1-3 URL scheme 白名单、§6.1-4 移除自更新端点）、**P1 状态机 §6.2 全部 3 项**（advanceDelivery 事务化+非法事件显式抛错+重放幂等、runtime 路由 zod schema、persist await）与 **P2 §6.3-1 secret-backend 去留**（用户拍板移除 9 条管理路由、保留库作 P1-2 地基）已于同日修复，下一批为 §6.3 剩余清理项（install.sh 双入口、死代码、确认字面量收敛、文档版本对齐），方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **审计整改 §6.3-1：secret-backend 去留决策落地（2026-08-31）**：用户拍板「移除路由、保留库」。daemon 全部 9 条 `/api/secret-backend/*` 管理路由删除（S4 明文出口消除）——核查确认零消费者（Studio 无 UI、管线走 `/api/credentials`、MCP 桥未暴露），双凭证系统并存问题随之消除。`packages/provider-cli/src/secret-backend/` 库保留作为 P1-2 Infisical Adapter 地基（26 个库测试不动），P1-2 落地时路由随测试文档一起回归。回归测试：带合法 token 请求 `keys`/`:key` 均 404。daemon 27 + provider-cli 26 例全绿，typecheck 通过。
 
 - **审计整改 §6.2：状态机与校验一致性（2026-08-31）**：P1 三项全部完成。
   - **`advanceDelivery`（§6.2-1）**：`deliveryRuns` + `projects` 两表写入包进同一 SQLite 事务；逐事件比较 send 前后状态——非法事件显式抛 `Event X is not allowed in delivery state Y`，不再被 xstate 静默吞掉。**重放幂等例外**：事件目标状态已是当前状态（恢复路径上 `BASELINE_CREATED` 重发）不抛错——实施中发现并修复了一个连带回归：恢复场景重放曾导致步骤全绿但 run 被误标 `failed`。新增 `workflow` 包 `isEventReplay()`（事件→目标状态映射，`PAUSE`/`RESUME`/`FAIL`/`RETRY` 不参与重放判定）。回归测试：非法事件拒绝且状态不变、重放幂等。
