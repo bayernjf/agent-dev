@@ -18,6 +18,10 @@ import { ProfileStore, type CreateProfileInput, type UpdateProfileInput, type Pr
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
 
+// On Windows, npm/npx are .cmd shims and Node (since the CVE-2024-27980 fix) refuses to spawn
+// them without a shell. All call sites pass fixed literal arguments, so shell: true is safe.
+const npmSpawnOptions = process.platform === 'win32' ? { shell: true } : {};
+
 function createOrm(database: Database) {
   return drizzle(database, { schema: { applyRuns, baselineApprovals, projects, blueprintRevisions, deliveryRuns, releaseRuns } });
 }
@@ -774,7 +778,7 @@ export class AgentDevStore {
     let exitCode = 0;
     let output = '';
     try {
-      const result = await execFileAsync('npm', ['run', 'quality'], { cwd: run.workspacePath, timeout: 120_000, maxBuffer: 1_000_000 });
+      const result = await execFileAsync('npm', ['run', 'quality'], { cwd: run.workspacePath, timeout: 120_000, maxBuffer: 1_000_000, ...npmSpawnOptions });
       output = `${result.stdout}${result.stderr}`.trim();
     } catch (error) {
       const cause = error as { code?: number | string; stdout?: string; stderr?: string; message?: string };
@@ -841,7 +845,7 @@ export class AgentDevStore {
     let exitCode = 0;
     let output = '';
     try {
-      const result = await execFileAsync('npm', ['install'], { cwd: run.workspacePath, timeout: 300_000, maxBuffer: 2_000_000 });
+      const result = await execFileAsync('npm', ['install'], { cwd: run.workspacePath, timeout: 300_000, maxBuffer: 2_000_000, ...npmSpawnOptions });
       output = `${result.stdout}${result.stderr}`.trim();
     } catch (error) {
       const cause = error as { code?: number | string; stdout?: string; stderr?: string; message?: string };
