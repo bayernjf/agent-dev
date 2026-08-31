@@ -1201,11 +1201,14 @@ export class AgentDevStore {
     const task = await this.getFeatureTask(projectId, blueprintRevision);
     if (!task || !task.pipeline) throw new Error('Feature Task or pipeline not found.');
     if (task.pipeline.status !== 'paused') throw new Error('Pipeline is not paused.');
-    // Mark the current step as approved by clearing requiresApproval (simplified).
+    // Mark the current step as approved by clearing requiresApproval (simplified). The approval gate
+    // lives in the authoritative feature-task.json, so persist the cleared gate before re-executing —
+    // executeFeatureTaskPipeline re-reads from disk and would otherwise pause on the same step again.
     const currentStep = task.pipeline.steps[task.pipeline.currentStepIndex];
     if (currentStep) {
       currentStep.requiresApproval = false;
     }
+    await this.saveFeatureTask({ ...task, pipeline: task.pipeline });
     return this.executeFeatureTaskPipeline(projectId, blueprintRevision, runner);
   }
 
