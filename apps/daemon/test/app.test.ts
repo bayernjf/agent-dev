@@ -953,6 +953,18 @@ describe('daemon API', () => {
       }
     });
 
+    it('no longer exposes the auto-update endpoints (S2 regression)', async () => {
+      const { store, app } = await openAuthedStore();
+      try {
+        // §6.1-4: both routes were removed entirely — with a valid token they are 404s, not
+        // functional endpoints gated only by the bearer token.
+        expect((await app.request('http://localhost/api/update/check', authed())).status).toBe(404);
+        expect((await app.request('http://localhost/api/update', { ...authed(), method: 'POST' })).status).toBe(404);
+      } finally {
+        await store.close();
+      }
+    });
+
     it('exempts /api/health from the token check', async () => {
       const { store, app } = await openAuthedStore();
       try {

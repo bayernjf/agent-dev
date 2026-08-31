@@ -254,56 +254,10 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
-  // Auto-update
-  app.get('/api/update/check', async context => {
-    try {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      // Fetch latest
-      await execFileAsync('git', ['fetch', 'origin'], { timeout: 15_000 });
-      // Check if behind
-      const local = (await execFileAsync('git', ['rev-parse', 'HEAD'])).stdout.trim();
-      const remote = (await execFileAsync('git', ['rev-parse', '@{u}'])).stdout.trim();
-      const base = (await execFileAsync('git', ['merge-base', 'HEAD', '@{u}'])).stdout.trim();
-      const upToDate = local === remote;
-      const behind = upToDate ? 0 : parseInt((await execFileAsync('git', ['rev-list', '--count', `HEAD..@{u}`])).stdout.trim(), 10);
-      const diverged = local !== base && !upToDate;
-      // Get recent commits if behind
-      let commits: string[] = [];
-      if (behind > 0) {
-        const log = (await execFileAsync('git', ['log', '--oneline', `HEAD..@{u}`])).stdout.trim();
-        commits = log ? log.split('\n') : [];
-      }
-      return context.json({ upToDate, behind, diverged, commits, local, remote });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Update check failed', upToDate: true, behind: 0 }, 500);
-    }
-  });
-
-  app.post('/api/update', async context => {
-    try {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      // Check for uncommitted changes
-      try {
-        await execFileAsync('git', ['diff', '--quiet']);
-        await execFileAsync('git', ['diff', '--cached', '--quiet']);
-      } catch {
-        return context.json({ error: 'Uncommitted changes detected. Please commit or stash before updating.' }, 409);
-      }
-      // Pull
-      await execFileAsync('git', ['pull', '--ff-only'], { timeout: 60_000 });
-      // Install dependencies
-      await execFileAsync('npm', ['install'], { timeout: 120_000 });
-      // Build
-      await execFileAsync('npm', ['run', 'build'], { timeout: 120_000 });
-      return context.json({ ok: true, message: 'Update complete. Restart the daemon to apply changes.' });
-    } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Update failed' }, 500);
-    }
-  });
+  // Auto-update endpoints were removed for the Pilot (docs/audit-2026-08-31.md §6.1-4): the old
+  // POST /api/update ran `git pull` + `npm install` + `npm run build` behind no meaningful gate,
+  // and GET /api/update/check executed `git fetch` on a nominally read-only route. Updating the
+  // checkout is now a deliberate human act: stop the daemon, `git pull`, restart.
 
   // Secret Backend management
   app.get('/api/secret-backend/status', async context => {
