@@ -1,10 +1,18 @@
 # Agent-Dev 项目交接
 
 > 更新时间：2026-08-31
-> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**（S1 绑定回环、§6.1-2 本机 token 鉴权、§6.1-3 URL scheme 白名单、§6.1-4 移除自更新端点）、**P1 状态机 §6.2 全部 3 项**（advanceDelivery 事务化+非法事件显式抛错+重放幂等、runtime 路由 zod schema、persist await）与 **P2 §6.3-1 secret-backend 去留**（用户拍板移除 9 条管理路由、保留库作 P1-2 地基）、**P3 §6.4 Windows 兼容全部 3 项**（npm/npx shell 处理、信号断言、symlink skip，Windows 测试首次全绿）已于同日修复，下一批为 §6.3 剩余清理项（install.sh 双入口、死代码、确认字面量收敛、文档版本对齐），方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
+> 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**（S1 绑定回环、§6.1-2 本机 token 鉴权、§6.1-3 URL scheme 白名单、§6.1-4 移除自更新端点）、**P1 状态机 §6.2 全部 3 项**（advanceDelivery 事务化+非法事件显式抛错+重放幂等、runtime 路由 zod schema、persist await）、**P2 §6.3 清理全部 6 项**（secret-backend 移除路由保留库、install.sh 双入口消除、死代码清理、确认字面量收敛 `@agent-dev/policy` CONFIRMATIONS 单一事实源、文档版本对齐+版本号升 0.2.0、`rm -rf` 改 fs/promises）与 **P3 §6.4 Windows 兼容全部 3 项**（npm/npx shell 处理、信号断言、symlink skip，Windows 测试首次全绿）已于同日完成，全仓 211 例测试全绿，剩余整改仅 §6.5 P4 测试补齐，方案与阻断条件见 [审计文档](docs/audit-2026-08-31.md)
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **审计整改 §6.3：清理与一致性剩余 5 项（2026-08-31）**：P2 除 secret-backend 外全部完成。
+  - **§6.3-2 install.sh 双入口**：根目录遗留副本（153 行、无任何文档引用）删除，唯一入口收敛为 `scripts/install-macos.sh`。
+  - **§6.3-3 死代码**：`buildCodexExecutionPlan`（已被 `buildAgentExecutionPlan` 取代，测试改用后者）、`isPipelineBlocked`（零消费者）删除；`formatDoctorSummary` 经核实被根 package.json `doctor` 脚本消费，**保留**（审计判断修正）；`detectDrift` 按既定决策保留。
+  - **§6.3-4 确认字面量收敛**：新增 `packages/policy/src/confirmations.ts` 导出 `CONFIRMATIONS`（23 个字面量 + `ConfirmationLiteral` 类型）作为单一事实源；daemon `app.ts` 23 处 zod schema、Studio `App.tsx` 20 处请求体、MCP 桥 `mcp.ts` 1 处全部改为引用该常量，三处定义不再可能漂移。MCP 桥的防伪造语义不变（字面量仍固定在桥的调用点，调用方无法传入）。
+  - **§6.3-5 文档版本对齐**：`handoff.md` ReleaseComposer 步数表述 7 步改 9 步（含真实步骤 id 与 `962932a` 演进说明）；`/api/health` 版本号改为从 `apps/daemon/package.json` 读取（与 MCP 桥同法）；**用户拍板版本号升 `0.2.0`**——全部 13 个 package.json（根 + 3 apps + 9 packages）同步。
+  - **§6.3-6 rm -rf**：`storage/src/index.ts` 的 `execFileAsync('rm', ['-rf', ...])` 改为 `node:fs/promises` 的 `rm(path, { recursive: true, force: true })`，消除对 Unix `rm` 二进制的依赖。
+  - **验证**：全仓 typecheck 11 个工作区 0 错误；`npm test` 全量 **211/211 全绿**（含此前偶发 flake 的 storage recovery 用例本轮全量并行也通过）。
 
 - **审计整改 §6.4：Windows 兼容（2026-08-31）**：三项全部完成——npm/npx 四处调用点统一 `shell: win32`（注意 CVE-2024-27980 后不能直接 spawn `npm.cmd`，会 EINVAL）、信号用例平台分支断言、symlink 用例 EPERM skip。**Windows 全仓测试首次全绿**（storage 14/14 + agent-runtime 通过；全量并行时 storage recovery 用例偶发资源竞争 flake，单独运行稳定，非回归）。
 
@@ -111,7 +119,7 @@
   - **环境前提（会被误判成产品缺陷）**：本机所有 `*.vercel.app` 对不走系统代理的进程都是 DNS 污染（连不存在的域名都能解析出地址），必须用系统代理，且 Node 的 `fetch` 需要 `NODE_USE_ENV_PROXY=1` 才读代理变量。Daemon 必须带 `https_proxy`/`http_proxy`/`no_proxy=localhost,127.0.0.1`/`NODE_USE_ENV_PROXY=1` 启动，否则 `verify-api-health`、`verify-joint-smoke` 会报 `fetch failed`。另外新建的 Cloudflare Pages 域名有几秒才生效，第一次联合 Smoke 失败、重跑即过（已确认是域名生效延迟，未误记为缺陷）。
 
 - **生产交付路径与失败 workspace 恢复已实现**（本节写于 2026-08-21，当时真实云端未跑；真实云端已于 2026-08-23 跑通，见上一条）。此前 Daemon 只覆盖到 Preview，`handoff.md` 第 8 节第 7 项因此被阻塞；现在两条前置路径都在：
-  - **生产发布**：新增 `ReleaseComposer`（`packages/deployment-composer/src/release.ts`），按架构第 10 节顺序编排 7 步：`release-quality → deploy-api-production → verify-api-production → build-web-production → deploy-web-production → verify-production-smoke → write-release-evidence`。它**故意不关闭 Vercel Deployment Protection**——那对一次性 Preview 站得住，对生产是错的，因此写成了一条负向断言测试防止将来被悄悄改回来。生产项目名不带分支后缀（一个产品只有一对生产项目），生产 Web origin 由 Cloudflare Pages 项目 apex 推导（Blueprint 里没有生产域名字段），这让 API 的 `ALLOWED_ORIGIN` 与被验证的 URL 在构造上必然相等。
+  - **生产发布**：新增 `ReleaseComposer`（`packages/deployment-composer/src/release.ts`），按架构第 10 节顺序编排 9 步：`checkout-production-source → install-release-dependencies → verify-release-quality → deploy-api-production → verify-api-production → build-web-production → deploy-web-production → verify-production-smoke → write-release-evidence`（其中前两步与生产分支校验是 2026-08-23 `962932a` 补上的，最初为 7 步）。它**故意不关闭 Vercel Deployment Protection**——那对一次性 Preview 站得住，对生产是错的，因此写成了一条负向断言测试防止将来被悄悄改回来。生产项目名不带分支后缀（一个产品只有一对生产项目），生产 Web origin 由 Cloudflare Pages 项目 apex 推导（Blueprint 里没有生产域名字段），这让 API 的 `ALLOWED_ORIGIN` 与被验证的 URL 在构造上必然相等。
   - **两道人工闸门**：新增 `release_runs` 表（migration 0005）与 `POST .../release/request`、`.../release/approve`、`.../release/retry`。`approve` 必须带 `approvedBy` 与 `summary`，空值被拒（错误信息要求说明"谁批准的"）；没有批准就调用 `approveRelease` 会被状态机拒在 `AWAITING_APPROVAL`，且不写任何日志行。Evidence 记录的是**观测值**（HTTP 状态、content-type、实测 CORS 响应头、页面字节数），不是 `passed` 这类判定常量——有一条测试断言序列化后的 observations 不含 `"passed"`。
   - **失败/过期 workspace 恢复**：`POST .../apply/recover` 不在原地修复，而是新建 `revision-N-recovery-M` 的干净 workspace，把旧的留在磁盘上并先报告它的 Git 状态（分支、HEAD、`status --short`、`diff --stat`）。workspace 可用时该接口返回 409，避免退化成常规重新 Apply。`apply_runs` 新增 `recovery_index` 让同一 revision 的多次运行有确定顺序（`created_at` 在同毫秒插入时做不到）。
   - **同时修掉四个真实缺陷**：Provider 项目名未 slug 化；`FAILED.RETRY` 固定回到 `VERIFYING`（失败的发布会被送错状态，现按失败处回到 `RELEASING`）；生成产品的 CI 钉在已废弃的 actions 版本；Preview Evidence 的判定字段是硬编码常量。**注意**：第三项让所有已存在的 workspace 立即变成 `staleConfig`——这正好是恢复路径的第一个真实用例，Daemon 测试就是这么验的。
@@ -327,10 +335,10 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 10. **审计整改（2026-08-31 审计产出，发现与验收标准以 [审计文档](docs/audit-2026-08-31.md) 为准）**。按五批执行，**P0 是外部 Pilot 阻断项——完成前不分发安装脚本**：
     - **P0 网络边界**：`serve()` 绑回 `127.0.0.1`（`apps/daemon/src/index.ts:45`）；全部 `/api/*` 加本机随机 token 鉴权（daemon 启动生成、写入仅当前用户可读文件，Studio 与 MCP 桥携带）；`importRepositoryUrl` 与证据 URL 限制 `http(s)`（封 `ext::`/`file://`/`javascript:`）；移除或门控 `POST /api/update` 与 `GET /api/update/check`。
     - **P1 状态机与校验**：`advanceDelivery` 事务化 + 非法事件显式抛错（`packages/storage/src/index.ts:1555-1573`，即「最近进度」生产交付路径条目记录的未验证边界）；4 条 runtime 门禁路由补 zod（`app.ts:819/850/863/876`）。
-    - **P2 清理与一致性**：决策 secret-backend 去留（默认建议移除——孤儿化、零测试且是凭证泄露通道载体）；删除根目录遗留 `install.sh`；确认字面量收敛单一事实源；修正 ReleaseComposer 步数表述、版本号改为从 package.json 读取。
+    - **P2 清理与一致性（已完成，见「最近进度」§6.3 条目）**：secret-backend 移除路由保留库（用户拍板）；根目录遗留 `install.sh` 已删除；确认字面量已收敛到 `@agent-dev/policy` 的 `CONFIRMATIONS` 单一事实源；ReleaseComposer 步数表述已修正（9 步）、`/api/health` 版本号已改为从 package.json 读取；死代码已清理、`rm -rf` 已改 fs/promises；版本号已升 `0.2.0`（用户拍板）。
     - **P3 Windows 兼容**：`npm`/`npx` 调用处理 `.cmd`（`storage/src/index.ts:777`、`:844`、`agent-runtime/src/doctor.ts`）；信号与符号链接用例按平台适配。
     - **P4 测试补齐**：storage pipeline 执行、MCP 21 工具、`advanceDelivery` 回归、Studio 冒烟。
-    - 需用户决策：secret-backend 去留、版本号是否升 `0.2.0`。
+    - 用户决策均已落定：secret-backend「移除路由、保留库」（2026-08-31）；版本号升 `0.2.0`（2026-08-31）。
 
 ## 9. 用户决策
 
@@ -343,6 +351,8 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 | GitHub Ruleset | 待确认 | 支持则自动计划；权限/套餐不足时生成 Manual Action |
 | Blueprint 开源 | 待确认 | v0.1 稳定后再发布 v1alpha1 |
 | Local Claude Runtime 验证 | 已推迟（2026-08-29） | v0.2 P0-1 暂缓；`claude-code` adapter 保持 `candidate`，不进 verified 列表。当前 Runtime 主力为 OpenCode 2.0 + `nemotron-3-ultra-free`。恢复触发条件：出现主力用 Claude 的 Pilot 用户 / 外部用户明确要求 / 免费模型额度或可用性出问题 |
+| secret-backend 去留 | 已确认（2026-08-31） | 移除 daemon 9 条管理路由（消除 S4 明文出口）；`packages/provider-cli/src/secret-backend/` 库保留作 P1-2 Infisical Adapter 地基 |
+| 版本号升级 | 已确认（2026-08-31） | 全部 13 个 package.json 从 `0.1.0-alpha.0` 升到 `0.2.0`，与 v0.2 Pilot 定位对齐 |
 
 ## 10. 交接完成定义
 
