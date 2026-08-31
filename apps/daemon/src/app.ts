@@ -55,8 +55,8 @@ const applyBaselineSchema = z.object({
   blueprintRevision: z.number().int().positive(),
   confirmation: z.literal('APPLY_BASELINE'),
   noExternalChanges: z.boolean().optional(),
-  /** Optional: URL of an existing Git repository to import instead of generating from scratch. */
-  importRepositoryUrl: z.string().url().optional(),
+  /** Optional: HTTPS URL of an existing Git repository to import instead of generating from scratch. */
+  importRepositoryUrl: httpUrlSchema('importRepositoryUrl').optional(),
 });
 
 const retryApplySchema = z.object({
@@ -113,14 +113,14 @@ const acceptanceApprovalSchema = z.object({
 
 const prEvidenceSchema = z.object({
   confirmation: z.literal('RECORD_PR_EVIDENCE'),
-  url: z.string().url(),
+  url: httpUrlSchema('url'),
   checks: z.array(z.string().trim().min(1).max(300)).min(1).max(20),
 });
 
 const previewEvidenceSchema = z.object({
   confirmation: z.literal('RECORD_PREVIEW_EVIDENCE'),
-  apiUrl: z.string().url(),
-  webUrl: z.string().url(),
+  apiUrl: httpUrlSchema('apiUrl'),
+  webUrl: httpUrlSchema('webUrl'),
   smokeTest: z.string().trim().min(10).max(2000),
 });
 

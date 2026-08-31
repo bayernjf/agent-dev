@@ -1005,4 +1005,76 @@ describe('daemon API', () => {
       }
     });
   });
+
+  describe('URL scheme allowlist (S3/S7)', () => {
+    const post = (body: unknown) => ({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const apply = (url: string) => post({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE', importRepositoryUrl: url });
+    const prEvidence = (url: string) => post({ confirmation: 'RECORD_PR_EVIDENCE', url, checks: ['quality: SUCCESS'] });
+    const previewEvidence = (apiUrl: string, webUrl: string) => post({ confirmation: 'RECORD_PREVIEW_EVIDENCE', apiUrl, webUrl, smokeTest: 'api and web respond 200' });
+
+    async function openStore() {
+      const directory = await mkdtemp(join(tmpdir(), 'agent-dev-urls-'));
+      directories.push(directory);
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { app } = createDaemonApp(store, undefined, {});
+      const created = await app.request('http://localhost/api/projects', post({ name: 'Url Guard' }));
+      const { project } = await created.json() as { project: { id: string } };
+      return { store, app, projectId: project.id };
+    }
+
+    it('rejects import URLs whose scheme is not http(s) before git clone can run (ext:: RCE)', async () => {
+      const { store, app, projectId } = await openStore();
+      try {
+        for (const url of ['ext::sh -c touch% /tmp/pwned', 'file:///C:/some/repo', 'git@github.com:acme/repo.git', 'ssh://git@github.com/acme/repo.git']) {
+          const res = await app.request(`http://localhost/api/projects/${projectId}/apply`, apply(url));
+          expect(res.status, `expected 400 for ${url}`).toBe(400);
+        }
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('accepts an http(s) import URL through schema validation', async () => {
+      const { store, app, projectId } = await openStore();
+      try {
+        // Schema validation is the part under test. Port 1 on loopback refuses the connection
+        // immediately, so the clone fails fast without any real network dependency; the failure
+        // surfaces as a failed apply run — never a 400 schema rejection.
+        const res = await app.request(`http://localhost/api/projects/${projectId}/apply`, apply('http://127.0.0.1:1/repo.git'));
+        expect(res.status).not.toBe(400);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('rejects javascript: and other non-http(s) PR evidence URLs (stored XSS)', async () => {
+      const { store, app, projectId } = await openStore();
+      try {
+        for (const url of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'file:///etc/passwd']) {
+          const res = await app.request(`http://localhost/api/projects/${projectId}/delivery/pr-evidence`, prEvidence(url));
+          expect(res.status, `expected 400 for ${url}`).toBe(400);
+        }
+        // A benign https URL passes schema validation; this fresh project then fails the
+        // LOCAL_ACCEPTED delivery gate (409), proving the schema is what rejected the others.
+        const ok = await app.request(`http://localhost/api/projects/${projectId}/delivery/pr-evidence`, prEvidence('https://github.com/acme/repo/pull/1'));
+        expect(ok.status).toBe(409);
+      } finally {
+        await store.close();
+      }
+    });
+
+    it('rejects non-http(s) preview evidence URLs', async () => {
+      const { store, app, projectId } = await openStore();
+      try {
+        expect((await app.request(`http://localhost/api/projects/${projectId}/delivery/preview-evidence`, previewEvidence('javascript:alert(1)', 'https://web.example'))).status).toBe(400);
+        expect((await app.request(`http://localhost/api/projects/${projectId}/delivery/preview-evidence`, previewEvidence('https://api.example', 'ftp://web.example'))).status).toBe(400);
+      } finally {
+        await store.close();
+      }
+    });
+  });
 });
