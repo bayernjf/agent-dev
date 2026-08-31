@@ -10,7 +10,7 @@ import initSqlJs, { type Database } from 'sql.js';
 import type { ProductBlueprint } from '@agent-dev/blueprint';
 import { createBaselinePlan, createDryRunPlan, productBlueprintSchema } from '@agent-dev/blueprint';
 import { buildAgentExecutionPlan, executeCodexPlan, isAgentExecutable, type CodexExecutionPlan, type CodexExecutionResult, type CodexProcessRunner, type AgentProfile, resolvePipelinePrompt, getNextPipelineStep, isPipelineComplete, type FeatureTaskPipeline, type PipelineStep, type PipelineStepResult } from '@agent-dev/agent-runtime';
-import { createNeedsInputRun, restoreDeliveryActor, type DeliveryEvent, type DeliverySnapshot, type DeliveryState } from '@agent-dev/workflow';
+import { createNeedsInputRun, restoreDeliveryActor, isEventReplay, type DeliveryEvent, type DeliverySnapshot, type DeliveryState } from '@agent-dev/workflow';
 import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects, releaseRuns } from './schema.js';
 import { migrations } from './migrations.js';
 import { ProfileStore, type CreateProfileInput, type UpdateProfileInput, type ProfileValidationResult } from './profiles-store.js';
@@ -432,7 +432,7 @@ export class AgentDevStore {
     }));
   }
 
-  reviseBlueprint(projectId: string, blueprint: ProductBlueprint): StoredProject {
+  async reviseBlueprint(projectId: string, blueprint: ProductBlueprint): Promise<StoredProject> {
     const project = this.getProject(projectId);
     if (!project) throw new Error(`Project ${projectId} not found.`);
     const newRevision = project.blueprint.metadata.revision + 1;
@@ -453,7 +453,7 @@ export class AgentDevStore {
       productType: updatedBlueprint.spec.product.type,
       updatedAt: now,
     }).where(eq(projects.id, projectId)).run();
-    this.persist();
+    await this.persist();
     return this.getProject(projectId)!;
   }
 
@@ -1557,12 +1557,39 @@ export class AgentDevStore {
     if (!project) throw new Error(`Project ${projectId} was not found.`);
     const actor = restoreDeliveryActor({ projectId: project.id, runId: project.runId }, project.snapshot as DeliverySnapshot);
     try {
-      for (const event of events) actor.send(event);
+      // Drive the actor to its post-event state first. An event the machine has no transition
+      // for is silently dropped by xstate, so compare states before and after each send:
+      // an event that changes nothing is a bug at the call site, not a no-op to persist.
+      // The one exception is a replay: an event whose target state is already the current
+      // state (e.g. BASELINE_CREATED on a recovered workspace whose run already reached
+      // BASELINE_READY) is idempotent, not an error.
+      let before = actor.getSnapshot().value as DeliveryState;
+      for (const event of events) {
+        actor.send(event);
+        const after = actor.getSnapshot().value as DeliveryState;
+        if (after === before) {
+          if (!isEventReplay(before, event.type)) {
+            throw new Error(`Event ${event.type} is not allowed in delivery state ${before}.`);
+          }
+          // Replay of an already-taken transition: keep the current state.
+        } else {
+          before = after;
+        }
+      }
       const snapshot = actor.getPersistedSnapshot();
-      const state = actor.getSnapshot().value as DeliveryState;
+      const state = before;
       const updatedAt = new Date().toISOString();
-      this.orm.update(deliveryRuns).set({ state, snapshotJson: JSON.stringify(snapshot), updatedAt }).where(eq(deliveryRuns.id, project.runId)).run();
-      this.orm.update(projects).set({ status: state, updatedAt }).where(eq(projects.id, projectId)).run();
+      // The two writes (delivery run + project row) form one transition; wrap them in a SQLite
+      // transaction so a crash in between cannot leave the run and project disagreeing.
+      this.sqlite.run('BEGIN IMMEDIATE;');
+      try {
+        this.orm.update(deliveryRuns).set({ state, snapshotJson: JSON.stringify(snapshot), updatedAt }).where(eq(deliveryRuns.id, project.runId)).run();
+        this.orm.update(projects).set({ status: state, updatedAt }).where(eq(projects.id, projectId)).run();
+        this.sqlite.run('COMMIT;');
+      } catch (error) {
+        this.sqlite.run('ROLLBACK;');
+        throw error;
+      }
       await this.persist();
     } finally {
       actor.stop();
