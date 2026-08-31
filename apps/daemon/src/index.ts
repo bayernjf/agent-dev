@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname, parse } from 'node:path';
 import { AgentDevStore } from '@agent-dev/storage';
 import { createDaemonApp } from './app.js';
+import { loadOrCreateDaemonToken } from './auth.js';
 import { DaemonEventBus } from './events.js';
 
 export { createDaemonApp } from './app.js';
@@ -41,8 +42,10 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
     join(resolveWorkspaceRoot(process.cwd()), '.agent-dev', 'agent-dev.sqlite');
   const dataDirectory = dirname(databasePath);
   const store = await AgentDevStore.open(databasePath);
-  const { app, events } = createDaemonApp(store, new DaemonEventBus(), {}, dataDirectory);
-  // Loopback only, on purpose: the API is unauthenticated (see docs/audit-2026-08-31.md, S1).
+  const authToken = loadOrCreateDaemonToken();
+  const { app, events } = createDaemonApp(store, new DaemonEventBus(), {}, dataDirectory, { authToken });
+  // Loopback only, on purpose: the API is unauthenticated beyond the bearer token
+  // (see docs/audit-2026-08-31.md, S1 and §6.1-2).
   const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' });
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
