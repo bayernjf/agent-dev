@@ -638,7 +638,12 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     return context.json({ probe: probeAgentCapabilities(agent.id, agent.launchCommand), adapterStatus: getAgentAdapterStatus(agent.id) });
   });
 
-  app.get('/api/runtime/catalog', context => context.json({ agents: discoverAgentRuntimes(customAgents) }));
+  // `detected` answers "is this CLI installed here", which is not the claim Studio makes next to
+  // the name. Only the Adapter registry knows whether the execution contract has been exercised, so
+  // the answer travels with the catalog instead of being guessed by the browser.
+  app.get('/api/runtime/catalog', context => context.json({
+    agents: discoverAgentRuntimes(customAgents).map(agent => ({ ...agent, adapterStatus: getAgentAdapterStatus(agent.id) })),
+  }));
 
   app.post('/api/runtime/catalog', async context => {
     const parsed = customAgentSchema.safeParse(await context.req.json().catch(() => null));
@@ -646,7 +651,8 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (customAgents.some(agent => agent.name.toLowerCase() === parsed.data.name.toLowerCase())) return context.json({ error: 'An Agent with this name already exists.' }, 409);
     customAgents.push(parsed.data);
     if (dataDirectory) saveCustomAgents(dataDirectory, customAgents);
-    return context.json({ agent: discoverAgentRuntimes(customAgents).at(-1) }, 201);
+    const agent = discoverAgentRuntimes(customAgents).at(-1);
+    return context.json({ agent: agent ? { ...agent, adapterStatus: getAgentAdapterStatus(agent.id) } : agent }, 201);
   });
 
   // --- Agent Profiles ---
