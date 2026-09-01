@@ -956,6 +956,24 @@ describe('daemon API', () => {
       }
     });
 
+    it('reports the credential backend status without exposing secret material', async () => {
+      const { store, app } = await openAuthedStore();
+      const previous = process.env.AGENT_DEV_SECRET_BACKEND;
+      delete process.env.AGENT_DEV_SECRET_BACKEND;
+      try {
+        // Same token gate as every other credential route.
+        expect((await app.request('http://localhost/api/credentials/backend')).status).toBe(401);
+        const response = await app.request('http://localhost/api/credentials/backend', authed());
+        expect(response.status).toBe(200);
+        const payload = await response.json() as { type?: string; available?: boolean; reason?: string; projectId?: string; environment?: string };
+        expect(payload).toEqual({ type: 'local-file', available: true });
+      } finally {
+        if (previous === undefined) delete process.env.AGENT_DEV_SECRET_BACKEND;
+        else process.env.AGENT_DEV_SECRET_BACKEND = previous;
+        await store.close();
+      }
+    });
+
     it('no longer exposes the auto-update endpoints (S2 regression)', async () => {
       const { store, app } = await openAuthedStore();
       try {
