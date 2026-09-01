@@ -162,6 +162,9 @@ export const en = {
     agentCodebuddyInstall: 'npm install -g @bytedance/codebuddy-cli',
     agentHermesDesc: 'Nous Research Hermes CLI. Open-source model with strong instruction following. Good for local/offline use.',
     agentHermesInstall: 'pip install hermes-agent',
+    // No install command is offered: this repository documents OpenClaw's launch command but not how
+    // it is installed, and guessing here would tell the user to run something unverifiable.
+    agentOpenclawDesc: 'OpenClaw CLI. Runs a local embedded agent turn through its agent subcommand. The Adapter is still a candidate, so only a dry-run plan is available until execution is verified.',
     agentAiderDesc: 'Aider AI pair programmer. Git-native, works with many models. Good for incremental changes.',
     agentAiderInstall: 'pip install aider-chat',
     agentPiDesc: 'Read-only code analysis agent. Does not modify files. Good for code review and understanding.',
