@@ -1292,6 +1292,17 @@ select option {
 .credential-status.connected { color: var(--status-ok); background: color-mix(in srgb, var(--status-ok) 12%, var(--surface)); }
 .credential-status.missing { color: var(--status-run); background: color-mix(in srgb, var(--status-run) 12%, var(--surface)); }
 
+.credential-backend {
+  display: inline-block;
+  margin: -6px 0 0;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.credential-backend.connected { color: var(--status-ok); background: color-mix(in srgb, var(--status-ok) 12%, var(--surface)); }
+.credential-backend.unavailable { color: var(--status-fail); background: color-mix(in srgb, var(--status-fail) 12%, var(--surface)); }
+
 .credential-hint { color: var(--text-2); font-size: 11px; line-height: 1.4; }
 .credential-tutorial { color: var(--accent); font-size: 11px; font-weight: 600; text-decoration: none; }
 .credential-tutorial:hover { color: var(--accent-2); text-decoration: underline; }

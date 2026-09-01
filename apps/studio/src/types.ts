@@ -238,6 +238,15 @@ export type CredentialMeta = {
   keys: string[];
 };
 
+// Read-only secret backend status from GET /api/credentials/backend; never carries plaintext.
+export type CredentialBackendInfo = {
+  type: 'local-file' | 'infisical';
+  available: boolean;
+  reason?: string;
+  projectId?: string;
+  environment?: string;
+};
+
 export type ProjectResources = {
   version: number;
   projectName: string;
