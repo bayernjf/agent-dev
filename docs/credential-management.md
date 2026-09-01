@@ -1,7 +1,7 @@
 # 凭证与环境变量管理方案
 
 > 创建时间：2026-08-08
-> 状态：Phase 1 本地文件/API 已实现；Phase 2 Studio 凭证面板已实现（当前面板增强形式：引导模式 + 验证 + Supabase 手动配置 + 自定义 Key）；真实 Supabase 自动 Adapter 按用户决策不做，保持 Manual 引导
+> 状态：Phase 1 本地文件/API 已实现；Phase 2 Studio 凭证面板已实现（当前面板增强形式：引导模式 + 验证 + Supabase 手动配置 + 自定义 Key）；真实 Supabase 自动 Adapter 按用户决策不做，保持 Manual 引导；**Secret Backend 后端化已实现（2026-09-01，默认行为不变，Infisical 真实验证待办，见 §3.5）**
 > 前置依赖：Real Provider Adapter 已验证通过（GitHub、Vercel、Cloudflare 真实接入，Supabase Manual 降级）
 
 ## 1. 问题背景
@@ -178,6 +178,36 @@ AGENT_DEV_CREDENTIALS_PATH=/my/custom/path/creds.txt
 const CREDENTIALS_PATH = process.env.AGENT_DEV_CREDENTIALS_PATH
   ?? join(process.env.HOME || process.env.USERPROFILE || '', '.agent-dev', 'credentials.txt');
 ```
+
+### 3.5 Secret Backend 后端化（2026-09-01 实现）
+
+凭证存储现在可通过 `SecretBackend` 抽象（`packages/provider-cli/src/secret-backend/`）切换后端，由环境变量 `AGENT_DEV_SECRET_BACKEND` 选择：
+
+- **`local-file`（默认，未设或设为此值）**：现有直写 `credentials.txt` 的实现，`loadCredentials`/`saveCredentials` 逻辑**字节级不变**，存储格式不迁移。
+- **`infisical`**：读写在 Infisical 后端与凭证系统之间切换。读走进程内快照——daemon 启动时 `refreshCredentialCache()` 水合、每次保存成功后重新水合——因此 25+ 个同步 `providerCredentialEnv()` 调用点无需异步化；进程外的 Infisical 控制台改动在下一次刷新时生效。
+
+Infisical 后端双认证路径：
+
+- **API 路径**（设 `INFISICAL_SERVICE_TOKEN`）：REST API v4（`/api/v4/secrets`，Bearer 认证），写操作的值走 JSON body，**不进 argv**（修复审计 S10）。端点形状按官方 OpenAPI 实现（2026-09-01 确认），**尚未对真实云端验证**。
+- **CLI 路径**（无 token）：`infisical secrets get/set/delete/list`。`secrets set KEY=VALUE` 的值仍在 argv（CLI 限制，本进程列表可见）——如实声明而非伪装已解决；需要写操作隐私时请配置 Service Token 走 API 路径。
+
+诚实事实（延续 §4.2 原则）：CLI 无法观测版本与时间戳，`Secret` 类型的 `version`/`createdAt`/`updatedAt` 为可选字段，CLI 路径不伪造；已确认的 v4 端点无版本历史读取，`getHistory()` 返回空数组；审批工作流是 Infisical 控制台的原生能力，`approve()`/`reject()` 抛错而非伪造审批状态；`isAvailable()` 的 CLI `whoami` 检查待真实验证。
+
+失败语义（**禁止静默回退**）：
+
+- `AGENT_DEV_SECRET_BACKEND=infisical` 且后端不可用时，daemon 启动的水合步骤直接抛错并停止启动——绝不退回本地文件造成「已保存」的假象。
+- 未水合时同步读凭证抛错（而不是读空）。三个读出口（`loadCredentials` / `providerCredentialEnv` / `getCredentialMeta`）均不会退回本地文件，已有磁盘哨兵测试锁定（见本节末）。
+- `saveCredentials` 与快照做 diff：新增/变更走 `set`、被移除的 key 走 `delete`，全部成功后才推进快照；中途失败时快照仍反映 Infisical 实际持有内容，重试只补缺失的写入。
+
+配套变更：daemon 新增只读 `GET /api/credentials/backend`（返回 `{ type, available, reason?, projectId?, environment? }`，不含任何明文，走既有 Bearer token 鉴权）；Studio 凭证面板顶部展示后端状态一行（抽取为 `components/CredentialBackendStatus.tsx`）。
+
+测试与真实验证：
+
+- `packages/provider-cli/test/secret-backend.test.ts`（19 例）——适配器双路径（mock runner + stub fetch）。
+- **不静默回退的磁盘哨兵证据**（`packages/provider-cli/test/index.test.ts`）：把 `AGENT_DEV_CREDENTIALS_PATH` 指向含 sentinel 的真实文件与 `.meta.json`，后端 `isAvailable` 返回 `{available:false}` 时：`refreshCredentialCache()` 抛出原因、`loadCredentials()` 与 `providerCredentialEnv()` 仍抛 `not hydrated`（**不得**返回 sentinel）、`getCredentialMeta()` 返回空 keys 而非本地 meta、且失败后磁盘文件字节不变。用例含正向对照（不设后端时同一文件可读），确保失败归因于后端选择而非 fixture 坏掉。
+- Studio 渲染证据（`apps/studio/test/smoke.test.tsx` 4 例）：`.credential-backend` 的 `connected` / `unavailable` 两分支（含 reason 透传）、`noteInfisical` 与本地文件文案互斥切换、探针未回答时不渲染状态行。`apps/studio/tsconfig.json` 的 include 补上 `test` 使 Studio 测试首次纳入 typecheck。
+- 补测后全仓 `npm test` **249/249 全绿**，typecheck 与 `npm run build` 通过。
+- **真实 Infisical 云端验证延后（用户决策）**——`spikes/infisical-backend/probe.mjs --online` 是既定验证入口，P1-2 状态为「代码完成，真实验证待办」。
 
 ## 4. Layer 2：项目资源清单
 

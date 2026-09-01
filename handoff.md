@@ -6,6 +6,7 @@
 
 ## 最近进度
 
+- **P1-2 Infisical Secret Backend Adapter 代码完成（2026-09-01，真实云端验证延后）**：用户拍板「凭证系统后端化集成 + 真实验证延后」。`credentials.ts` 后端化——`AGENT_DEV_SECRET_BACKEND=infisical` 时读写在 Infisical 与本地文件间切换，默认 `local-file` **字节级不变**；读走进程内快照（daemon 启动水合 + 保存后重水合），25+ 个同步 `providerCredentialEnv()` 调用点无需异步化；后端不可用时大声失败、**不静默回退**。`InfisicalBackend` 重写为双认证路径（Service Token 走 REST API v4，写操作值进 JSON body 修复 S10；无 token 走 CLI 并如实声明 argv 限制）；删除伪造的 version/history/approval（`Secret` 类型对应字段改可选）；Windows `shell: 'win32'` 兼容。daemon 新增只读 `GET /api/credentials/backend`（无明文）+ Studio 凭证面板后端状态一行。测试全新编写：`secret-backend.test.ts` 19 例 + 凭证后端路由 5 例 + daemon 契约 1 例（**更正**：审计 §6.3-1 所称「26 个库测试保留」不实，secret-backend 此前零测试）。「禁止静默回退」已拿到磁盘哨兵证据（`index.test.ts`）：`AGENT_DEV_CREDENTIALS_PATH` 指向含 sentinel 的真实文件时，后端不可用则 `refreshCredentialCache()` 抛出原因、`loadCredentials()`/`providerCredentialEnv()` 仍抛 `not hydrated`、`getCredentialMeta()` 返回空 keys、失败后文件字节不变；含正向对照（不设后端时同一文件可读）。Studio 面板抽为 `components/CredentialBackendStatus.tsx`，`smoke.test.tsx` +4 例锁住 connected/unavailable 两分支与 noteInfisical 文案互斥；`apps/studio/tsconfig.json` include 补 `test`（Studio 测试此前完全不在 typecheck 范围内，也导致 `--jsx` 未设置）。补测后全仓 **249/249 全绿**，typecheck 与 build 通过。探测脚本 `spikes/infisical-backend/`（离线 + `--online` 回环）已就绪，本轮未跑在线探测；P1-2 状态「代码完成，真实验证待办」，不满足 ✅。
 - **审计整改 §6.5：P4 测试补齐全部 4 项（2026-08-31）**：审计整改全部完成。
   - **§6.5-1 storage pipeline 执行测试**：新增「feature task pipeline execution」describe（`packages/storage/test/index.test.ts`）4 例——requiresApproval 步骤暂停且不执行（证明 `isStepApproved` 未批准时拦截）、resume 清除审批门并跑到 completed（断言项目状态推进 VERIFYING）、非 paused 状态 resume 抛错、步骤失败且 continueOnFailure 未设时 pipeline 失败且后续步骤不执行。**测试驱动修复真实缺陷**：`resumeFeatureTaskPipeline` 清除内存 step 的 `requiresApproval` 后未落盘，`executeFeatureTaskPipeline` 重读磁盘仍见审批门导致 resume 无法恢复——现已先 `saveFeatureTask` 落盘再执行。
   - **§6.5-2 MCP 桥 20 工具全覆盖**：新增 2 例覆盖此前仅注解检查的 5 个工具（`get_runtime`、`get_connectors`[注入 stub dependencies 避免真实 CLI 探测]、`get_release`、`get_release_plan`[409 门禁透传]、`revise_blueprint`[revision 2 + 404 透传]），20 工具全部有行为断言。
@@ -23,7 +24,7 @@
 
 - **审计整改 §6.4：Windows 兼容（2026-08-31）**：三项全部完成——npm/npx 四处调用点统一 `shell: win32`（注意 CVE-2024-27980 后不能直接 spawn `npm.cmd`，会 EINVAL）、信号用例平台分支断言、symlink 用例 EPERM skip。**Windows 全仓测试首次全绿**（storage 14/14 + agent-runtime 通过；全量并行时 storage recovery 用例偶发资源竞争 flake，单独运行稳定，非回归）。
 
-- **审计整改 §6.3-1：secret-backend 去留决策落地（2026-08-31）**：用户拍板「移除路由、保留库」。daemon 全部 9 条 `/api/secret-backend/*` 管理路由删除（S4 明文出口消除）——核查确认零消费者（Studio 无 UI、管线走 `/api/credentials`、MCP 桥未暴露），双凭证系统并存问题随之消除。`packages/provider-cli/src/secret-backend/` 库保留作为 P1-2 Infisical Adapter 地基（26 个库测试不动），P1-2 落地时路由随测试文档一起回归。回归测试：带合法 token 请求 `keys`/`:key` 均 404。daemon 27 + provider-cli 26 例全绿，typecheck 通过。
+- **审计整改 §6.3-1：secret-backend 去留决策落地（2026-08-31）**：用户拍板「移除路由、保留库」。daemon 全部 9 条 `/api/secret-backend/*` 管理路由删除（S4 明文出口消除）——核查确认零消费者（Studio 无 UI、管线走 `/api/credentials`、MCP 桥未暴露），双凭证系统并存问题随之消除。`packages/provider-cli/src/secret-backend/` 库保留作为 P1-2 Infisical Adapter 地基（P1-2 落地时库测试全新编写，见最近进度 2026-09-01 条目），P1-2 落地时路由随测试文档一起回归。回归测试：带合法 token 请求 `keys`/`:key` 均 404。daemon 27 + provider-cli 26 例全绿，typecheck 通过。
 
 - **审计整改 §6.2：状态机与校验一致性（2026-08-31）**：P1 三项全部完成。
   - **`advanceDelivery`（§6.2-1）**：`deliveryRuns` + `projects` 两表写入包进同一 SQLite 事务；逐事件比较 send 前后状态——非法事件显式抛 `Event X is not allowed in delivery state Y`，不再被 xstate 静默吞掉。**重放幂等例外**：事件目标状态已是当前状态（恢复路径上 `BASELINE_CREATED` 重发）不抛错——实施中发现并修复了一个连带回归：恢复场景重放曾导致步骤全绿但 run 被误标 `failed`。新增 `workflow` 包 `isEventReplay()`（事件→目标状态映射，`PAUSE`/`RESUME`/`FAIL`/`RETRY` 不参与重放判定）。回归测试：非法事件拒绝且状态不变、重放幂等。
@@ -214,7 +215,7 @@ Agent-Dev 是面向 AI 产品创作者的 Agentic Product Delivery Platform。�
 | Git 仓库 | 已初始化；Phase 0 提交已完成 |
 | package.json / 代码骨架 | npm workspaces、Studio、Daemon、Blueprint、Policy、Provider Core、Provider CLI、Storage、Workflow 已实现 |
 | 真实 Provider Adapter | GitHub/Vercel/Cloudflare 真实 CLI 接入已验证；Supabase Manual 降级已验证；RealProviderRegistry 统一编排，支持 CLI 可用性自动检测和 Manual 降级；Promise.allSettled 部分失败处理 |
-| 凭证管理方案 | Phase 1 + Phase 2 已实现（详见 [凭证管理方案](docs/credential-management.md)）。凭证/元数据写入 Agent-Dev `.agent-dev` 目录，项目资源清单写入 workspace `.agent-dev`，自动生成 `.env`；Studio 凭证面板（引导模式 + 验证 + Supabase 手动配置 + 自定义 Key）已完成 |
+| 凭证管理方案 | Phase 1 + Phase 2 已实现（详见 [凭证管理方案](docs/credential-management.md)）。凭证/元数据写入 Agent-Dev `.agent-dev` 目录，项目资源清单写入 workspace `.agent-dev`，自动生成 `.env`；Studio 凭证面板（引导模式 + 验证 + Supabase 手动配置 + 自定义 Key + Secret 后端状态展示）已完成；**Secret Backend 后端化已实现**（2026-09-01）：`AGENT_DEV_SECRET_BACKEND=infisical` 切换 Infisical 后端，默认 `local-file` 不变，真实 Infisical 云端验证待办 |
 | Dual Preview 部署编排 | `packages/deployment-composer` 已实现：7 步幂等编排（含 Vercel SSO Protection 关闭）、精确 CORS origin、临时项目清理、Daemon Preview API 和 Studio 部署区块；证据会区分 Wrangler 实测 URL 与推导兜底 URL；真实云端 7/7 步已于 2026-08-14 跑通并独立复验，剩余未验证项是 PR 关闭后的清理链路 |
 | 当前本地能力 | Blueprint Revision、Dry Run、Connector Preflight/Discovery、资源归属计划、本地审批、六类产品模板（Web SaaS / 落地页 / 浏览器插件 MV3 / 桌面端 Tauri v2 与 Electron / 移动端 Expo / API 工具）、隔离工作区 Git baseline、Feature Task 与人工 Approval、Codex Runtime dry-run/Execute/Retry、运行结果和 Git evidence、Acceptance Gate、Final Delivery Report、Local Quality Gate、Local Apply Simulator、XState 状态推进（含 `LOCAL_ACCEPTED`）、PR/Preview 证据推进 API、Fake Provider Adapter、真实 Provider Adapter（GitHub/Vercel/Cloudflare）及 Studio 展示、凭证管理 UI（含验证和引导）、Dual Preview 部署编排；Agent Catalog 已支持 Key-Value 内置目录、Studio 选择、Custom Agent 弹窗和 `.agent-dev/agents.conf` 持久化、刷新检测和只读 Capability Probe 展示；内置未安装项隐藏、custom 未安装项置灰；多 Agent 真实执行 Adapter、Supabase 真实自动接入尚未实现；签名/公证/商店提交按设计仍是人工步骤，每类模板内附 `generated/DISTRIBUTION.md` 清单 |
 | 生产交付路径 | 已实现并**已在真实云端跑通**（2026-08-23 `Receipt Test` → `DELIVERED`，批准人 `feng`；2026-08-24 项目 3 `Link Vault` 同样从 `main` checkout 独立发布验证）：`ReleaseComposer` 9 步编排 + `release_runs` 日志 + Daemon `release/plan\|request\|approve\|retry` + Studio 发布区块。两道人工闸门（请求、具名批准）由状态机与 Schema 强制，Evidence 记录观测值而非判定常量，生产批准始终由用户本人给出。从记录仓库的生产分支 checkout 后发布，并要求该分支已带上被验收的提交（`962932a`），此前的"从本地 workspace 发布"缺口已修、并已真实跑过 |
@@ -346,6 +347,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
     - **P3 Windows 兼容**：`npm`/`npx` 调用处理 `.cmd`（`storage/src/index.ts:777`、`:844`、`agent-runtime/src/doctor.ts`）；信号与符号链接用例按平台适配。
     - **P4 测试补齐（已完成，见「最近进度」§6.5 条目）**：storage pipeline 执行（含 resume 未落盘缺陷修复）、MCP 20 工具全覆盖、`advanceDelivery` 回归、Studio 渲染冒烟。
     - 用户决策均已落定：secret-backend「移除路由、保留库」（2026-08-31）；版本号升 `0.2.0`（2026-08-31）。
+11. **v0.2 收尾**：P0/P1/P2 全部完成后，仅剩 **P1-2 真实验证待办**——在 Infisical 控制台建 scratch 项目，按 [spikes/infisical-backend/README](spikes/infisical-backend/README.md) 配置后跑 `npm run probe:online`，回环 `complete: true` 后把 P1-2 状态升级为已验证（同步 `docs/implementation-plan-v0.2.md` 与 [凭证管理方案 §3.5](docs/credential-management.md)）。并行小尾巴不变：PR 关闭清理真实验证、遗留 Preview 资源清理、Studio 界面链路逐项核对。
 
 ## 9. 用户决策
 
@@ -360,6 +362,8 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 | Local Claude Runtime 验证 | 已推迟（2026-08-29） | v0.2 P0-1 暂缓；`claude-code` adapter 保持 `candidate`，不进 verified 列表。当前 Runtime 主力为 OpenCode 2.0 + `nemotron-3-ultra-free`。恢复触发条件：出现主力用 Claude 的 Pilot 用户 / 外部用户明确要求 / 免费模型额度或可用性出问题 |
 | secret-backend 去留 | 已确认（2026-08-31） | 移除 daemon 9 条管理路由（消除 S4 明文出口）；`packages/provider-cli/src/secret-backend/` 库保留作 P1-2 Infisical Adapter 地基 |
 | 版本号升级 | 已确认（2026-08-31） | 全部 13 个 package.json 从 `0.1.0-alpha.0` 升到 `0.2.0`，与 v0.2 Pilot 定位对齐 |
+| P1-2 Infisical 集成方式 | 已确认（2026-09-01） | 凭证系统后端化（`credentials.ts` 经 `SecretBackend` 抽象切换，默认 `local-file` 字节级不变），不恢复独立 secret-backend 路由 |
+| P1-2 真实验证时机 | 已确认（2026-09-01） | 延后：本轮交付代码 + 单元测试 + 探测脚本与配置指南；P1-2 标记「代码完成，真实验证待办」，不满足 ✅ |
 
 ## 10. 交接完成定义
 
