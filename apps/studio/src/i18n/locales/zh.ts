@@ -260,6 +260,9 @@ export const zh = {
   credentials: {
     title: '凭证',
     note: 'Token 仅保存在本机 {path} 中，不会上传到任何服务器。',
+    backendStatus: '密钥后端：{type}',
+    backendUnavailable: '密钥后端 {type} 不可用 — {reason}',
+    noteInfisical: 'Token 保存在本机配置的 Infisical 密钥后端中，不会写入本地凭证文件。',
     guideMode: '引导模式',
     skipGuide: '跳过引导',
     step: '第 {current} 步，共 {total} 步',

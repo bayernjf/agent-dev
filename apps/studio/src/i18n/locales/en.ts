@@ -263,6 +263,9 @@ export const en = {
   credentials: {
     title: 'Credentials',
     note: 'Tokens are stored only in {path} on your machine. They are never uploaded to any server.',
+    backendStatus: 'Secret backend: {type}',
+    backendUnavailable: 'Secret backend {type} unavailable — {reason}',
+    noteInfisical: 'Tokens are stored in the Infisical secret backend configured for this machine. They are not written to a local credentials file.',
     guideMode: 'Guide Mode',
     skipGuide: 'Skip guide',
     step: 'Step {current} of {total}',

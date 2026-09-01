@@ -10,11 +10,12 @@ import { baselineProvidersFor, getBlueprintDecisions, runtimeProviderSchema, typ
 import { CONFIRMATIONS } from '@agent-dev/policy/confirmations';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
 import { FailureDisplay } from './components/FailureDisplay';
+import { CredentialBackendStatus } from './components/CredentialBackendStatus';
 import type {
   Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyStep, ApplyRun, DependencyReadiness,
   QualityGateResult, DependencyInstallResult, FeatureTask, RuntimeAttempt, RuntimeRun, GitEvidence,
   PrEvidence, PreviewEvidence, AcceptanceRecord, ProviderPlan, ProviderVerification, AgentDescriptor,
-  AgentCapabilityProbe, AgentProfile, CredentialMeta, ProjectResources, CredentialVerifyResult, PreviewStep,
+  AgentCapabilityProbe, AgentProfile, CredentialBackendInfo, CredentialMeta, ProjectResources, CredentialVerifyResult, PreviewStep,
   PreviewDeploymentResult, WorkspaceVerification, ReleaseStep, ReleaseRun, ReleaseEvidence,
   ReleaseSource, ReleasePlan, View,
 } from './types';
@@ -126,6 +127,7 @@ export function App() {
   const [agentProbes, setAgentProbes] = useState<Record<string, AgentCapabilityProbe>>({});
   const [probingAgentId, setProbingAgentId] = useState<string | null>(null);
   const [credentialMeta, setCredentialMeta] = useState<CredentialMeta | null>(null);
+  const [credentialBackend, setCredentialBackend] = useState<CredentialBackendInfo | null>(null);
   const [credentialInputs, setCredentialInputs] = useState<Record<string, string>>({});
   const [savingCredentials, setSavingCredentials] = useState(false);
   const [projectResources, setProjectResources] = useState<ProjectResources>(null);
@@ -796,6 +798,11 @@ export function App() {
   };
 
   const loadCredentials = async () => {
+    // Best-effort: the backend status line must not block the credentials list, so a
+    // failed /api/credentials/backend probe (e.g. older daemon) is silently ignored.
+    void fetch('/api/credentials/backend')
+      .then(async response => { if (response.ok) setCredentialBackend(await response.json() as CredentialBackendInfo); })
+      .catch(() => setCredentialBackend(null));
     try {
       const response = await fetch('/api/credentials');
       if (!response.ok) throw new Error(t('errors.loadCredentials'));
@@ -1560,7 +1567,7 @@ export function App() {
   const credentialsPanel = (
     <section className="credential-panel" id="credentials">
       <div className="panel-title"><div><p className="eyebrow">{t('common.localOnly')}</p><h2>{t('credentials.title')}</h2></div><KeyRound size={19} aria-hidden="true" /></div>
-      <p className="form-note">{t('credentials.note', { path: '~/.agent-dev/credentials.txt' })}</p>
+      <CredentialBackendStatus backend={credentialBackend} />
 
       {guideMode && credentialMeta?.keys.length === 0 && (
         <div className="credential-guide">
