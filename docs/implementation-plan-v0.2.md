@@ -81,13 +81,15 @@ v0.1 验证的是「作者本人能跑通整条流水线」。v0.2 验证的是*
 
    * 依赖：P0-3（导入冲突需复用失败分类）。
 
-2. **P1-2 Infisical Secret Backend Adapter**
+2. **P1-2 Infisical Secret Backend Adapter** — **代码完成 + 单元测试（2026-09-01），不满足 ✅ 条件**
 
-   * 抽象 `SecretBackend`（平台 / Keychain / Infisical / Doppler），v0.1 仅前两者。Infisical 实现：版本、审批、轮换、跨平台同步；Agent-Dev 仍只持有引用不存明文。
+   * 实际落地形式为**凭证系统后端化**（用户决策 2026-09-01，非独立 secret-backend 路由）：`credentials.ts` 通过 `SecretBackend` 抽象切换后端，`AGENT_DEV_SECRET_BACKEND=infisical` 时读写在 Infisical 与本地文件间切换，默认 `local-file` 字节级不变；后端不可用时大声失败、不静默回退。
 
-   * 基础代码已写（local-file + Infisical 基础），未连真实 Infisical 验证。
+   * `InfisicalBackend` 重写为双认证路径（Service Token 走 REST API v4、写操作值进 JSON body 修复 S10；无 token 走 CLI 并如实声明 argv 限制）；删除伪造的 version/history/approval；`approve`/`reject` 两条路径都抛错。Windows `shell: 'win32'` 兼容 `.cmd`。
 
-   * 依赖：无硬依赖，但建议与 P1-1 之后做，避免同时动 Secret 与导入两条链路。
+   * 测试：`secret-backend.test.ts` 19 例全新编写（适配器双路径）+ 凭证后端路由测试（含「**禁止静默回退**」磁盘哨兵证据：后端不可用时三个读出口均不回读 `credentials.txt`）+ daemon `/api/credentials/backend` 契约测试 + Studio `.credential-backend` 两分支渲染 4 例。补测后全仓 249 例全绿。
+
+   * **真实 Infisical 云端验证延后（用户决策）**：`spikes/infisical-backend/probe.mjs --online`（set/get/rotate/delete 回环 + Evidence JSON）是既定验证入口；跑通前 P1-2 保持「代码完成，真实验证待办」。
 
 3. **P1-3 Blueprint 分享 + 升级提示** ✅（2026-08-27 完成）
 
