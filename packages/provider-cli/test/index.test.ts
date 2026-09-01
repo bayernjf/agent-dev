@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GitHubAdapter, VercelAdapter, CloudflareAdapter, ManualProviderAdapter, RealProviderRegistry, getCredentialMeta, loadCredentials, saveCredentials, writeProjectResources, loadProjectResources, generateEnvFile, type CommandRunner, type CliResult } from '../src/index.js';
+import { GitHubAdapter, VercelAdapter, CloudflareAdapter, ManualProviderAdapter, RealProviderRegistry, getCredentialMeta, loadCredentials, providerCredentialEnv, saveCredentials, refreshCredentialCache, writeProjectResources, loadProjectResources, generateEnvFile, registerBackend, InfisicalBackend, credentialBackendType, type CommandRunner, type CliResult, type SecretBackend } from '../src/index.js';
 
 const mockRunner = (responses: Record<string, CliResult>): CommandRunner => {
   return async (command, args) => {
@@ -142,7 +142,7 @@ describe('GitHubAdapter', () => {
     const previous = process.env.AGENT_DEV_CREDENTIALS_PATH;
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-github-token-'));
     process.env.AGENT_DEV_CREDENTIALS_PATH = join(directory, 'credentials.txt');
-    saveCredentials({ GITHUB_TOKEN: 'fixture-token' });
+    await saveCredentials({ GITHUB_TOKEN: 'fixture-token' });
     const receivedTokens: Array<string | undefined> = [];
     const runner: CommandRunner = async (_command, args, options) => {
       receivedTokens.push(options?.env?.GITHUB_TOKEN);
@@ -362,7 +362,7 @@ describe('local credential and resource files', () => {
     const previous = process.env.AGENT_DEV_CREDENTIALS_PATH;
     process.env.AGENT_DEV_CREDENTIALS_PATH = join(directory, 'credentials.txt');
     try {
-      saveCredentials({ GITHUB_TOKEN: 'fixture-secret', OPENAI_API_KEY: 'fixture-key' });
+      await saveCredentials({ GITHUB_TOKEN: 'fixture-secret', OPENAI_API_KEY: 'fixture-key' });
       expect(loadCredentials()).toEqual({ GITHUB_TOKEN: 'fixture-secret', OPENAI_API_KEY: 'fixture-key' });
       expect(getCredentialMeta()).toMatchObject({ version: 1, keys: ['GITHUB_TOKEN', 'OPENAI_API_KEY'] });
       await expect(readFile(join(directory, 'credentials.txt.meta.json'), 'utf8')).resolves.not.toContain('fixture-secret');
@@ -385,5 +385,130 @@ describe('local credential and resource files', () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('credential backend routing', () => {
+  // The real infisical factory is restored after each test so other suites keep hitting
+  // the built-in backends.
+  const restoreInfisicalFactory = () => registerBackend('infisical', config => new InfisicalBackend(config));
+
+  const useMockBackend = (overrides: Partial<SecretBackend> = {}): SecretBackend => {
+    const store: Record<string, string> = {};
+    const backend: SecretBackend = {
+      type: 'infisical',
+      get: async key => store[key] ?? null,
+      getSecret: async key => (key in store ? { key, value: store[key], status: 'active' } : null),
+      set: async (key, value) => { store[key] = value; },
+      delete: async key => { delete store[key]; },
+      listKeys: async () => Object.keys(store),
+      getAll: async () => ({ ...store }),
+      isAvailable: async () => ({ available: true }),
+      rotate: async () => { throw new Error('not implemented'); },
+      approve: async () => { throw new Error('not implemented'); },
+      reject: async () => { throw new Error('not implemented'); },
+      getHistory: async () => [],
+      ...overrides,
+    };
+    registerBackend('infisical', () => backend);
+    return backend;
+  };
+
+  const withInfisicalEnv = async (run: (backend: SecretBackend) => Promise<void>) => {
+    const previous = process.env.AGENT_DEV_SECRET_BACKEND;
+    process.env.AGENT_DEV_SECRET_BACKEND = 'infisical';
+    try {
+      await run(useMockBackend());
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_DEV_SECRET_BACKEND;
+      else process.env.AGENT_DEV_SECRET_BACKEND = previous;
+      restoreInfisicalFactory();
+    }
+  };
+
+  // NOTE: these tests share the module-level credential snapshot in credentials.ts, so the
+  // no-hydration expectations must run BEFORE any test hydrates the cache (vitest runs
+  // tests in a file sequentially in declaration order).
+
+  it('defaults to the local-file backend without touching any snapshot', async () => {
+    delete process.env.AGENT_DEV_SECRET_BACKEND;
+    expect(credentialBackendType()).toBe('local-file');
+    await expect(refreshCredentialCache()).resolves.toBeUndefined();
+  });
+
+  it('fails loudly when the backend is unavailable — no silent fallback to the local file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-no-fallback-'));
+    const credentialsFile = join(directory, 'credentials.txt');
+    const previousPath = process.env.AGENT_DEV_CREDENTIALS_PATH;
+    process.env.AGENT_DEV_CREDENTIALS_PATH = credentialsFile;
+    const localFixture = '# Agent-Dev credentials. Never commit or share this file.\n\nGITHUB_TOKEN=LOCAL-SENTINEL\nOPENAI_API_KEY=LOCAL-SENTINEL-2\n';
+    try {
+      await writeFile(credentialsFile, localFixture, 'utf8');
+      await writeFile(`${credentialsFile}.meta.json`, JSON.stringify({ version: 1, updatedAt: '2026-08-01T00:00:00.000Z', keys: ['GITHUB_TOKEN', 'OPENAI_API_KEY'] }), 'utf8');
+      // Positive control: the very same fixture is readable with no backend override, so the
+      // expectations below fail because of backend selection rather than a malformed fixture.
+      delete process.env.AGENT_DEV_SECRET_BACKEND;
+      expect(loadCredentials()).toEqual({ GITHUB_TOKEN: 'LOCAL-SENTINEL', OPENAI_API_KEY: 'LOCAL-SENTINEL-2' });
+
+      await withInfisicalEnv(async backend => {
+        backend.isAvailable = async () => ({ available: false, reason: 'project unreachable' });
+        await expect(refreshCredentialCache()).rejects.toThrow(/not available.*project unreachable/s);
+        // Every read surface must refuse instead of quietly serving the disk copy: a future
+        // `catch { return readLocalFile() }` would hand out LOCAL-SENTINEL and go unnoticed
+        // by a test that only checks the throw.
+        expect(() => loadCredentials()).toThrow(/not hydrated/);
+        expect(() => providerCredentialEnv()).toThrow(/not hydrated/);
+        // The meta path is the third read surface; it reports the empty snapshot instead of the
+        // local .meta.json keys and updatedAt.
+        expect(getCredentialMeta()).toEqual({ version: 1, updatedAt: '', keys: [] });
+      });
+
+      // Refusing to serve the file must also leave it untouched for the operator to recover.
+      await expect(readFile(credentialsFile, 'utf8')).resolves.toBe(localFixture);
+    } finally {
+      if (previousPath === undefined) delete process.env.AGENT_DEV_CREDENTIALS_PATH;
+      else process.env.AGENT_DEV_CREDENTIALS_PATH = previousPath;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects reads before the snapshot is hydrated', async () => {
+    await withInfisicalEnv(async () => {
+      expect(() => loadCredentials()).toThrow(/not hydrated/);
+      await refreshCredentialCache();
+      expect(loadCredentials()).toEqual({});
+    });
+  });
+
+  it('routes load/save through the registered backend and diffs deletions on save', async () => {
+    await withInfisicalEnv(async backend => {
+      const sets: Array<[string, string]> = [];
+      const deletes: string[] = [];
+      const originalSet = backend.set.bind(backend);
+      const originalDelete = backend.delete.bind(backend);
+      backend.set = async (key, value) => { sets.push([key, value]); await originalSet(key, value); };
+      backend.delete = async key => { deletes.push(key); await originalDelete(key); };
+
+      await backend.set('GITHUB_TOKEN', 'gh-old');
+      await backend.set('OPENAI_API_KEY', 'key-1');
+      sets.length = 0;
+      await refreshCredentialCache();
+      expect(loadCredentials()).toEqual({ GITHUB_TOKEN: 'gh-old', OPENAI_API_KEY: 'key-1' });
+
+      await saveCredentials({ GITHUB_TOKEN: 'gh-new', VERCEL_TOKEN: 'vc-1' });
+      expect(sets).toEqual([['GITHUB_TOKEN', 'gh-new'], ['VERCEL_TOKEN', 'vc-1']]);
+      expect(deletes).toEqual(['OPENAI_API_KEY']);
+      expect(await backend.getAll()).toEqual({ GITHUB_TOKEN: 'gh-new', VERCEL_TOKEN: 'vc-1' });
+      expect(loadCredentials()).toEqual({ GITHUB_TOKEN: 'gh-new', VERCEL_TOKEN: 'vc-1' });
+      expect(getCredentialMeta().keys).toEqual(['GITHUB_TOKEN', 'VERCEL_TOKEN']);
+    });
+  });
+
+  it('propagates write failures instead of pretending the save succeeded', async () => {
+    await withInfisicalEnv(async backend => {
+      backend.set = async () => { throw new Error('Infisical write rejected'); };
+      await refreshCredentialCache();
+      await expect(saveCredentials({ GITHUB_TOKEN: 'x' })).rejects.toThrow(/Infisical write rejected/);
+    });
   });
 });
