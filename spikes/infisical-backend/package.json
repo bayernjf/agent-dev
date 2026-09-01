@@ -1,0 +1,9 @@
+{
+  "name": "@agent-dev/spike-infisical-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe": "node probe.mjs",
+    "probe:online": "node probe.mjs --online"
+  }
+}
