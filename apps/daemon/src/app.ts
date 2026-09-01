@@ -12,7 +12,7 @@ import { CONFIRMATIONS, runAccountDiscovery, runConnectorPreflight, type Account
 import { AgentDevStore, type ReleaseStep } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
 import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, runDoctor, type CustomAgentInput, type AgentProfile, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
-import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
+import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialBackendInfo, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
 import type { ReleaseSource } from '@agent-dev/deployment-composer';
 import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin, releaseIdempotencyKey, releaseStepPlan } from '@agent-dev/deployment-composer';
 import type { CleanupResult, PreviewDeploymentResult, ReleaseResult } from '@agent-dev/deployment-composer';
@@ -410,20 +410,25 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.get('/api/credentials', context => context.json({ meta: getCredentialMeta() }));
 
+  // Read-only secret backend status (type/availability/projectId). Never returns secret
+  // material; the plaintext exit the audit removed (S4) stays removed — this route only
+  // names the backend and whether it is reachable.
+  app.get('/api/credentials/backend', async context => context.json(await getCredentialBackendInfo()));
+
   app.post('/api/credentials', async context => {
     const parsed = credentialsSchema.safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Credentials must be an object of uppercase key/value pairs.' }, 400);
-    saveCredentials({ ...loadCredentials(), ...parsed.data });
+    await saveCredentials({ ...loadCredentials(), ...parsed.data });
     realProviders.invalidateCredentials();
     return context.json({ saved: true, meta: getCredentialMeta() });
   });
 
-  app.delete('/api/credentials/:key', context => {
+  app.delete('/api/credentials/:key', async context => {
     const key = context.req.param('key');
     const credentials = loadCredentials();
     if (!(key in credentials)) return context.json({ error: 'Credential not found.' }, 404);
     delete credentials[key];
-    saveCredentials(credentials);
+    await saveCredentials(credentials);
     realProviders.invalidateCredentials();
     return context.json({ saved: true, meta: getCredentialMeta() });
   });
