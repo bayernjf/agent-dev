@@ -159,6 +159,7 @@ export const zh = {
     agentCodebuddyInstall: 'npm install -g @bytedance/codebuddy-cli',
     agentHermesDesc: 'Nous Research Hermes CLI。开源模型，指令遵循能力强。适合本地/离线使用。',
     agentHermesInstall: 'pip install hermes-agent',
+    agentOpenclawDesc: 'OpenClaw CLI。通过它的 agent 子命令跑一次本地嵌入式 agent turn。Adapter 仍为候选，执行链路未验证前只能生成 dry-run 计划。',
     agentAiderDesc: 'Aider AI 结对编程。Git 原生，支持多种模型。适合增量修改。',
     agentAiderInstall: 'pip install aider-chat',
     agentPiDesc: '只读代码分析 Agent。不修改文件。适合代码审查和理解。',
