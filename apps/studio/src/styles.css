@@ -474,8 +474,14 @@ select option {
   border-radius: 3px;
   font-weight: 600;
   text-transform: uppercase;
+  /* This badge is a flex item, so a long agent name could squeeze it below its own content width.
+     Latin text would have overflowed; Chinese can break between any two characters, which stacked it
+     one glyph per line. A badge must keep its label on one line. */
+  white-space: nowrap;
 }
 .agent-badge.verified { background: color-mix(in srgb, var(--status-ok) 12%, var(--surface)); color: var(--status-ok); }
+/* Deliberately not green: a candidate Adapter has an Adapter but no exercised execution contract. */
+.agent-badge.candidate { background: color-mix(in srgb, var(--status-pending) 18%, var(--surface)); color: var(--status-pending); }
 .agent-badge.profile { background: color-mix(in srgb, var(--brand) 12%, var(--surface)); color: var(--brand); }
 .agent-badge.not-detected { background: var(--surface-muted); color: var(--text-3); }
 

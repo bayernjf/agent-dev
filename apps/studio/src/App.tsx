@@ -2121,12 +2121,16 @@ export function App() {
                       })
                       .map(({ agent, provider }) => {
                         const copy = agentCopyKeys(agent.id);
+                        const adapterVerified = agent.adapterStatus === 'verified';
                         return (
                           <label key={agent.id} className="agent-option">
                             <div className="agent-option-header">
                               <input type="radio" name="runtime" checked={answers.runtimeProvider === provider} onChange={() => setAnswer('runtimeProvider', provider)} />
                               <span className="agent-name">{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</span>
-                              <span className="agent-badge verified">{t('blueprint.runtimeVerified')}</span>
+                              {/* Being detected only means the CLI is installed. A candidate Adapter is
+                                  refused at execution time by the daemon, so stamping every installed
+                                  Agent "Verified" promised a guarantee this product does not have. */}
+                              <span className={`agent-badge ${adapterVerified ? 'verified' : 'candidate'}`}>{adapterVerified ? t('blueprint.runtimeVerified') : t('blueprint.runtimeCandidate')}</span>
                             </div>
                             {copy && <p className="agent-desc">{t(copy.desc)}</p>}
                           </label>
