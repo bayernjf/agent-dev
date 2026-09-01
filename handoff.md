@@ -6,6 +6,13 @@
 
 ## 最近进度
 
+- **Studio 界面链路走查启动，修掉冷启动鉴权缺陷；发现 Windows 阻断项（2026-09-01）**：开始清 §8-11.1 那条 2026-08-14 至今的债。环境刻意选本机 Windows + `~/.agent-dev/` 全新，等价于外部用户首跑。
+  - **冷启动鉴权竞态（已修复）**：`npm run dev` 用 concurrently 并发起 daemon 与 Vite，而 `vite.config.ts` 在**加载配置时一次性**读 `~/.agent-dev/daemon-token` 注入 `__DAEMON_TOKEN__`；daemon 只在首启生成该文件，所以**全新机器首跑必然**注入空串（实测：事后 token 文件长度 64、注入 define 长度 0、`injectedMatchesFile: false`）→ `daemon-auth.ts` 的 `if (token)` 整块跳过 → fetch 不包装 → 全部 `/api/*` 401 且界面无任何解释。§6.1-2 原记录把「Studio 需在 daemon 首启之后再启动」当作无新增约束，但这条顺序外部用户无法满足，本次更正。
+  - **修复：bearer 从浏览器移到 dev proxy**。新增 `apps/studio/dev-proxy-auth.ts`（`daemonTokenPath` / `readDaemonToken` / `createDaemonAuthHandler`），`vite.config.ts` 在 `/api` proxy 的 `proxyReq` 钩子里**逐请求**读文件并 `setHeader('authorization', ...)`；删 `src/daemon-auth.ts`、`define`、`src/vite-env.d.ts` 及 `main.tsx` 导入；proxy target 改 `http://127.0.0.1:3737`（daemon 显式绑 127.0.0.1，Windows 下 `localhost` 可能先解析 `::1`）；补 `preview.proxy`，否则构建产物无 API 通道。
+  - **顺带关掉一个 dev-only 泄露面**：Vite dev 模块带 inline source map 且端口零鉴权，`define` 注入的 token 任何本地进程都能从 `/@vite/env` 读到（走查过程中我自己触发过一次进日志，已当场轮换 token 使其失效）。改到 proxy 侧后 token 既不进浏览器也不进 `vite build` 产物——`0600` token 文件的边界重新成立。
+  - **验证**：`apps/studio/test/dev-proxy-auth.test.ts` 5 例（token 在 handler 构造之后才落盘 → 下一请求即带上；逐请求重读 → 轮换生效；去尾换行；缺失读空串；`AGENT_DEV_DAEMON_TOKEN_PATH` 覆盖）。真机 HTTP 探针：Studio `/api/projects` 200、daemon 直连无 token 401、`/@vite/env` 与 index.html 均不再含 64 位 hex。全仓 **254/254 全绿**、typecheck 通过。
+  - **走查第一阶段（只读）结论**：凭证面板渲染正确——状态行「Secret backend: local-file」、class `credential-backend connected`、note 正确指向本地文件、`GITHUB_TOKEN` 显示 Connected 且值完全不回显；控制台零 error/warning；`/events` SSE 建连，Activity 有事件；zh 切换无 i18n key 字面量泄漏。本机 Projects 为空（daemon 确返 `{"projects":[]}`），故项目详情各标签页本轮进不去，需先经 New Blueprint 建记录。小缺陷：zh 下导航「Agents」与「Supabase Configuration」未译；首屏 6 个 `/api` 请求各双发（疑 StrictMode，需确认生产不重复）。
+  - **Windows 阻断项（证据已锁，修复路线待用户拍板）**：Agents 页 6 个已装 agent 里 5 个报「version probe failed」。实测根因是**无 shell 的 spawn 撞上 npm shim**：`spawnSync('codex'|'opencode'|'openclaw'|'codebuddy'|'claude', ['--version'])` 全部 **ENOENT / 29ms**，只有原生 `.exe` 的 `hermes` 成功；补 `shell: true` 后 codex/opencode/openclaw/codebuddy 立即出版本（耗时 0.4–4.2s）。次因：版本探测预算 500ms（codex 2s）低于真实耗时；`lookupOnPath` 依赖 `which`（Windows 无此命令，本机靠 hermes 附带的 MSYS `which` 才侥幸工作）。**同一模式存在于 `packages/agent-runtime/src/index.ts:runCodexProcess`，意味着 Windows 用户走 Apply → Feature Task 时 agent 根本起不来**；但该处 `shell: true` 会把 prompt 文本送进 cmd 命令行（注入面），故未擅自改动。
 - **P1-2 Infisical Secret Backend Adapter 代码完成（2026-09-01，真实云端验证延后）**：用户拍板「凭证系统后端化集成 + 真实验证延后」。`credentials.ts` 后端化——`AGENT_DEV_SECRET_BACKEND=infisical` 时读写在 Infisical 与本地文件间切换，默认 `local-file` **字节级不变**；读走进程内快照（daemon 启动水合 + 保存后重水合），25+ 个同步 `providerCredentialEnv()` 调用点无需异步化；后端不可用时大声失败、**不静默回退**。`InfisicalBackend` 重写为双认证路径（Service Token 走 REST API v4，写操作值进 JSON body 修复 S10；无 token 走 CLI 并如实声明 argv 限制）；删除伪造的 version/history/approval（`Secret` 类型对应字段改可选）；Windows `shell: 'win32'` 兼容。daemon 新增只读 `GET /api/credentials/backend`（无明文）+ Studio 凭证面板后端状态一行。测试全新编写：`secret-backend.test.ts` 19 例 + 凭证后端路由 5 例 + daemon 契约 1 例（**更正**：审计 §6.3-1 所称「26 个库测试保留」不实，secret-backend 此前零测试）。「禁止静默回退」已拿到磁盘哨兵证据（`index.test.ts`）：`AGENT_DEV_CREDENTIALS_PATH` 指向含 sentinel 的真实文件时，后端不可用则 `refreshCredentialCache()` 抛出原因、`loadCredentials()`/`providerCredentialEnv()` 仍抛 `not hydrated`、`getCredentialMeta()` 返回空 keys、失败后文件字节不变；含正向对照（不设后端时同一文件可读）。Studio 面板抽为 `components/CredentialBackendStatus.tsx`，`smoke.test.tsx` +4 例锁住 connected/unavailable 两分支与 noteInfisical 文案互斥；`apps/studio/tsconfig.json` include 补 `test`（Studio 测试此前完全不在 typecheck 范围内，也导致 `--jsx` 未设置）。补测后全仓 **249/249 全绿**，typecheck 与 build 通过。探测脚本 `spikes/infisical-backend/`（离线 + `--online` 回环）已就绪，本轮未跑在线探测；P1-2 状态「代码完成，真实验证待办」，不满足 ✅。
 - **审计整改 §6.5：P4 测试补齐全部 4 项（2026-08-31）**：审计整改全部完成。
   - **§6.5-1 storage pipeline 执行测试**：新增「feature task pipeline execution」describe（`packages/storage/test/index.test.ts`）4 例——requiresApproval 步骤暂停且不执行（证明 `isStepApproved` 未批准时拦截）、resume 清除审批门并跑到 completed（断言项目状态推进 VERIFYING）、非 paused 状态 resume 抛错、步骤失败且 continueOnFailure 未设时 pipeline 失败且后续步骤不执行。**测试驱动修复真实缺陷**：`resumeFeatureTaskPipeline` 清除内存 step 的 `requiresApproval` 后未落盘，`executeFeatureTaskPipeline` 重读磁盘仍见审批门导致 resume 无法恢复——现已先 `saveFeatureTask` 落盘再执行。
@@ -42,8 +49,8 @@
 - **审计整改 §6.1-2：本机 token 鉴权落地（2026-08-31）**：daemon 全部 `/api/*` 路由现要求 `Authorization: Bearer <token>`，未认证请求 401——关闭审计 S2/S3/S4 的「未认证」前提（路由本身仍需按 §6.1-3/4 整改），并缓解 S5 与浏览器 CSRF。
   - **token 生命周期**：`apps/daemon/src/auth.ts` 的 `loadOrCreateDaemonToken()`——首启生成 64 位 hex 随机数，持久化 `~/.agent-dev/daemon-token`（0600、目录 0700，`AGENT_DEV_DAEMON_TOKEN_PATH` 可覆盖）；token 复用不轮换，daemon 重启后 Studio/MCP 不需重新读取。
   - **中间件**：`createDaemonApp` 新增 `authToken` 选项（`startDaemon` 恒传入；不传则不启用，供测试直连 app）；timingSafeEqual 比较；显式豁免仅 `/api/health` 与 `/api/github/webhooks`（后者走自身 HMAC 签名），`/events` SSE 在 `/api/*` 之外（EventSource 无法带自定义头，仅承载事件元数据）。
-  - **客户端接入**：Studio——`vite.config.ts` 启动时读 token 文件注入 `__DAEMON_TOKEN__` 常量，`src/daemon-auth.ts` 包装 `window.fetch` 对 `/api/*` 统一附加头（一处覆盖全部现有与未来调用点）；MCP 桥——`callDaemon` 携带 `authorization` 头，token 取自 `AGENT_DEV_DAEMON_TOKEN` 环境变量或同一 token 文件。
-  - **验证**：新增 6 个契约测试（无/错/畸形 token 401、合法 token 200、credentials/secret-backend/update 路由 401 回归、health/webhook 豁免走确定性 HMAC 路径、token 文件创建与复用）；daemon 22 例全绿、cli MCP 5 例全绿、全仓 typecheck 通过。注意：Studio 需在 daemon 首启之后再启动才能读到 token 文件（此前 proxy 也会失败，无新增约束）。
+  - **客户端接入**：Studio——`vite.config.ts` 启动时读 token 文件注入 `__DAEMON_TOKEN__` 常量，`src/daemon-auth.ts` 包装 `window.fetch` 对 `/api/*` 统一附加头（一处覆盖全部现有与未来调用点）；MCP 桥——`callDaemon` 携带 `authorization` 头，token 取自 `AGENT_DEV_DAEMON_TOKEN` 环境变量或同一 token 文件。**（2026-09-01 已变更：Studio 侧改为 Vite dev/preview proxy 逐请求附加，token 不再进浏览器——见「最近进度」同日期条目）**
+  - **验证**：新增 6 个契约测试（无/错/畸形 token 401、合法 token 200、credentials/secret-backend/update 路由 401 回归、health/webhook 豁免走确定性 HMAC 路径、token 文件创建与复用）；daemon 22 例全绿、cli MCP 5 例全绿、全仓 typecheck 通过。（**2026-09-01 更正**：此处原文「注意：Studio 需在 daemon 首启之后再启动才能读到 token 文件（此前 proxy 也会失败，无新增约束）」并不成立——`npm run dev` 并发起两个进程，全新机器首跑必然读到空 token，这条顺序要求外部用户无法满足；已改为 proxy 侧逐请求读取，约束消除。）
 
 - **全仓安全与质量审计完成，4 条高危缺口与整改方案落档（2026-08-31）**：三路并行——客观检查、安全审计、代码质量审计；安全高危结论逐一复核过源码，全文见 [审计文档](docs/audit-2026-08-31.md)。
   - **客观检查**：`npm run typecheck` 9 个工作区全部通过；`npm test` 199 例中 196 通过，3 个失败全是 Windows 平台问题（其中真问题：`execFileAsync('npm')` 未加 `shell: true` 导致质量门在 Windows 误判，`packages/storage/src/index.ts:777`）。
@@ -347,7 +354,19 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
     - **P3 Windows 兼容**：`npm`/`npx` 调用处理 `.cmd`（`storage/src/index.ts:777`、`:844`、`agent-runtime/src/doctor.ts`）；信号与符号链接用例按平台适配。
     - **P4 测试补齐（已完成，见「最近进度」§6.5 条目）**：storage pipeline 执行（含 resume 未落盘缺陷修复）、MCP 20 工具全覆盖、`advanceDelivery` 回归、Studio 渲染冒烟。
     - 用户决策均已落定：secret-backend「移除路由、保留库」（2026-08-31）；版本号升 `0.2.0`（2026-08-31）。
-11. **v0.2 收尾**：P0/P1/P2 全部完成后，仅剩 **P1-2 真实验证待办**——在 Infisical 控制台建 scratch 项目，按 [spikes/infisical-backend/README](spikes/infisical-backend/README.md) 配置后跑 `npm run probe:online`，回环 `complete: true` 后把 P1-2 状态升级为已验证（同步 `docs/implementation-plan-v0.2.md` 与 [凭证管理方案 §3.5](docs/credential-management.md)）。并行小尾巴不变：PR 关闭清理真实验证、遗留 Preview 资源清理、Studio 界面链路逐项核对。
+11. **v0.2 收尾**。P1-2 代码已落地（2026-09-01），仅剩**真实云端验证待办**——在 Infisical 控制台建 scratch 项目，按 [spikes/infisical-backend/README](spikes/infisical-backend/README.md) 配置后跑 `npm run probe:online`，回环 `complete: true` 后把 P1-2 状态升级为已验证（同步 `docs/implementation-plan-v0.2.md` 与 [凭证管理方案 §3.5](docs/credential-management.md)）。
+
+    **不要把本条读成“v0.2 只剩 P1-2”**——上面 §8-3/§8-4/§8-7 各自还挂着未闭环子项，按对 Pilot 的影响排序：
+
+    1. **Studio 界面链路从未走过界面**（§8-3 遗留，2026-08-14 至今）：历次端到端验证都是直接调 Daemon API，而外部用户只会点界面——这是“外人能否跑通”最大的未知项。
+    2. **各 Agent 在实际安装环境的 Adapter 验证**（§8-4 遗留）。
+    3. **资源清单外部 ID/URL 与 Provider 控制台一致性逐项核对**（§8-3 遗留）。
+    4. **Preview 遗留资源清理 + PR 关闭清理链路真实验证**（§8-7 与§7 段遗留；生产项目是交付物，不清理）。
+    5. **Windows 上 agent 起不来（2026-09-01 走查新发现，优先级高于 1–4）**：`agent-runtime` 的探测与执行两处都用无 shell 的 spawn，npm shim 类 CLI（codex / claude / opencode / openclaw / codebuddy）一律 ENOENT；`which` 依赖与 500ms 探测预算同样不适用于 Windows。现象、实测数据与两种修法的安全代价见「最近进度」2026-09-01 条目与决策表「Windows agent 启动方式」。Pilot 若在 Windows 分发，此项为阻断。
+
+    走查进度：§8-11.1 已完成第一阶段（首屏 / 凭证面板 / Activity / zh 切换，只读），项目详情各标签页因本机无项目记录而未走到；冷启动鉴权缺陷已修复并验证。
+
+    P1-2 的 Infisical 验证不改变外部用户的默认 `local-file` 路径，按 `docs/implementation-plan-v0.2.md` §1 的降权原则可后置。
 
 ## 9. 用户决策
 
@@ -364,6 +383,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 | 版本号升级 | 已确认（2026-08-31） | 全部 13 个 package.json 从 `0.1.0-alpha.0` 升到 `0.2.0`，与 v0.2 Pilot 定位对齐 |
 | P1-2 Infisical 集成方式 | 已确认（2026-09-01） | 凭证系统后端化（`credentials.ts` 经 `SecretBackend` 抽象切换，默认 `local-file` 字节级不变），不恢复独立 secret-backend 路由 |
 | P1-2 真实验证时机 | 已确认（2026-09-01） | 延后：本轮交付代码 + 单元测试 + 探测脚本与配置指南；P1-2 标记「代码完成，真实验证待办」，不满足 ✅ |
+| Windows agent 启动方式 | 待确认（2026-09-01） | 无 shell 的 spawn 在 Windows 上无法启动 npm shim 类 agent CLI（探测与执行两条路径都受影响）。候选路线：① PATH+PATHEXT 解析 + 自实现 cmd 参数转义（无注入面，工作量最大）；② 直接 `shell: true`（与 `doctor.ts` 现有做法一致，但 prompt 文本进 cmd 命令行，存在注入面）；③ 从 npm `.cmd` shim 解析出 `node <entry.js>` 后无 shell 启动（无注入面，依赖 shim 格式）；④ Windows 上显式拒绝执行并给出可操作提示（诚实降级，但仍不可用）。未定前不动 `runCodexProcess` |
 
 ## 10. 交接完成定义
 
