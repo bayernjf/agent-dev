@@ -21,15 +21,7 @@ import type {
 } from './types';
 import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
 import { agentCopyKeys } from './lib/agent-copy';
-
-const PRODUCT_TYPE_LABEL_KEYS = [
-  ['web-app', 'blueprint.productTypeWebApp'],
-  ['landing-page', 'blueprint.productTypeLandingPage'],
-  ['browser-extension', 'blueprint.productTypeBrowserExtension'],
-  ['desktop', 'blueprint.productTypeDesktop'],
-  ['mobile', 'blueprint.productTypeMobile'],
-  ['api-tool', 'blueprint.productTypeApiTool'],
-] as const satisfies readonly [BlueprintAnswers['productType'], KeyPath][];
+import { PRODUCT_TYPE_LABEL_KEYS } from './lib/product-type';
 
 
 export function App() {
