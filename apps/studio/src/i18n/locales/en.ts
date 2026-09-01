@@ -68,7 +68,7 @@ export const en = {
     empty: 'No projects yet. Start a Blueprint to establish a delivery baseline.',
     table: {
       project: 'Project',
-      mode: 'Mode',
+      productType: 'Product type',
       deliveryState: 'Delivery state',
       updated: 'Updated',
     },

@@ -68,7 +68,7 @@ export const zh = {
     empty: '暂无任何项目。创建 Blueprint 以建立交付基线。',
     table: {
       project: '项目',
-      mode: '模式',
+      productType: '产品类型',
       deliveryState: '交付状态',
       updated: '更新时间',
     },
