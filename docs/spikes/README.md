@@ -1,6 +1,6 @@
 # Phase 0 技术 Spike 状态
 
-> 更新时间：2026-08-09
+> 更新时间：2026-08-14
 > 原则：未取得真实平台 Evidence 的项目不能标记通过。
 
 | Spike | 当前状态 | 已取得证据 | 下一动作 |
@@ -21,7 +21,7 @@ Wrangler       project-local 4.120.0 installed and OAuth authenticated
 Supabase CLI   not installed
 ```
 
-> 注：2026-08-09 已补齐并授权本机 `wrangler`，且确认 `vercel` 已登录。端到端 Composer 目前受当前网络无法访问新建 Vercel Deployment Domain 阻塞，不是 CLI 安装或认证问题。
+> 注：`wrangler` 已授权、`vercel` 已登录。2026-08-09 记录的「当前网络无法访问新建 Vercel Deployment Domain」阻塞已于 2026-08-14 解除（走本机代理 + `NODE_USE_ENV_PROXY=1`），正式 Composer 已在真实云端 7/7 步跑通（见上表）。
 
 可重复检查：
 
