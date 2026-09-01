@@ -273,7 +273,7 @@ export const zh = {
     saveToLocal: '保存到本地',
     verifying: '验证中...',
     verifyCredentials: '验证凭证',
-    supabaseConfiguration: 'Supabase Configuration',
+    supabaseConfiguration: 'Supabase 配置',
     supabaseStep1: '访问 {link} 并创建新项目',
     supabaseStep2: '等待项目完成初始化',
     supabaseStep3: '复制 Project URL 和 anon/public key',
