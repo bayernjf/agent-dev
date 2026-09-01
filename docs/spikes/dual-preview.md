@@ -126,7 +126,7 @@ Dual Preview 联合部署编排契约已通过真实云端验证：Vercel API �
 - Daemon 提供 `POST /api/projects/:projectId/preview/deploy`、`GET .../preview/plan`、`POST .../preview/cleanup` 三个路由；部署传入 `pullRequestNumber` 时使用规范分支 `pr-<number>`；
 - `POST /api/github/webhooks` 会验证 `GITHUB_WEBHOOK_SECRET` 的 HMAC SHA-256 签名，并仅处理 `pull_request.closed`。它按仓库名匹配唯一本地项目，以 `pr-<number>` 推导临时项目名后调用清理；无效签名或无关事件不会执行删除；
 - Studio 在 Quality Gate 通过后展示 Dual Preview 部署区块；
-- 13 个单元测试全部通过（含 SSO Protection 关闭的两条路径：`VERCEL_TOKEN` 注入下的 mock fetch，以及仅有 CLI 登录态时的 `vercel api` 调用）。
+- 15 个单元测试全部通过（含 SSO Protection 关闭的两条路径：`VERCEL_TOKEN` 注入下的 mock fetch，以及仅有 CLI 登录态时的 `vercel api` 调用；另有 `WRANGLER_LOG` 不出现在 create 调用 env 的回归测试）。
 
 2026-08-09 已安装并授权 Wrangler，并进行了三次真实 Vercel 诊断/双 Preview 尝试：Vercel 控制面部署为 `READY`，保护字段已置空，但当前网络访问新建 `*.vercel.app` Deployment Domain 超时或 `ECONNREFUSED`；Vercel 临时项目均已清理，Cloudflare 项目未创建。下一步需在可访问 Vercel Deployment Domain 的网络重新运行；Composer 与 Spike 的健康检查已将传播重试窗口扩大到约 2 分钟。
 
