@@ -202,6 +202,10 @@ export type AgentDescriptor = {
   version: string | null;
   detail: string;
   capabilities: string[];
+  // Whether the execution contract for this Agent has been exercised. Separate from `detected`,
+  // which only says the CLI is installed: an installed Agent with a candidate Adapter cannot run a
+  // feature task, so Studio must not present the two as the same guarantee.
+  adapterStatus?: 'verified' | 'candidate' | 'unsupported';
 };
 
 export type AgentCapabilityProbe = {

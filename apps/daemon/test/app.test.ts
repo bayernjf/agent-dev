@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentDevStore } from '@agent-dev/storage';
+import { getAgentAdapterStatus } from '@agent-dev/agent-runtime';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
 import { createDaemonApp } from '../src/app.js';
 
@@ -240,15 +241,20 @@ describe('daemon API', () => {
     expect(catalog.status).toBe(200);
     // The catalog only reports built-ins actually present on PATH, so asserting a specific Agent
     // would only pass on a machine that happens to have it installed. The contract is the shape.
-    const catalogPayload = await catalog.json() as { agents: { source: string; detected: boolean; launchCommand: string }[] };
+    const catalogPayload = await catalog.json() as { agents: { id: string; source: string; detected: boolean; launchCommand: string; adapterStatus?: string }[] };
     expect(Array.isArray(catalogPayload.agents)).toBe(true);
     expect(catalogPayload.agents.every(agent => agent.detected && agent.launchCommand.length > 0)).toBe(true);
     expect(catalogPayload.agents.every(agent => agent.source === 'built-in')).toBe(true);
+    // Studio stamps a Verified/Candidate badge straight from this field, so the route has to carry
+    // the Adapter registry's answer rather than let the browser infer a capability from "detected".
+    // Which Agents are installed differs per machine; the id-to-status mapping does not.
+    expect(catalogPayload.agents.every(agent => typeof agent.adapterStatus === 'string')).toBe(true);
+    expect(catalogPayload.agents.every(agent => agent.adapterStatus === getAgentAdapterStatus(agent.id))).toBe(true);
     const customAgent = await app.request('http://localhost/api/runtime/catalog', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Node Fixture', launchCommand: 'node' }),
     });
     expect(customAgent.status).toBe(201);
-    await expect(customAgent.json()).resolves.toMatchObject({ agent: { source: 'custom', name: 'Node Fixture', detected: true } });
+    await expect(customAgent.json()).resolves.toMatchObject({ agent: { source: 'custom', name: 'Node Fixture', detected: true, adapterStatus: 'unsupported' } });
     const runtimeRun = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/run`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'PREPARE_RUNTIME_RUN' }),
     });
