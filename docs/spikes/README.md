@@ -43,7 +43,7 @@ node spikes/infisical-backend/probe.mjs --online
 
 对应 v0.2 计划 P1-2，状态：**代码完成，真实云端验证待办（不标记通过）**。
 
-- **已完成**：适配器按官方 OpenAPI 实现 v4 端点（2026-09-01 确认请求形状）；凭证系统后端化集成；19 例适配器单测（mock runner + stub fetch）+ 5 例凭证后端路由测试（含「禁止静默回退」磁盘哨兵证据）+ 1 例 daemon 契约测试 + 4 例 Studio 后端状态渲染测试，全仓 249 例全绿（2026-09-01 补上 Studio dev proxy 回归 5 例后为 254 例）。
+- **已完成**：适配器按官方 OpenAPI 实现 v4 端点（2026-09-01 确认请求形状）；凭证系统后端化集成；19 例适配器单测（mock runner + stub fetch）+ 5 例凭证后端路由测试（含「禁止静默回退」磁盘哨兵证据）+ 1 例 daemon 契约测试 + 4 例 Studio 后端状态渲染测试，全仓 249 例全绿（2026-09-01 补上 Studio dev proxy 回归 5 例、Windows PATH/PATHEXT 发现回归 2 例后为 256 例）。
 - **本机探测**：离线部分已跑（`cliInstalled: false`、未配置项目）。
 - **未取得**：任何真实 Infisical Evidence。CLI 路径的 `secrets` 子命令 JSON 输出形状与 `whoami` 均按文档实现、未实测；API 端点未对真实项目发过请求。
 - **下一动作**：配 scratch 项目后跑 `node spikes/infisical-backend/probe.mjs --online`，回环 `complete: true` 才升级为已验证，并同步 `docs/implementation-plan-v0.2.md` 与 `docs/credential-management.md` §3.5。
