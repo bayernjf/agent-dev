@@ -80,17 +80,20 @@ Structured output: Unknown
 
 未识别的能力显示 `Unknown`，不能被自动推断为支持。
 
-### 3.1 "探测不出来" 不等于 "不存在"（2026-08-26 补充）
-
-探测有三种结果，必须分开表达，不能塌成两种：
+### 3.1 发现只有两种结论（2026-08-26 补充，2026-09-01 改写）
 
 | 结果 | 含义 | 是否缓存 |
 | --- | --- | --- |
-| PATH 查找返回非零 | 命令确实不在 PATH 上 | 缓存（结论确定） |
-| PATH 查找自身没跑起来（超时 / EAGAIN / ENOENT） | 可用性未知 | **不缓存**，展示为"未完成，请重试" |
-| 在 PATH 上但 `--version` 失败 | Agent 存在，版本未知 | 缓存为 detected，版本 `null` |
+| `resolveExecutablePath()` 在 PATH × PATHEXT 上找不到 | 命令确实不在 PATH 上 | 缓存（结论确定） |
+| 找到了但 `--version` 失败 / 超时 | Agent 存在，版本未知 | 缓存为 detected，版本 `null` |
 
-第二行曾被当成第一行处理：一次负载下的 `which` 超时就把装好的 Agent 在 Studio 里标成不可用、daemon 拒绝启动它并返回 409，且结论被缓存到进程结束（缺陷 29）。现在未完成的查找会在更长预算上重试一次，仍未完成则报告未知且不落缓存。
+本节以前还分三种结果，因为 PATH 查找是**外部命令 `which`**：它自己可能超时 / EAGAIN / ENOENT，而那种“没跑起来”曾会被当成“命令不存在”，一次失败的查找就可能把已装好的 Agent 在 Studio 里标成不可用、让 daemon 拒绝启动它并返回 409，且结论缓存到进程结束（缺陷 29）；当时的修法是两个预算各重试一次、未知结论不落缓存。
+
+2026-09-01 把这类不确定整个去掉了：发现改为进程内用 `existsSync` 遍历 PATH 与 PATHEXT，无子进程、无超时，所以不存在“查找本身失败”这种状态。选型理由：Windows 根本没有 `which` 命令，那套重试在一个目标平台上永远走不通（本机此前能用，纯因 hermes 带了一个 MSYS 版 `which`）。Windows 下 PATHEXT 条目必须优先于无后缀名：npm 会同时留下 `claude`（POSIX sh 脚本）与 `claude.cmd`，把前者交给 shell 会挂到超时；探测传的是固定字面量参数，所以 win32 下 `--version` / `--help` 带 `shell: true`（与 `doctor.ts` 同样理由），不因此引入注入面。
+
+### 3.2 “已检测”不等于“能执行”（2026-09-01 补充）
+
+`detected` 只回答“这个 CLI 本机装了没”，而能不能跑 Feature Task 取决于 `AGENT_ADAPTERS` 里的状态（`verified` / `candidate` / `unsupported`）：candidate 的 Adapter 能被选中、能生成 dry-run 计划，但**执行阶段会被 `buildAgentExecutionPlan` 直接拒绝**。两个事实不能混为同一个标签，所以 `/api/runtime/catalog`（GET 与 POST）除 `AgentDescriptor` 字段外额外带一个 `adapterStatus`，Studio 的徽章直接按它渲染 `Verified` / `Candidate`，不让浏览器从 `detected` 推断。该字段是 daemon 从 Adapter 注册表取的，与本机装了哪些 agent 无关。
 
 ## 4. 专业模式
 
