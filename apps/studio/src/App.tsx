@@ -20,6 +20,7 @@ import type {
   ReleaseSource, ReleasePlan, View,
 } from './types';
 import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
+import { agentCopyKeys } from './lib/agent-copy';
 
 const PRODUCT_TYPE_LABEL_KEYS = [
   ['web-app', 'blueprint.productTypeWebApp'],
@@ -2119,10 +2120,7 @@ export function App() {
                         return agent.detected && provider.success ? [{ agent, provider: provider.data }] : [];
                       })
                       .map(({ agent, provider }) => {
-                        const descKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Desc` as keyof typeof t;
-                        const installKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Install` as keyof typeof t;
-                        const desc = t(descKey) || '';
-                        const install = t(installKey) || '';
+                        const copy = agentCopyKeys(agent.id);
                         return (
                           <label key={agent.id} className="agent-option">
                             <div className="agent-option-header">
@@ -2130,7 +2128,7 @@ export function App() {
                               <span className="agent-name">{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</span>
                               <span className="agent-badge verified">{t('blueprint.runtimeVerified')}</span>
                             </div>
-                            {desc && <p className="agent-desc">{desc}</p>}
+                            {copy && <p className="agent-desc">{t(copy.desc)}</p>}
                           </label>
                         );
                       })}
@@ -2150,18 +2148,15 @@ export function App() {
                     })}
                     {/* Show not-detected agents with install guide */}
                     {agents.filter(a => !a.detected).map(agent => {
-                      const descKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Desc` as keyof typeof t;
-                      const installKey = `blueprint.agent${agent.id.charAt(0).toUpperCase() + agent.id.slice(1).replace('-', '')}Install` as keyof typeof t;
-                      const desc = t(descKey) || '';
-                      const install = t(installKey) || '';
+                      const copy = agentCopyKeys(agent.id);
                       return (
                         <div key={agent.id} className="agent-option not-detected">
                           <div className="agent-option-header">
                             <span className="agent-name" style={{ opacity: 0.6 }}>{agent.name}</span>
                             <span className="agent-badge not-detected">{t('blueprint.runtimeNotDetected')}</span>
                           </div>
-                          {desc && <p className="agent-desc">{desc}</p>}
-                          {install && <p className="agent-install"><code>{install}</code></p>}
+                          {copy && <p className="agent-desc">{t(copy.desc)}</p>}
+                          {copy?.install && <p className="agent-install"><code>{t(copy.install)}</code></p>}
                         </div>
                       );
                     })}
