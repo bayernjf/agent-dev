@@ -366,7 +366,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 1. ✅ ~~实现凭证管理 Phase 2~~：已于 2026-08-08 完成（Studio 凭证面板 + 引导模式 + 凭证验证 + Supabase 手动配置）；
 2. ✅ ~~将 Dual Preview 部署编排实现为幂等 Step~~：已于 2026-08-09 完成（`packages/deployment-composer`，精确 CORS + 临时项目清理）；
 3. ✅ ~~重跑 Deployment Composer 端到端~~：已于 2026-08-14 完成，真实云端 7/7 步通过并独立复验（Evidence 见 [Dual Preview](docs/spikes/dual-preview.md)）；**Studio 部署区块 → Daemon 这一段仍未走过界面**，本轮是直接调 Daemon API 触发的，资源清单外部 ID/URL 与 Provider 控制台的一致性也尚未逐项核对；
-4. ✅ ~~为 Catalog 增加只读 Capability Probe~~：Daemon API 已提供探测结果，Studio 选择 Agent 后显示非交互、workspace-write 和 Adapter 状态；仍需在各 Agent 实际安装环境逐个验证 Adapter；
+4. ✅ ~~为 Catalog 增加只读 Capability Probe~~：Daemon API 已提供探测结果，Studio 选择 Agent 后显示的是探测读到的东西——Adapter 要用的参数在不在该 CLI 的帮助输出里（列出 / 没列 / 帮助答不了三种分开印）以及 Adapter 状态；2026-09-02 去掉了原先那枚 `workspace-write` chip，它抄的是目录自己的声明而不是测量结果（详见 [Agent Runtime Catalog](docs/agent-runtime-catalog.md) §3.3）；仍需在各 Agent 实际安装环境逐个验证 Adapter；
 5. ✅ ~~用一次必然产生 Git diff 的真实功能任务验证 Runtime 写入和 Quality Gate~~：已于 2026-08-11 完成；Human Acceptance 仍需由用户明确确认；
 6. ✅ ~~将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联~~：已于 2026-08-10 完成；本地批准进入 `LOCAL_ACCEPTED`，不代表生产交付；
 7. ✅ ~~使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期~~：**3/3 已完成**——`Receipt Test`（2026-08-23）、`Workspace Verify Fresh`（2026-08-23）、`Link Vault`（2026-08-24）都走完 Blueprint → Preview → Production 并上线，证据与三轮共修掉的缺陷见「最近进度」。遗留动作：

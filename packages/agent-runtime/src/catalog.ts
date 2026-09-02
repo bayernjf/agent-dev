@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
+import { NON_INTERACTIVE_SWITCHES } from './non-interactive-switches.js';
 
 export type AgentSource = 'built-in' | 'custom';
 
@@ -48,18 +49,6 @@ const BUILT_IN_CAPABILITIES: Record<string, AgentCapability[]> = {
   codebuddy: ['workspace-write', 'version-detection', 'non-interactive'],
   hermes: ['workspace-write', 'version-detection', 'non-interactive'],
   pi: ['read-only', 'version-detection'],
-};
-
-const NON_INTERACTIVE_FLAGS: Record<string, string[]> = {
-  codex: ['exec', '--json'],
-  'claude-code': ['-p', '--print'],
-  aider: ['--message', '--yes'],
-  // OpenCode 2.0 dropped `-p --print`; non-interactive execution goes through the `api` subcommand.
-  opencode: ['api'],
-  openclaw: ['exec', '--json'],
-  codebuddy: ['-p', '--print'],
-  // Hermes one-shot mode: `-z PROMPT` prints only the final response to stdout.
-  hermes: ['-z'],
 };
 
 type DetectionResult = { detected: boolean; version: string | null; detail: string };
@@ -135,39 +124,67 @@ function detect(command: string): DetectionResult {
 const detectionCache = new Map<string, DetectionResult>();
 const helpCache = new Map<string, string>();
 
-function probeHelp(command: string): string {
-  const cached = helpCache.get(command);
+// `subcommand` selects the help level to read, so a CLI whose flags live one level down is asked
+// about the level it actually documents them at.
+//
+// A page only counts as an answer when the command ran and succeeded. Under `shell: true` on
+// Windows, an unresolvable command still produces text - cmd.exe's "is not recognized as an
+// internal or external command" - and treating that as a help page let the probe report a CLI that
+// never started as having documented the opposite of what we expected.
+function probeHelp(command: string, subcommand?: string): string {
+  const cacheKey = subcommand ? `${command} ${subcommand}` : command;
+  const cached = helpCache.get(cacheKey);
   if (cached !== undefined) return cached;
+  const level = subcommand ? [subcommand] : [];
   for (const flag of ['--help', '-h']) {
-    const result = spawnSync(command, [flag], { encoding: 'utf8', timeout: HELP_PROBE_TIMEOUT_MS, ...probeSpawnOptions });
+    const result = spawnSync(command, [...level, flag], { encoding: 'utf8', timeout: HELP_PROBE_TIMEOUT_MS, ...probeSpawnOptions });
+    if (result.error || result.status !== 0) continue;
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
     if (output.length > 0) {
-      helpCache.set(command, output);
+      helpCache.set(cacheKey, output);
       return output;
     }
   }
-  helpCache.set(command, '');
+  helpCache.set(cacheKey, '');
   return '';
 }
 
 export type CapabilityProbe = {
   agentId: string;
+  // Evidence, not a verdict: this is "the help output documents, as its own entry, every switch our
+  // Adapter passes to run this Agent non-interactively". It is not a non-interactive run - that is
+  // what the Adapter's `verified` status records - and `false` does not mean "unsupported": it means
+  // either the help text does not list the switch or the help text never answered. Studio renders
+  // those apart from a confirmation; a caller must not flatten them.
   nonInteractive: boolean;
   nonInteractiveFlags: string[];
-  workspaceWrite: boolean;
   helpAvailable: boolean;
 };
 
-export function probeAgentCapabilities(agentId: string, launchCommand: string): CapabilityProbe {
-  const expectedFlags = NON_INTERACTIVE_FLAGS[agentId] ?? [];
-  const helpOutput = probeHelp(launchCommand);
-  const nonInteractive = expectedFlags.length > 0 && expectedFlags.every(flag => helpOutput.includes(flag));
-  const workspaceWrite = (BUILT_IN_CAPABILITIES[agentId] ?? []).includes('workspace-write');
+// A help page is a list of switch tokens, so a switch counts only when it stands alone: `--json`
+// is documented, while `--json-lines` documents a different switch and `--permission-mode` is not
+// Claude Code's `-p`. Substring matching let both of those read as confirmations, which is the
+// failure mode where a probe is worse than no probe - it reports health that was never asked about.
+function documentsSwitch(helpOutput: string, spelling: string): boolean {
+  const escaped = spelling.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[\\s,=])${escaped}(?=$|[\\s,=])`, 'm').test(helpOutput);
+}
+
+// `readHelp` is injectable so the reasoning below can be tested against fixtures instead of against
+// whichever CLIs happen to be installed on the machine running the suite.
+export function probeAgentCapabilities(
+  agentId: string,
+  launchCommand: string,
+  readHelp: (command: string, subcommand?: string) => string = probeHelp,
+): CapabilityProbe {
+  const expectation = NON_INTERACTIVE_SWITCHES[agentId] ?? { switches: [] };
+  const helpOutput = readHelp(launchCommand, expectation.subcommand);
+  const confirmed = expectation.switches.length > 0
+    && expectation.switches.every(spellings => spellings.some(spelling => documentsSwitch(helpOutput, spelling)));
   return {
     agentId,
-    nonInteractive,
-    nonInteractiveFlags: expectedFlags,
-    workspaceWrite,
+    nonInteractive: confirmed,
+    nonInteractiveFlags: expectation.switches.flat(),
     helpAvailable: helpOutput.length > 0,
   };
 }

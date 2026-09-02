@@ -22,6 +22,7 @@ import type {
 import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
 import { agentCopyKeys } from './lib/agent-copy';
 import { adapterStatusOf, canProfileRunTasks, canRunSelectedAgent, canRunTasks } from './lib/agent-selectability';
+import { nonInteractiveVerdict } from './lib/capability-verdict';
 import { classifyRuntimeExecutorFailure, runtimeExecutorId, withoutProviderNamespace } from './lib/runtime-executor';
 import { PRODUCT_TYPE_LABEL_KEYS } from './lib/product-type';
 
@@ -1790,7 +1791,7 @@ export function App() {
         return (
         <div className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}${agent.detected ? '' : ' unavailable'}`} key={agent.id}>
           <button className="agent-select" type="button" disabled={!selectable} onClick={() => { if (selectable) setSelectedAgentId(agent.id); }}>
-            <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source === 'built-in' ? t('agents.builtIn') : t('agents.custom')}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? t('agents.runningProbe') : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{probe && <div className="agent-caps"><span className="agent-cap">{probe.nonInteractive ? t('agents.nonInteractiveYes') : t('agents.nonInteractiveUnknown')}</span><span className="agent-cap">{probe.workspaceWrite ? t('agents.workspaceWriteYes') : t('agents.workspaceWriteNo')}</span><span className="agent-cap">{t(`agents.adapterStatus.${probe.adapterStatus}` as KeyPath)}</span></div>}{agent.detected && !selectable && <small className="agent-reason">{t('agents.notExecutable')}</small>}<code className="agent-command">{agent.launchCommand}</code></div>
+            <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source === 'built-in' ? t('agents.builtIn') : t('agents.custom')}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? t('agents.runningProbe') : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{probe && <div className="agent-caps"><span className="agent-cap">{t(`agents.nonInteractiveVerdict.${nonInteractiveVerdict(probe)}` as KeyPath)}</span><span className="agent-cap">{t(`agents.adapterStatus.${probe.adapterStatus}` as KeyPath)}</span></div>}{agent.detected && !selectable && <small className="agent-reason">{t('agents.notExecutable')}</small>}<code className="agent-command">{agent.launchCommand}</code></div>
           </button>
           <div className="agent-side">
             <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? t('agents.detected') : t('agents.notDetected')}</span>
