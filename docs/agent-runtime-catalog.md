@@ -128,6 +128,29 @@ Structured output: Unknown
 
 `apps/daemon/test/app.test.ts` 是**故意**保留真发现的：它断言的是真路由契约（每条 agent 的 `adapterStatus === getAgentAdapterStatus(id)`、custom agent 为 `unsupported`），换成夹具就等于把契约本身换成夹具。代价是它仍带着同样的贴边风险。
 
+### 3.5 本机逐个 Agent 的 Adapter 对账（2026-09-02）
+
+交接文档 §8-11.2 一直挂着「仍需在各 Agent 实际安装环境逐个验证 Adapter」。这台机器实测**八个内置全在 PATH 上**，所以这一次把八份都对完了。方法全程只读：`discoverAgentRuntimes()` 给检出与版本，`buildAgentExecutionPlan(task, cwd, id, { execute: false })` 给**我们真正会传的 argv**（从公开 API 取，不抄我读到的源码），`probeAgentCapabilities()` 给探针判定；然后把 argv 里**每一个以 `-` 开头的 token** 用与探针同一条「必须独立成词」规则拿去问该 CLI 自己的帮助——先问参数表指定的那一层，再问顶层。除 `--version` 与 `--help`/`-h` 外没有向任何 agent CLI 传过参数，没有跑过任何一次任务。
+
+| Agent | 本机版本 | Adapter | 探针 | Adapter 传的 flag 在帮助里独立成词 |
+| --- | --- | --- | --- | --- |
+| codex | `codex-cli 0.147.0` | verified | true | 4/4（`exec --help` 层：`--json` `--ephemeral` `--sandbox` `--cd`） |
+| claude-code | `2.1.231 (Claude Code)` | candidate | true | 4/4（顶层：`-p` `--allowedTools` `--dangerously-skip-permissions` `--output-format`） |
+| aider | `aider 0.86.2` | candidate | true | 2/2（`--message` `--yes-always`） |
+| opencode | `opencode2 v0.0.0-beta-17823` | verified（走 driver） | false / 帮助答得出 | 不适用：argv 里唯一带 `-` 的 token 是**我们自己 driver 的** `--prompt=<临时文件>`，不是 opencode 的参数 |
+| codebuddy | `2.142.0` | verified | true | 3/3（`-p` `--permission-mode` `--no-session-persistence`） |
+| hermes | `Hermes Agent v0.20.6 (2026.8.27)` | verified | true | 3/3（`-z` `--in` `--yolo`） |
+| openclaw | **答不出** | candidate | false / 帮助答不出 | 0/4，四个全是「帮助没答」 |
+| pi | **答不出** | **无 Adapter** | 无期望条目 | — |
+
+1. **六个能答的，Adapter 真传的 flag 全部有据**：一个都不缺，包括探针根本没去问的那些。顺带量出探针只查子集：探针问的是 1–2 个 flag，Adapter 真传的是 3–4 个（codex 只问 `--json`，却还传 `--ephemeral --sandbox --cd`；claude 只问 `-p`，却传 4 个）。所以 `nonInteractive` 为真**不等于整条 argv 有据**——本轮把没问的那些也核了，全绿。要不要把它们补进期望表是另一个决定：补全会让 CLI 帮助一改版就掉判定，而"问错层"的假阴性见 §3.3。
+2. **openclaw 与 pi 在本机不可验证，原因是环境不是产品**：这台 shell 的 node 是 v20.20.2，openclaw 的启动器直接以 `Node.js >=22.22.3 <23, >=24.15.0 <25, or >=25.9.0 is required (current: v20.20.2).` 退出 1（stderr 167 字节，stdout 空）；pi 退出 1 并往 stderr 倒 57 KB 打包栈。而交接文档 §8-7 的 daemon PATH 配方**要求带上 fnm node20 全局 bin**（为了 `vercel`/`wrangler`），所以 daemon 起来后 openclaw 仍会在同一道门上挂——它的 candidate 状态在这台机器推不动，除非换 node。
+3. **修掉一条假陈述**（`806d490`）：`--version` 没答出来的 Agent，`version` 字段此前装的是那段错误文本的第一行，于是 Studio 会把「Node.js >=22 才够」和一行 bundle 路径**当版本号印出来**（`App.tsx` 的 `{agent.version && …}`）。现在探测没答就没有版本，而 PATH 上存在这件事仍由 `detected` 表达（§3.1 的两分不变）——这条已沉淀成 [经验沉淀](real-world-lessons.md) §2 规则 8 的一般形式：**探测填的每个字段，没答出来就不能替它作答**。种植反证：把 guard 撤掉，新用例红在 `expected 'Example: Node.js >=22 is required (cu…' to be null`；改回来后本机重跑，pi 与 openclaw 的 `version` 均为 null，其余六个照旧。
+4. **一处声明与测量的不一致，只记录不动**：`BUILT_IN_CAPABILITIES.pi` 声明 `version-detection`，而它连版本都答不出，Studio 那排 chip 展示的就是这份声明。这与 §3.3 里删掉的 `workspace-write` chip 同一形态，但处理它要先决定这份 capabilities 表整体算「声明」还是「测量」，属架构判断。
+5. **一处文档过期**：§5.3（真实链路经验沉淀）写的是 homebrew codex `0.142.3`，实测现在解析到 `0.151.0`；而默认 PATH 上的 `codex` 仍是 fnm node20 全局 bin 里的 `0.147.0`，即那份记录里点名要避开的那版。0.147.0 与 `ark-code-latest` 不兼容这一条**今天没有重测**（要真跑一次模型调用），本轮只更新了版本号观测。
+
+§3.3 结尾那句「本机实测（四个）…」已被本节的八份对账取代。
+
 ## 4. 专业模式
 
 自动探测失败时，专业模式才允许补充完整执行参数：
