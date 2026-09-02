@@ -103,3 +103,24 @@ describe('decision locale key coverage', () => {
     });
   }
 });
+
+describe('baseline locale key coverage', () => {
+  const keys = [
+    'baseline.summary.ready', 'baseline.summary.blocked',
+    'baseline.resource.github.title', 'baseline.resource.github.missingReason',
+    'baseline.resource.supabase.title', 'baseline.resource.supabase.missingReason',
+    'baseline.resource.vercel.title', 'baseline.resource.vercel.missingReason',
+    'baseline.resource.cloudflare.title', 'baseline.resource.cloudflare.missingReason',
+    'baseline.resource.reason.hasOwner',
+  ] as const;
+
+  for (const key of keys) {
+    it(`resolves ${key} in both locales`, () => {
+      for (const [dict, name] of dictionaries) {
+        const value = resolveKey(dict, key);
+        expect(value, `${name} missing ${key}`).toBeDefined();
+        expect(value!.length).toBeGreaterThan(0);
+      }
+    });
+  }
+});
