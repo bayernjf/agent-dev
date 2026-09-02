@@ -46,6 +46,8 @@ export const zh = {
     namePlaceholder: '例如：Jiang Feng',
     egAcme: '例如：acme',
     language: '语言',
+    switchToLight: '切换到浅色主题',
+    switchToDark: '切换到深色主题',
   },
   nav: {
     projects: '项目',
@@ -64,6 +66,13 @@ export const zh = {
     title: '项目',
     description: '每个 Blueprint 都是一次交付运行的持久真实来源。',
     newBlueprint: '新建 Blueprint',
+    exportBlueprint: '导出',
+    exportBlueprintTitle: '将当前 Blueprint 导出为 JSON',
+    importBlueprint: '导入',
+    importBlueprintTitle: '从 JSON 导入 Blueprint',
+    showDiff: '显示差异',
+    hideDiff: '隐藏差异',
+    showDiffTitle: '与上一个 Revision 对比',
     loading: '正在加载项目...',
     empty: '暂无任何项目。创建 Blueprint 以建立交付基线。',
     table: {

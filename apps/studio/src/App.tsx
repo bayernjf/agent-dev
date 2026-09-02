@@ -1918,21 +1918,21 @@ export function App() {
               <button className={locale === 'en' ? 'active' : ''} type="button" onClick={() => setLocale('en')}>EN</button>
               <button className={locale === 'zh' ? 'active' : ''} type="button" onClick={() => setLocale('zh')}>中</button>
             </div>
-            <button className="theme-switch" type="button" onClick={toggleTheme} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}>
+            <button className="theme-switch" type="button" onClick={toggleTheme} aria-label={t(theme === 'dark' ? 'common.switchToLight' : 'common.switchToDark')} title={t(theme === 'dark' ? 'common.switchToLight' : 'common.switchToDark')}>
               {theme === 'dark' ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
             </button>
             <button className="icon-button" type="button" onClick={() => void loadProjects()} aria-label={t('common.refresh')} title={t('common.refresh')}><RefreshCw size={18} /></button>
             {view.kind === 'project' && selected && (
               <>
-                <button className="quiet-button" type="button" onClick={() => void exportBlueprint()} title="Export Blueprint as JSON">
-                  Export
+                <button className="quiet-button" type="button" onClick={() => void exportBlueprint()} title={t('projects.exportBlueprintTitle')}>
+                  {t('projects.exportBlueprint')}
                 </button>
-                <label className="quiet-button" style={{ cursor: 'pointer' }} title="Import Blueprint from JSON">
-                  Import
+                <label className="quiet-button" style={{ cursor: 'pointer' }} title={t('projects.importBlueprintTitle')}>
+                  {t('projects.importBlueprint')}
                   <input type="file" accept="application/json" style={{ display: 'none' }} onChange={e => { const file = e.target.files?.[0]; if (file) void importBlueprint(file); e.target.value = ''; }} disabled={importingBlueprint} />
                 </label>
-                <button className="quiet-button" type="button" onClick={() => { if (showDiff) { setShowDiff(false); setBlueprintDiff(null); } else void loadBlueprintDiff(); }} title="Show diff with previous revision">
-                  {showDiff ? 'Hide Diff' : 'Show Diff'}
+                <button className="quiet-button" type="button" onClick={() => { if (showDiff) { setShowDiff(false); setBlueprintDiff(null); } else void loadBlueprintDiff(); }} title={t('projects.showDiffTitle')}>
+                  {showDiff ? t('projects.hideDiff') : t('projects.showDiff')}
                 </button>
               </>
             )}
@@ -2140,10 +2140,12 @@ export function App() {
                         <label key={profile.id} className="agent-option" style={{ opacity: ready ? 1 : 0.5 }}>
                           <div className="agent-option-header">
                             <input type="radio" name="runtime" checked={answers.runtimeProvider === profile.id} onChange={() => setAnswer('runtimeProvider', profile.id)} disabled={!ready} />
-                            <span className="agent-name">{profile.icon ? `${profile.icon} ` : ''}{profile.name} · Profile</span>
-                            <span className="agent-badge profile">Profile</span>
+                            {/* The badge already reads PROFILE, so repeating it inside the name said
+                                the same word twice in one row. */}
+                            <span className="agent-name">{profile.icon ? `${profile.icon} ` : ''}{profile.name}</span>
+                            <span className="agent-badge profile">{t('agents.profileBadge')}</span>
                           </div>
-                          <p className="agent-desc">Based on {baseAgent?.name ?? profile.baseAgentId}{!ready && ` — ${t('blueprint.runtimeNotDetected')}`}</p>
+                          <p className="agent-desc">{t('agents.basedOn', { name: baseAgent?.name ?? profile.baseAgentId })}{!ready && ` — ${t('blueprint.runtimeNotDetected')}`}</p>
                         </label>
                       );
                     })}
