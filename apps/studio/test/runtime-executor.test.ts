@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { AGENT_NOT_EXECUTABLE_CODE, classifyRuntimeExecutorFailure, withoutProviderNamespace } from '../src/lib/runtime-executor';
+import {
+  AGENT_NOT_EXECUTABLE_CODE, classifyRuntimeExecutorFailure, runtimeExecutorId, withoutProviderNamespace,
+} from '../src/lib/runtime-executor';
 
 // Why this exists: the daemon used to answer "this Agent cannot run the task" by building a Codex
 // plan, so the panel showed an executor nobody had picked. It now refuses, and Studio has to say so -
@@ -88,5 +90,48 @@ describe('a namespaced executor id still reads as one Agent', () => {
 
   it('asks for the id as written before asking for the stripped one', () => {
     expect(code('App.tsx')).toContain('nameFor(agentId) ?? nameFor(withoutProviderNamespace(agentId))');
+  });
+});
+
+// Installing an Agent is no decision to use it, so the order below is the whole contract of the
+// Runtime panel's header: a run that was prepared, then a click, then the Blueprint a human approved.
+describe('the panel names an executor it can account for', () => {
+  it('reads the prepared run ahead of anything still on screen', () => {
+    expect(runtimeExecutorId({
+      runAgentId: 'opencode', selectedAgentId: 'codex', blueprintProvider: 'local-claude-code',
+    })).toBe('opencode');
+  });
+
+  it('reads an explicit click over the Blueprint', () => {
+    // Changing the Agent in the panel is a question about what Prepare will send; the header has to
+    // move with it or the two statements contradict each other.
+    expect(runtimeExecutorId({ selectedAgentId: 'p-helper', blueprintProvider: 'local-claude-code' }))
+      .toBe('p-helper');
+  });
+
+  it('inherits the approved Blueprint with the namespace shed', () => {
+    // This row replaced "the first installed Agent". A project approved with Claude Code read Codex
+    // on screen under the old rule, and Prepare then sent a run for the name it showed.
+    expect(runtimeExecutorId({ blueprintProvider: 'local-claude-code' })).toBe('claude-code');
+  });
+
+  it('names nobody that it cannot account for', () => {
+    expect(runtimeExecutorId({})).toBeNull();
+    expect(runtimeExecutorId({ runAgentId: '', selectedAgentId: null, blueprintProvider: undefined })).toBeNull();
+  });
+
+  it('hands a legacy namespaced run id over unchanged', () => {
+    // The caller looks an id up as written first, so a record prepared before the executor was
+    // normalised still names the Agent it names instead of losing it to the strip.
+    expect(runtimeExecutorId({ runAgentId: 'local-codex' })).toBe('local-codex');
+  });
+
+  it('is the only source the Runtime header prints from', () => {
+    const app = code('App.tsx');
+    const eyebrow = app.match(/<p className="eyebrow">\{t\('runtime\.eyebrow'\)\}[^<]*<\/p>/)?.[0] ?? '';
+    expect(eyebrow, 'the Runtime header no longer renders the accounted-for executor').toContain('runtimeExecutorAgentId');
+    expect(eyebrow).not.toMatch(/selectedAgentId|agents\[|catalog/);
+    // One call site: a surface that re-derives the executor is how a removed fallback comes back.
+    expect(app.match(/runtimeExecutorId\(\{/g)?.length).toBe(1);
   });
 });

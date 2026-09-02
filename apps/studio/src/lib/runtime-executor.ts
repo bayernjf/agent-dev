@@ -43,3 +43,28 @@ export function classifyRuntimeExecutorFailure(
   }
   return { kind: 'other' };
 }
+
+/** The three things the Runtime panel can know about who runs the task, weakest last. */
+export type ExecutorNaming = {
+  runAgentId?: string | null;
+  selectedAgentId?: string | null;
+  blueprintProvider?: string | null;
+};
+
+/**
+ * Whose name the Runtime panel is allowed to print as the executor.
+ *
+ * A run record is the fact of who was planned; an explicit selection is the user's own choice; and
+ * with neither, the Blueprint revision a human approved says who takes the task. What must not happen
+ * is naming an Agent because it happens to be installed: the panel used to fall back to the first
+ * runnable catalog entry, so a project approved with Claude Code in it read "Codex" and Prepare sent
+ * a Codex run, with nothing on screen admitting the swap.
+ *
+ * The Blueprint provider is returned stripped because it is stored namespaced; a legacy run record may
+ * still carry the prefix, and the caller resolves names by trying the id as written first.
+ */
+export function runtimeExecutorId(sources: ExecutorNaming): string | null {
+  if (sources.runAgentId) return sources.runAgentId;
+  if (sources.selectedAgentId) return sources.selectedAgentId;
+  return sources.blueprintProvider ? withoutProviderNamespace(sources.blueprintProvider) : null;
+}

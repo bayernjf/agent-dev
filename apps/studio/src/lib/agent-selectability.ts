@@ -15,10 +15,9 @@ export function adapterStatusOf(agent: AgentDescriptor | undefined): AdapterStat
   return agent?.adapterStatus ?? 'unsupported';
 }
 
-// One question, asked by every surface that presents an Agent: the auto-selection after a catalog
-// load, the capability probe row, the Blueprint runtime radios, the Profile rows and the Runtime
-// prepare gate. Each of them used to derive its own answer from `detected` alone, which is how a
-// candidate Adapter became a selectable runtime.
+// One question, asked by every surface that presents an Agent: the capability probe row, the
+// Blueprint runtime radios, the Profile rows and the Runtime prepare gate. Each of them used to derive
+// its own answer from `detected` alone, which is how a candidate Adapter became a selectable runtime.
 export function canRunTasks(agent: AgentDescriptor | undefined): boolean {
   return Boolean(agent?.detected) && adapterStatusOf(agent) === 'verified';
 }
@@ -41,12 +40,4 @@ export function canRunSelectedAgent(
   const profile = profiles.find(candidate => candidate.id === agentId);
   if (profile) return canProfileRunTasks(profile, agents);
   return canRunTasks(agents.find(candidate => candidate.id === agentId));
-}
-
-// Which Agent Studio uses when the user has not chosen one. This used to be the first installed CLI,
-// and falling through to `agents[0]` when nothing was installed - both could name an Agent the daemon
-// would refuse. With nothing runnable the selection stays empty instead, and the prepare request
-// leaves the executor to the Blueprint rather than guessing on the user's behalf.
-export function firstRunnableAgent(agents: AgentDescriptor[]): AgentDescriptor | undefined {
-  return agents.find(canRunTasks);
 }

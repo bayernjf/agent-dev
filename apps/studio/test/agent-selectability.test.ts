@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import * as selectability from '../src/lib/agent-selectability';
 import {
-  adapterStatusOf, canProfileRunTasks, canRunSelectedAgent, canRunTasks, firstRunnableAgent,
+  adapterStatusOf, canProfileRunTasks, canRunSelectedAgent, canRunTasks,
 } from '../src/lib/agent-selectability';
 import type { AgentDescriptor, AgentProfile } from '../src/types';
 
@@ -11,6 +12,13 @@ import type { AgentDescriptor, AgentProfile } from '../src/types';
 // the daemon. The verdict now lives in one place; these cases are the ones that were wrong before.
 
 const SRC = new URL('../src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+
+// Source evidence has one rule here: read the file with whole-line comments removed, so that
+// commenting a wiring row out is a failing change rather than a passing one.
+const code = (file: string) => readFileSync(`${SRC}/${file}`, 'utf8')
+  .split('\n')
+  .filter(line => !line.trim().startsWith('//'))
+  .join('\n');
 
 const agent = (id: string, over: Partial<AgentDescriptor> = {}): AgentDescriptor => ({
   id,
@@ -72,27 +80,21 @@ describe('the execution verdict is not the detection verdict', () => {
     expect(canRunSelectedAgent('unknown', agents, profiles)).toBe(false);
   });
 
-  it('picks past an installed candidate when choosing for the user', () => {
-    const catalog = [
-      agent('claude-code', { adapterStatus: 'candidate' }),
-      agent('aider', { adapterStatus: 'unsupported' }),
-      agent('codex', { adapterStatus: 'verified' }),
-    ];
-    // The old default was `find(agent => agent.detected)`, which landed on Claude Code, then fell
-    // through to catalog[0] when nothing was installed.
-    expect(firstRunnableAgent(catalog)?.id).toBe('codex');
-    expect(firstRunnableAgent(catalog.slice(0, 2))).toBeUndefined();
-    expect(firstRunnableAgent([])).toBeUndefined();
+  it('exports no helper that chooses an Agent on the user\'s behalf', () => {
+    // A "best default" helper is exactly how the Runtime panel came to name Codex under a Blueprint
+    // that had approved someone else. This module answers a question about one Agent; deciding for the
+    // user belongs to the user.
+    expect(Object.keys(selectability).filter(name => !/^can|^adapter/.test(name))).toEqual([]);
   });
 });
 
 // The predicate is worthless if a surface keeps deriving its own answer, so the wiring is pinned here.
 // Each row names a place an Agent is offered or chosen; deleting a guard makes its row fail.
 describe('every surface that presents an Agent asks the shared question', () => {
-  const app = readFileSync(`${SRC}/App.tsx`, 'utf8');
+  const app = code('App.tsx');
 
   const SITES: { where: string; evidence: string }[] = [
-    { where: 'catalog auto-select', evidence: 'return firstRunnableAgent(payload.agents)?.id ?? null;' },
+    { where: 'catalog load', evidence: 'return profiles.some(profile => profile.id === current) ? current : null;' },
     { where: 'capability probe click', evidence: 'if (canRunTasks(agent)) setSelectedAgentId(agent.id);' },
     { where: 'Blueprint Agent radio', evidence: 'const runnable = canRunTasks(agent);' },
     { where: 'Blueprint Profile radio', evidence: 'const runnable = canProfileRunTasks(profile, agents);' },
@@ -106,6 +108,14 @@ describe('every surface that presents an Agent asks the shared question', () => 
       expect(app.includes(site.evidence), `${site.where} no longer asks the shared verdict`).toBe(true);
     });
   }
+
+  it('never picks a default Agent after loading the catalog', () => {
+    // The row above only proves the guard exists; this one proves nothing replaced it. The fallback
+    // used to run whenever the selection was empty, so the first verified Agent in the catalog became
+    // the executor of a task nobody had assigned to it.
+    expect(app).not.toMatch(/setSelectedAgentId\(\s*(firstRunnable|payload\.agents)/);
+    expect(app).not.toContain('firstRunnableAgent');
+  });
 
   it('names the Adapter state instead of printing the enum', () => {
     // `t('agents.adapter', { status: probe.adapterStatus })` rendered "adapter: unsupported" into a
