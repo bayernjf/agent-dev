@@ -1212,9 +1212,28 @@ select option {
   transition: border-color .15s, background .15s;
 }
 
-.agent-item:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.agent-item:hover:not(.unavailable) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 .agent-item.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
-.agent-item:disabled { opacity: .55; cursor: not-allowed; }
+.agent-item.unavailable { opacity: .55; }
+
+/* A catalog row carries two intents that used to share one click: name this Agent as the executor,
+   and read out what its CLI can do. They are now two controls, so .agent-select adds no chrome of
+   its own - the row keeps its single border - and it stays a real <button>, because the split must
+   not cost the keyboard the thing it could already do. */
+.agent-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+}
+
+.agent-select:disabled { cursor: not-allowed; }
+.agent-side { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.agent-probe { width: 26px; height: 26px; }
 
 .agent-info { display: grid; gap: 3px; min-width: 0; }
 .agent-header { display: flex; align-items: center; gap: 8px; }

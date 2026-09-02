@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Activity, ArrowLeft, ArrowRight, CheckCircle2, CircleDot, FolderKanban, KeyRound, Moon, PlugZap, RefreshCw, ShieldCheck, Sparkles, Sun,
+import { Activity, ArrowLeft, ArrowRight, CheckCircle2, CircleDot, FolderKanban, Gauge, KeyRound, Moon, PlugZap, RefreshCw, ShieldCheck, Sparkles, Sun,
 } from 'lucide-react';
 import { useI18n, type KeyPath } from './i18n/i18n';
 import { Dashboard } from './views/Dashboard';
@@ -756,9 +756,8 @@ export function App() {
 
   const probeAgent = async (agent: AgentDescriptor) => {
     if (!agent.detected || probingAgentId === agent.id) return;
-    // The probe itself is read-only and worth running for any installed CLI, so the click stays
-    // allowed; only its side effect of naming this Agent as the executor is withheld.
-    if (canRunTasks(agent)) setSelectedAgentId(agent.id);
+    // Reading a CLI's help output is worth doing for any installed Agent, verified or not, and it
+    // settles nothing. Naming the executor is the row's own click, never a side effect of looking.
     setProbingAgentId(agent.id);
     try {
       const response = await fetch(`/api/runtime/probe/${encodeURIComponent(agent.id)}`);
@@ -1783,11 +1782,21 @@ export function App() {
       <p className="form-note">{t('agents.formNote')}</p>
       {loadingAgents && agents.length === 0 ? <p className="empty-state">{t('agents.detecting')}</p> : agents.length === 0 ? <p className="empty-state">{t('agents.notFound')}</p> : <div className="agent-list">{agents.map(agent => {
         const probe = agentProbes[agent.id];
+        const selectable = canRunTasks(agent);
+        // One click used to do two unrelated things: run the read-only capability probe and name this
+        // Agent as the executor. The probe is now its own button beside the row, so the row is left
+        // with the only decision it was ever entitled to make - and it stays a real button, because
+        // losing the keyboard with the extra click would be a worse trade than gaining one.
         return (
-        <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => void probeAgent(agent)} disabled={!agent.detected || probingAgentId !== null}>
-          <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source === 'built-in' ? t('agents.builtIn') : t('agents.custom')}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? t('agents.runningProbe') : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{probe && <div className="agent-caps"><span className="agent-cap">{probe.nonInteractive ? t('agents.nonInteractiveYes') : t('agents.nonInteractiveUnknown')}</span><span className="agent-cap">{probe.workspaceWrite ? t('agents.workspaceWriteYes') : t('agents.workspaceWriteNo')}</span><span className="agent-cap">{t(`agents.adapterStatus.${probe.adapterStatus}` as KeyPath)}</span></div>}{agent.detected && !canRunTasks(agent) && <small className="agent-reason">{t('agents.notExecutable')}</small>}<code className="agent-command">{agent.launchCommand}</code></div>
-          <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? t('agents.detected') : t('agents.notDetected')}</span>
-        </button>
+        <div className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}${agent.detected ? '' : ' unavailable'}`} key={agent.id}>
+          <button className="agent-select" type="button" disabled={!selectable} onClick={() => { if (selectable) setSelectedAgentId(agent.id); }}>
+            <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source === 'built-in' ? t('agents.builtIn') : t('agents.custom')}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? t('agents.runningProbe') : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{probe && <div className="agent-caps"><span className="agent-cap">{probe.nonInteractive ? t('agents.nonInteractiveYes') : t('agents.nonInteractiveUnknown')}</span><span className="agent-cap">{probe.workspaceWrite ? t('agents.workspaceWriteYes') : t('agents.workspaceWriteNo')}</span><span className="agent-cap">{t(`agents.adapterStatus.${probe.adapterStatus}` as KeyPath)}</span></div>}{agent.detected && !selectable && <small className="agent-reason">{t('agents.notExecutable')}</small>}<code className="agent-command">{agent.launchCommand}</code></div>
+          </button>
+          <div className="agent-side">
+            <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? t('agents.detected') : t('agents.notDetected')}</span>
+            <button className="icon-button agent-probe" type="button" disabled={!agent.detected || probingAgentId !== null} onClick={() => { void probeAgent(agent); }} aria-label={`${t('agents.probeCapabilities')} · ${agent.name}`} title={t('agents.probeCapabilities')}><Gauge size={15} /></button>
+          </div>
+        </div>
         );
       })}</div>}
 
