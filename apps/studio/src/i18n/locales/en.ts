@@ -629,6 +629,9 @@ export const en = {
   },
   featureTask: {
     eyebrow: 'Feature delivery',
+    // Every block on the Iteration tab is gated on a state the project has not reached yet, which
+    // left the tab rendering as blank space with no reason and no next step.
+    waitingForApply: 'Feature work needs the workspace Local Apply creates. Run Local Apply from the Delivery tab, then return here to define a feature task.',
     defineNext: 'Define the next feature',
     taskIs: 'Task is {status}. Acceptance criteria are the Agent boundary.',
     createTaskDescription: 'Create a focused task package before asking an Agent to change code.',

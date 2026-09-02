@@ -626,6 +626,7 @@ export const zh = {
   },
   featureTask: {
     eyebrow: '功能交付',
+    waitingForApply: '功能任务需要 Local Apply 创建的工作区。请先到「交付」标签运行 Local Apply，完成后回到这里定义功能任务。',
     defineNext: '定义下一个功能',
     taskIs: '任务状态为 {status}。验收标准是 Agent 的边界。',
     createTaskDescription: '在让 Agent 修改代码之前，创建一个聚焦的任务包。',
