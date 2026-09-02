@@ -1116,4 +1116,95 @@ describe('daemon API', () => {
       }
     });
   });
+
+  describe('Runtime executor refusal', () => {
+    const post = (body: unknown) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+    // A Blueprint may name any Agent, while the Adapter registry only trusts the verified ones. The
+    // Runtime routes have to answer an untrusted executor by refusing it, never by planning some
+    // other Agent's run. Resolution only consults the registry, so these expectations hold on a
+    // machine where neither Agent is installed.
+    async function openProjectWithApprovedTask(runtimeProvider: string) {
+      const directory = await mkdtemp(join(tmpdir(), 'agent-dev-executor-'));
+      directories.push(directory);
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { app } = createDaemonApp(store, undefined, {});
+      const created = await app.request('http://localhost/api/projects', post({
+        name: 'Refused Executor',
+        answers: {
+          mode: 'professional',
+          runtimeProvider,
+          githubOwner: 'acme',
+          supabaseOrganization: 'acme',
+          vercelTeam: 'acme',
+          cloudflareAccount: 'acme',
+        },
+      }));
+      const { project } = await created.json() as { project: { id: string } };
+      const approved = await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, post({
+        blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user',
+      }));
+      expect(approved.status).toBe(200);
+      const applied = await app.request(`http://localhost/api/projects/${project.id}/apply`, post({
+        blueprintRevision: 1, confirmation: 'APPLY_BASELINE',
+      }));
+      expect(applied.status).toBe(200);
+      const task = await app.request(`http://localhost/api/projects/${project.id}/feature-task`, post({
+        blueprintRevision: 1, title: 'Add receipt list', objective: 'Show saved receipts to the user.',
+        acceptanceCriteria: ['The list renders saved receipts.'],
+      }));
+      expect(task.status).toBe(201);
+      const approvedTask = await app.request(`http://localhost/api/projects/${project.id}/feature-task/approve`, post({
+        blueprintRevision: 1, confirmation: 'APPROVE_FEATURE_TASK', approvedBy: 'test-user',
+      }));
+      expect(approvedTask.status).toBe(200);
+      return { store, app, projectId: project.id };
+    }
+
+    it('refuses both Runtime routes when the Blueprint names an Agent with a candidate Adapter', async () => {
+      const { store, app, projectId } = await openProjectWithApprovedTask('local-claude-code');
+      try {
+        const plan = await app.request(`http://localhost/api/projects/${projectId}/runtime/plan`);
+        expect(plan.status).toBe(409);
+        const planBody = await plan.json() as { error: string; code?: string; agentId?: string };
+        // The literal below is AGENT_NOT_EXECUTABLE_CODE. Studio cannot import the Runtime package
+        // (it spawns), so it mirrors this code; this response is the wire truth both sides check in.
+        expect(planBody.code).toBe('agent_not_executable');
+        expect(planBody.agentId).toBe('claude-code');
+        expect(planBody.error).toContain('claude-code');
+        expect(planBody.error).toContain('candidate');
+
+        const run = await app.request(`http://localhost/api/projects/${projectId}/runtime/run`, post({
+          confirmation: 'PREPARE_RUNTIME_RUN',
+        }));
+        expect(run.status).toBe(409);
+        await expect(run.json()).resolves.toMatchObject({ code: 'agent_not_executable', agentId: 'claude-code' });
+        // Refusing must not leave a half-truth behind: no run record means no report claiming an Agent
+        // that was never planned.
+        expect(await store.getRuntimeRun(projectId, 1)).toBeNull();
+      } finally {
+        await store.close();
+      }
+    }, 30_000);
+
+    it('keeps the plain "no approved task" refusal distinguishable from an executor refusal', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'agent-dev-executor-'));
+      directories.push(directory);
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      try {
+        const { app } = createDaemonApp(store, undefined, {});
+        const created = await app.request('http://localhost/api/projects', post({ name: 'No Task Yet' }));
+        const { project } = await created.json() as { project: { id: string } };
+        const plan = await app.request(`http://localhost/api/projects/${project.id}/runtime/plan`);
+        expect(plan.status).toBe(409);
+        const planBody = await plan.json() as Record<string, unknown>;
+        // Studio only shows "this Agent cannot run the task" when the code is present, so a 409 that
+        // merely means "nothing to run yet" must not carry it.
+        expect(planBody.error).toContain('Approve a Feature Task');
+        expect('code' in planBody).toBe(false);
+      } finally {
+        await store.close();
+      }
+    });
+  });
 });

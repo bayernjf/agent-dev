@@ -688,3 +688,76 @@ describe('feature task pipeline execution', () => {
     }
   }, 30_000);
 });
+
+/** Build an approved, applied project with one approved task and a given Runtime provider. */
+async function seedAppliedProject(store: AgentDevStore, runtimeProvider: string): Promise<{ projectId: string; revision: number; workspacePath: string }> {
+  const created = await store.createProject({
+    name: 'Runtime Executor Desk',
+    blueprint: createBlueprint('runtime-executor-desk', { mode: 'professional', githubOwner: 'acme', supabaseOrganization: 'acme', vercelTeam: 'acme', cloudflareAccount: 'acme', runtimeProvider }),
+  });
+  await store.approveBaseline(created.id, 1, 'test-user');
+  const applied = await store.executeApplyRun((await store.createApplyRun(created.id, 1)).id);
+  await store.createFeatureTask({ projectId: created.id, blueprintRevision: 1, title: 'Build the list', objective: 'Show saved receipts.', acceptanceCriteria: ['The list renders.'] });
+  await store.approveFeatureTask(created.id, 1, 'test-user');
+  return { projectId: created.id, revision: 1, workspacePath: applied.workspacePath };
+}
+
+// The record of who runs a task and the process that actually ran it used to be decided twice, by two
+// copies of the id rules that disagreed. A Blueprint naming any provider was planned for Codex, and
+// an unresolvable record was *executed* on Codex, so the run report named one Agent in front of a
+// different one's writes. These cases are the ones that were wrong before.
+describe('the Runtime executor is resolved once', () => {
+  it('prepares the run on the Agent the Blueprint named', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-runtime-executor-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { projectId, revision, workspacePath } = await seedAppliedProject(store, 'local-opencode');
+
+      const run = await store.prepareRuntimeRun(projectId, revision, 'local-opencode');
+
+      // `local-` is the provider namespace, not part of any Adapter key.
+      expect(run.agentId).toBe('opencode');
+      expect(run.plan).toMatchObject({ baseAgentId: 'opencode', mode: 'dry-run', executionAllowed: false });
+      expect(run.plan.command[0]).not.toBe('codex');
+      await expect(readFile(join(workspacePath, 'RUNTIME_RUN_REPORT.md'), 'utf8')).resolves.toContain('- Agent: opencode');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 30_000);
+
+  it('refuses to prepare a run instead of quietly planning one for Codex', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-runtime-executor-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { projectId, revision } = await seedAppliedProject(store, 'local-claude-code');
+
+      await expect(store.prepareRuntimeRun(projectId, revision, 'local-claude-code')).rejects.toThrow(/claude-code/);
+      // Nothing was written, so no later stage can read a run record whose executor nobody approved.
+      expect(await store.getRuntimeRun(projectId, revision)).toBeNull();
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 30_000);
+
+  it('refuses to execute a run whose recorded Agent cannot run it', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-runtime-executor-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { projectId, revision, workspacePath } = await seedAppliedProject(store, 'local-opencode');
+      const prepared = await store.prepareRuntimeRun(projectId, revision, 'local-opencode');
+      // Stand in the failure this guard exists for: a record left behind by an older build, or one
+      // whose Profile has since been deleted, so the id no longer resolves to a verified Adapter.
+      await writeFile(join(workspacePath, 'runtime-run.json'), JSON.stringify({ ...prepared, agentId: 'claude-code' }, null, 2) + '\n', 'utf8');
+
+      await expect(store.executeRuntimeRun(projectId, revision, fakeRunner([{ exitCode: 0 }]))).rejects.toThrow(/claude-code/);
+      // An attempt that never resolved an executor must not be counted or committed either.
+      const untouched = await store.getRuntimeRun(projectId, revision);
+      expect(untouched?.attempts).toBe(0);
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 30_000);
+});
