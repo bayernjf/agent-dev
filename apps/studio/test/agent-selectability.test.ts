@@ -1,24 +1,15 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as selectability from '../src/lib/agent-selectability';
 import {
   adapterStatusOf, canProfileRunTasks, canRunSelectedAgent, canRunTasks,
 } from '../src/lib/agent-selectability';
 import type { AgentDescriptor, AgentProfile } from '../src/types';
+import { readSource } from './source-evidence';
 
 // Why this exists: "detected" and "can run a task" are two different claims, and Studio used to answer
 // the second one from the first. Claude Code, Aider and OpenClaw are installed on many machines and
 // still have no exercised execution Adapter, so a user could pick one, press prepare and be refused by
 // the daemon. The verdict now lives in one place; these cases are the ones that were wrong before.
-
-const SRC = new URL('../src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-
-// Source evidence has one rule here: read the file with whole-line comments removed, so that
-// commenting a wiring row out is a failing change rather than a passing one.
-const code = (file: string) => readFileSync(`${SRC}/${file}`, 'utf8')
-  .split('\n')
-  .filter(line => !line.trim().startsWith('//'))
-  .join('\n');
 
 const agent = (id: string, over: Partial<AgentDescriptor> = {}): AgentDescriptor => ({
   id,
@@ -91,7 +82,7 @@ describe('the execution verdict is not the detection verdict', () => {
 // The predicate is worthless if a surface keeps deriving its own answer, so the wiring is pinned here.
 // Each row names a place an Agent is offered or chosen; deleting a guard makes its row fail.
 describe('every surface that presents an Agent asks the shared question', () => {
-  const app = code('App.tsx');
+  const app = readSource('App.tsx');
 
   const SITES: { where: string; evidence: string }[] = [
     { where: 'catalog load', evidence: 'return profiles.some(profile => profile.id === current) ? current : null;' },

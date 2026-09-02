@@ -1,23 +1,14 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { en } from '../src/i18n/locales/en';
 import { nonInteractiveVerdict } from '../src/lib/capability-verdict';
 import { zh } from '../src/i18n/locales/zh';
 import type { AgentCapabilityProbe } from '../src/types';
+import { readSource } from './source-evidence';
 
 // Why this exists: the probe reads a CLI's help output and never runs the CLI, but the row rendered
 // whatever came out as a promise or its absence - `non-interactive: yes` for documentation,
 // `non-interactive: unknown` for both "we looked and it is not there" and "this Agent's
 // non-interactive path is not something help text can show". Three readings, three wordings.
-
-const SRC = new URL('../src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-
-// Source evidence has one rule here: read the file with whole-line comments removed, so that
-// commenting a wiring row out is a failing change rather than a passing one.
-const code = (file: string) => readFileSync(`${SRC}/${file}`, 'utf8')
-  .split('\n')
-  .filter(line => !line.trim().startsWith('//'))
-  .join('\n');
 
 const probe = (over: Partial<AgentCapabilityProbe> = {}): AgentCapabilityProbe => ({
   agentId: 'codex',
@@ -53,7 +44,7 @@ describe('the capability probe row keeps its three answers apart', () => {
   });
 
   it('renders the reading rather than the raw boolean', () => {
-    const app = code('App.tsx');
+    const app = readSource('App.tsx');
     expect(app).toContain("t(`agents.nonInteractiveVerdict.${nonInteractiveVerdict(probe)}` as KeyPath)");
     expect(app).not.toContain('agents.nonInteractiveYes');
     expect(app).not.toContain('agents.nonInteractiveUnknown');
@@ -62,7 +53,7 @@ describe('the capability probe row keeps its three answers apart', () => {
   it('prints no capability the probe never observed', () => {
     // `workspaceWrite` was copied out of the catalog's static declaration by a function named
     // probe, in the row directly below the chips that print that same declaration.
-    const app = code('App.tsx');
+    const app = readSource('App.tsx');
     expect(app).not.toContain('workspaceWrite');
     for (const dictionary of [en, zh]) {
       expect(Object.keys(dictionary.agents).filter(key => key.startsWith('workspaceWrite'))).toEqual([]);
