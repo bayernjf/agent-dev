@@ -264,6 +264,14 @@ export const zh = {
     generatedPackage: '生成的交付包',
     refreshPlan: '刷新交付计划',
   },
+  dryRun: {
+    summary: '本次 dry run 准备 {artifactCount} 个生成物与 {actionCount} 项人工动作。不改动任何云资源、凭证或代码仓库。',
+    automaticPreparation: {
+      validateSchema: '校验 ProductBlueprint schema 与所选模块组合。',
+      generateArtifacts: '生成产品标准、Agent 约束、交付流程、环境变量契约与交接文档预览。',
+      classifyBoundaries: '在创建任何 Provider 计划前，划分审批边界与人工动作。',
+    },
+  },
   evidence: {
     title: '证据包',
     finalDeliveryReport: '最终交付报告',
