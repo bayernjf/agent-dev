@@ -46,13 +46,13 @@ Agent Runtime  -> 用户电脑中的 Codex
 ### 当前实施
 
 - [Phase 0 技术 Spike 状态](docs/spikes/README.md)：本机实测证据、阻塞项和进入工程阶段的 Gate。
-- [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目暴露的缺陷、架构规则、模型选型与环境前提。
+- [真实链路经验沉淀](docs/real-world-lessons.md)：四个真实项目与 Studio 界面走查暴露的 31 个缺陷、11 条架构规则、模型选型与环境前提。
 - [v0.2 实施计划](docs/implementation-plan-v0.2.md)：v0.2 的目标、工程拆解与完成定义。
 - [Agent Profile 自定义方案](docs/custom-agent-profiles.md)：Runtime 的 Profile 化配置、校验与合并规则，已实施。
 - [凭证管理](docs/credential-management.md)：本地凭证文件、连接元数据、`.env` 生成器与 Studio 引导面板。
 - [对外 MCP 桥接](docs/mcp-bridge.md)：`agent-dev mcp` 的 20 工具清单、闸门边界与客户端配置。
 - [Studio 双主题设计方案](docs/studio-theme-design.md)：Studio 深/浅双主题 token 化视觉方案，已实施（`90696d4`）。
-- [Studio i18n 设计方案](docs/studio-i18n-design.md)：Studio 中/英双语方案，默认英文、术语保留英文，已实施（`90696d4`）。
+- [Studio i18n 设计方案](docs/studio-i18n-design.md)：Studio 中/英双语方案，默认英文、术语保留英文，已实施（`90696d4`）；§6.1/§6.2 是枚举驱动 key 与插值 params 的两条强制规则（含种植实测的判据）。
 - [外部 Pilot 招募](docs/pilot-recruiting.md)：v0.2 外部 Pilot 参与条件、流程、激励与隐私边界，申请/反馈走仓库 Issue 模板。
 - [安全与质量审计 2026-08-31](docs/audit-2026-08-31.md)：全仓审计发现与整改方案（P0–P4），整改进度以此为准。
 - [项目交接](handoff.md)：当前分支、硬约束、已完成工作和下一步。

@@ -66,6 +66,20 @@ apps/studio/src/i18n/
 
 判据：删掉字典里任一枚举成员，`npm run typecheck` 必须报错（已实测：会在字典、译文、调用点同时报三处）。
 
+### 6.2 算出来的 key 还要把 params 钉住（2026-09-02 补充）
+
+6.1 管的是"key 存不存在"，typecheck 能治。但当调用点是 `t(notes.key, notes.params)`——key 和 params 都由一个函数算出来——还有第二种坏法，typecheck 完全看不见：key 存在、类型正确、句子通顺，只是它里面没有那个 `{var}`，于是用户看到裸露的 `{providers}`。占位符只是字符串里的字符，字典的 `string` 类型对它一无所知。规则：
+
+- **占位集合与 params 键集合必须双向对上**，并且**在两本字典上都断言**（`test/key-resolution.ts` 的 `dictionaries` + `resolveKey`）。zh 漏一个占位符与 en 漏一个同样致命，只测 en 等于没测。
+- **候选 key 的交换要单独钉**。两份文案都是合法句子，把 A 情形指向 B 的 key 在界面上看不出语法问题，只有一张按枚举逐个写死的期望表能发现。因此"这两句话语义不重叠"那类只读字典本身的用例**不能替代**期望表——它结构上就看不见交换。
+- **不要用手写 `replace` 绕开 `t()` 的插值**，那会把占位符契约挪到断言之外的地方。
+- 这类断言属于源码证据测试，仍要遵守 `test/source-evidence.ts` 的注释剥离规则（该模块的收敛理由记录在 [交接文档](../handoff.md)）。
+
+判据（2026-09-02 实测，两次种植后均已回滚，Studio 12 文件 / 81 用例恢复全绿）：
+
+1. 删掉 `en.ts` 中 `baselineNoteCloud` 的 `{providers}` → 两条用例红，且都点名 `en / blueprint.baselineNoteCloud`（"占位对不上" + "两句话语义不重叠"）。
+2. 在 `baselineNoteFor` 里交换两个候选 key → "期望表" 与 "占位对不上" 两条红；而"两句话语义不重叠"那条**仍然绿**。这正是上一条规则要求保留期望表的证据。
+
 ## 7. 实施步骤
 
 1. 建 i18n 基础设施（`i18n.tsx` + `locales/en.ts` + `locales/zh.ts`）。
@@ -82,6 +96,7 @@ apps/studio/src/i18n/
 - [ ] 技术术语（Blueprint / Preview / Quality Gate / Runtime / Provider 等）保持英文原文。
 - [ ] 数据/产物类文本（活动历史、gate 输出、runtime 输出、报告、commit 证据）未被误翻译。
 - [ ] 动态插值（`{var}`）在两种语言下均正常渲染。
+- [ ] 由代码算出的 key，其 `params` 与**两本**字典里的 `{var}` 集合逐一对上；删掉任一占位符或交换任一候选 key 都会让测试红（见 6.2）。
 - [ ] 枚举拼接出来的 key 全部由 `satisfies Record<联合类型, string>` 覆盖；删掉任一成员会编译失败（见 6.1）。
 - [ ] 语言切换与主题切换并存互不干扰（同一侧边栏/顶部区域）。
 - [ ] `npm run typecheck` + `npm run build` 通过。
