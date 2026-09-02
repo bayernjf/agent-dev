@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  AGENT_NOT_EXECUTABLE_CODE, classifyRuntimeExecutorFailure, runtimeExecutorId, withoutProviderNamespace,
+  AGENT_NOT_DETECTED_CODE, AGENT_NOT_EXECUTABLE_CODE, classifyRuntimeExecutorFailure, runtimeExecutorId, withoutProviderNamespace,
 } from '../src/lib/runtime-executor';
 
 // Why this exists: the daemon used to answer "this Agent cannot run the task" by building a Codex
@@ -25,9 +25,24 @@ describe('a refused executor is told apart from an empty panel', () => {
     expect(AGENT_NOT_EXECUTABLE_CODE).toBe('agent_not_executable');
   });
 
+  it('carries the same literal the daemon stamps for a CLI that is not installed', () => {
+    // Same mirroring rule as above, and the second code exists so this sentence is not said about an
+    // Agent whose contract is fine and whose binary is simply missing.
+    expect(AGENT_NOT_DETECTED_CODE).toBe('agent_not_detected');
+  });
+
   it('names the Agent when the response actually says which one', () => {
     expect(classifyRuntimeExecutorFailure(409, { code: AGENT_NOT_EXECUTABLE_CODE, agentId: 'claude-code' }))
       .toEqual({ kind: 'agent-not-executable', agentId: 'claude-code' });
+  });
+
+  it('does not read the missing CLI as the missing contract', () => {
+    // Same status, same Agent id, different fact: an unverified Adapter and an uninstalled CLI need
+    // different sentences, so the classifier may not collapse them into one kind.
+    expect(classifyRuntimeExecutorFailure(409, { code: AGENT_NOT_DETECTED_CODE, agentId: 'codex' }))
+      .toEqual({ kind: 'agent-not-detected', agentId: 'codex' });
+    expect(classifyRuntimeExecutorFailure(409, { code: AGENT_NOT_DETECTED_CODE, agentId: 'codex' }).kind)
+      .not.toBe(classifyRuntimeExecutorFailure(409, { code: AGENT_NOT_EXECUTABLE_CODE, agentId: 'codex' }).kind);
   });
 
   it('stays quiet on the other 409', () => {
@@ -40,6 +55,7 @@ describe('a refused executor is told apart from an empty panel', () => {
   it('will not report a refusal it cannot name', () => {
     expect(classifyRuntimeExecutorFailure(409, { code: AGENT_NOT_EXECUTABLE_CODE }).kind).toBe('other');
     expect(classifyRuntimeExecutorFailure(409, { code: AGENT_NOT_EXECUTABLE_CODE, agentId: 7 }).kind).toBe('other');
+    expect(classifyRuntimeExecutorFailure(409, { code: AGENT_NOT_DETECTED_CODE }).kind).toBe('other');
   });
 
   it('does not read a refusal into another status', () => {
@@ -59,6 +75,9 @@ describe('both Runtime requests consult the classifier', () => {
     { where: 'prepare request', evidence: 'const failure = classifyRuntimeExecutorFailure(response.status, payload);' },
     { where: 'inherited refusal gate', evidence: 'const inheritedExecutorRefused = selectedAgentId === null && refusedExecutorAgentId !== null;' },
     { where: 'refusal reason render', evidence: '{prepareBlockedReason && <p className="agent-reason">{prepareBlockedReason}</p>}' },
+    // The second refusal has its own branch. Falling through to `payload.error` here would print the
+    // daemon's English sentence about PATH in an interface that already knows how to say it.
+    { where: 'missing-CLI refusal', evidence: "throw new Error(t('runtime.agentNotDetected', { agent: agentDisplayName(failure.agentId) }));" },
   ];
 
   for (const site of SITES) {

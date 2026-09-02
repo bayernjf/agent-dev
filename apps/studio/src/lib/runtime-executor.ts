@@ -8,6 +8,12 @@
 // apps/daemon/test against a real response, this package's test against the constant below.
 export const AGENT_NOT_EXECUTABLE_CODE = 'agent_not_executable';
 
+// Mirrors AGENT_NOT_DETECTED_CODE in @agent-dev/agent-runtime. The second code exists because the two
+// refusals are not the same fact: one is about an execution contract the registry has never verified,
+// which is true on every machine, and the other is about a CLI that is not installed here, which is
+// true until someone installs it. They cannot share a sentence in the interface.
+export const AGENT_NOT_DETECTED_CODE = 'agent_not_detected';
+
 /**
  * Blueprint runtime providers carry a `local-` namespace to say the runtime lives on this machine
  * (`local-opencode`), while the catalog, the Adapter registry and every run record written since use
@@ -24,13 +30,14 @@ export function withoutProviderNamespace(id: string): string {
 
 export type RuntimeExecutorFailure =
   | { kind: 'agent-not-executable'; agentId: string }
+  | { kind: 'agent-not-detected'; agentId: string }
   | { kind: 'other' };
 
 /** Whatever a Runtime route answered with; only the two fields below are consulted. */
 export type RuntimeRejectionBody = { code?: unknown; agentId?: unknown; [field: string]: unknown };
 
 /**
- * Narrow the payload of a failed Runtime request to the one refusal the panel has to explain itself.
+ * Narrow the payload of a failed Runtime request to the refusals the panel has to explain itself.
  * Anything else - a 409 with no body, a 409 that lost its code, a 404 - stays on the generic path,
  * where the backend sentence is shown rather than a localisation guessed over it.
  */
@@ -38,9 +45,9 @@ export function classifyRuntimeExecutorFailure(
   status: number,
   payload: RuntimeRejectionBody,
 ): RuntimeExecutorFailure {
-  if (status === 409 && payload.code === AGENT_NOT_EXECUTABLE_CODE && typeof payload.agentId === 'string') {
-    return { kind: 'agent-not-executable', agentId: payload.agentId };
-  }
+  if (status !== 409 || typeof payload.agentId !== 'string') return { kind: 'other' };
+  if (payload.code === AGENT_NOT_EXECUTABLE_CODE) return { kind: 'agent-not-executable', agentId: payload.agentId };
+  if (payload.code === AGENT_NOT_DETECTED_CODE) return { kind: 'agent-not-detected', agentId: payload.agentId };
   return { kind: 'other' };
 }
 

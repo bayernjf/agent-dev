@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentDevStore } from '@agent-dev/storage';
 import { getAgentAdapterStatus } from '@agent-dev/agent-runtime';
+import type { DaemonDependencies } from '../src/app.js';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
 import { createDaemonApp } from '../src/app.js';
 
@@ -133,7 +134,10 @@ describe('daemon API', () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
     directories.push(directory);
     const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
-    const { app } = createDaemonApp(store);
+    // This walkthrough covers a run through its whole lifecycle, and one step of that is preparing a
+    // run - which the route now refuses when the executor's CLI is not on this machine. The suite says
+    // it is, because what is being tested is the lifecycle, not what happens to be installed here.
+    const { app } = createDaemonApp(store, undefined, { isAgentDetected: () => true });
     const created = await app.request('http://localhost/api/projects', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -236,7 +240,9 @@ describe('daemon API', () => {
     await expect(approvedTask.json()).resolves.toMatchObject({ task: { status: 'approved', approvedBy: 'test-user' } });
     const runtimePlan = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/plan`);
     expect(runtimePlan.status).toBe(200);
-    await expect(runtimePlan.json()).resolves.toMatchObject({ plan: { mode: 'dry-run', executionAllowed: false, noExternalChanges: true }, probe: { executionVerified: false } });
+    const runtimePlanBody = await runtimePlan.json() as { plan?: Record<string, unknown>; probe?: unknown };
+    expect(runtimePlanBody.plan).toMatchObject({ mode: 'dry-run', executionAllowed: false, noExternalChanges: true });
+    expect(runtimePlanBody.probe).toBeUndefined();
     const catalog = await app.request('http://localhost/api/runtime/catalog');
     expect(catalog.status).toBe(200);
     // The catalog only reports built-ins actually present on PATH, so asserting a specific Agent
@@ -1124,11 +1130,11 @@ describe('daemon API', () => {
     // Runtime routes have to answer an untrusted executor by refusing it, never by planning some
     // other Agent's run. Resolution only consults the registry, so these expectations hold on a
     // machine where neither Agent is installed.
-    async function openProjectWithApprovedTask(runtimeProvider: string) {
+    async function openProjectWithApprovedTask(runtimeProvider: string, dependencies: DaemonDependencies = {}) {
       const directory = await mkdtemp(join(tmpdir(), 'agent-dev-executor-'));
       directories.push(directory);
       const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
-      const { app } = createDaemonApp(store, undefined, {});
+      const { app } = createDaemonApp(store, undefined, dependencies);
       const created = await app.request('http://localhost/api/projects', post({
         name: 'Refused Executor',
         answers: {
@@ -1176,12 +1182,54 @@ describe('daemon API', () => {
 
         const run = await app.request(`http://localhost/api/projects/${projectId}/runtime/run`, post({
           confirmation: 'PREPARE_RUNTIME_RUN',
+          // Named in the body as well, because this route used to answer an override with six branches
+          // of its own prose and no code - the same question the resolver had already settled once.
+          agentId: 'local-claude-code',
         }));
         expect(run.status).toBe(409);
         await expect(run.json()).resolves.toMatchObject({ code: 'agent_not_executable', agentId: 'claude-code' });
         // Refusing must not leave a half-truth behind: no run record means no report claiming an Agent
         // that was never planned.
         expect(await store.getRuntimeRun(projectId, 1)).toBeNull();
+      } finally {
+        await store.close();
+      }
+    }, 30_000);
+
+    it('refuses a run whose executor can run tasks but is not installed on this machine', async () => {
+      // A second code, because a second fact. `isAgentDetected: () => false` is injected rather than
+      // assumed: whether Codex is on PATH here is not something the suite may claim, and a refusal that
+      // depends on the machine has to be testable without uninstalling anything from it.
+      const { store, app, projectId } = await openProjectWithApprovedTask('local-codex', { isAgentDetected: () => false });
+      try {
+        const run = await app.request(`http://localhost/api/projects/${projectId}/runtime/run`, post({
+          confirmation: 'PREPARE_RUNTIME_RUN', agentId: 'codex',
+        }));
+        expect(run.status).toBe(409);
+        // The literal below is AGENT_NOT_DETECTED_CODE, mirrored by Studio's runtime-executor.ts.
+        await expect(run.json()).resolves.toMatchObject({ code: 'agent_not_detected', agentId: 'codex' });
+        // Refusing has to happen before a record exists: a `planned` row naming a CLI that is not here
+        // is the half-truth these routes exist to prevent, and the reports built from it would repeat it.
+        expect(await store.getRuntimeRun(projectId, 1)).toBeNull();
+      } finally {
+        await store.close();
+      }
+    }, 30_000);
+
+    it('prepares that same run on a machine where the CLI is there', async () => {
+      // Without this, the case above could be passing because the route refuses every request, and a
+      // new refusal code would be hiding a broken route instead of a second fact.
+      const { store, app, projectId } = await openProjectWithApprovedTask('local-codex', { isAgentDetected: () => true });
+      try {
+        const run = await app.request(`http://localhost/api/projects/${projectId}/runtime/run`, post({
+          confirmation: 'PREPARE_RUNTIME_RUN', agentId: 'codex',
+        }));
+        expect(run.status).toBe(201);
+        const body = await run.json() as { run?: { status: string; agentId: string }; probe?: unknown };
+        expect(body.run).toMatchObject({ status: 'planned', agentId: 'codex' });
+        // A response that reports a probe of its own must report the executor it just prepared, not
+        // whichever CLI the route author had in mind; the field is gone until it can say the right one.
+        expect(body.probe).toBeUndefined();
       } finally {
         await store.close();
       }
