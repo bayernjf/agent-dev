@@ -21,6 +21,7 @@ import type {
 } from './types';
 import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
 import { agentCopyKeys } from './lib/agent-copy';
+import { adapterStatusOf, canProfileRunTasks, canRunSelectedAgent, canRunTasks, firstRunnableAgent } from './lib/agent-selectability';
 import { PRODUCT_TYPE_LABEL_KEYS } from './lib/product-type';
 
 
@@ -515,8 +516,10 @@ export function App() {
       setAgents(payload.agents);
       setSelectedAgentId(current => {
         if (current && payload.agents.some(agent => agent.id === current)) return current;
-        const firstDetected = payload.agents.find(agent => agent.detected);
-        return firstDetected?.id ?? payload.agents[0]?.id ?? null;
+        // Taking the first installed CLI, or the first row at all, meant the Agent most users ended up
+        // with was whichever one sorted earlier in the catalog - including a candidate whose run the
+        // daemon would refuse. With nothing runnable the selection stays empty.
+        return firstRunnableAgent(payload.agents)?.id ?? null;
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('errors.loadAgentCatalog'));
@@ -736,7 +739,9 @@ export function App() {
 
   const probeAgent = async (agent: AgentDescriptor) => {
     if (!agent.detected || probingAgentId === agent.id) return;
-    setSelectedAgentId(agent.id);
+    // The probe itself is read-only and worth running for any installed CLI, so the click stays
+    // allowed; only its side effect of naming this Agent as the executor is withheld.
+    if (canRunTasks(agent)) setSelectedAgentId(agent.id);
     setProbingAgentId(agent.id);
     try {
       const response = await fetch(`/api/runtime/probe/${encodeURIComponent(agent.id)}`);
@@ -1259,6 +1264,12 @@ export function App() {
     ?? agents.find(candidate => candidate.id === agentId)?.name
     ?? agentId;
 
+  // The daemon rejects a non-verified executor with a 409 whose explanation is backend prose, so the
+  // refusal is surfaced here instead: the button stays inert and the reason is in the current language.
+  // An empty selection is not a blocked one - the request then leaves the executor to the Blueprint.
+  const selectionCanRun = canRunSelectedAgent(selectedAgentId, agents, profiles);
+  const selectionBlocked = selectedAgentId !== null && !selectionCanRun;
+
   const prepareRuntime = async () => {
     if (!selected || !featureTask || featureTask.status !== 'approved' || preparingRuntime) return;
     if (!window.confirm(t('confirmations.prepareRuntimeDryRun'))) return;
@@ -1720,12 +1731,15 @@ export function App() {
     <section className="agent-catalog-panel" id="agents">
       <div className="panel-title"><div><p className="eyebrow">{t('agents.eyebrow')}</p><h2>{t('agents.title')}</h2></div><button className="icon-button" type="button" onClick={() => { void loadAgents(); void loadProfiles(); }} disabled={loadingAgents || loadingProfiles} aria-label={t('agents.refresh')} title={t('agents.refresh')}><RefreshCw size={17} /></button></div>
       <p className="form-note">{t('agents.formNote')}</p>
-      {loadingAgents && agents.length === 0 ? <p className="empty-state">{t('agents.detecting')}</p> : agents.length === 0 ? <p className="empty-state">{t('agents.notFound')}</p> : <div className="agent-list">{agents.map(agent => (
+      {loadingAgents && agents.length === 0 ? <p className="empty-state">{t('agents.detecting')}</p> : agents.length === 0 ? <p className="empty-state">{t('agents.notFound')}</p> : <div className="agent-list">{agents.map(agent => {
+        const probe = agentProbes[agent.id];
+        return (
         <button className={`agent-item ${selectedAgentId === agent.id ? 'selected' : ''}`} type="button" key={agent.id} onClick={() => void probeAgent(agent)} disabled={!agent.detected || probingAgentId !== null}>
-          <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source === 'built-in' ? t('agents.builtIn') : t('agents.custom')}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? t('agents.runningProbe') : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{agentProbes[agent.id] && <div className="agent-caps"><span className="agent-cap">{agentProbes[agent.id].nonInteractive ? t('agents.nonInteractiveYes') : t('agents.nonInteractiveUnknown')}</span><span className="agent-cap">{agentProbes[agent.id].workspaceWrite ? t('agents.workspaceWriteYes') : t('agents.workspaceWriteNo')}</span><span className="agent-cap">{t('agents.adapter', { status: agentProbes[agent.id].adapterStatus })}</span></div>}<code className="agent-command">{agent.launchCommand}</code></div>
+          <div className="agent-info"><div className="agent-header"><strong>{agent.name}</strong><span className={`agent-source ${agent.source}`}>{agent.source === 'built-in' ? t('agents.builtIn') : t('agents.custom')}</span></div>{agent.version && <small className="agent-version">{agent.version}</small>}<small className="agent-detail">{probingAgentId === agent.id ? t('agents.runningProbe') : agent.detail}</small>{agent.capabilities.length > 0 && <div className="agent-caps">{agent.capabilities.map(cap => <span className="agent-cap" key={cap}>{cap}</span>)}</div>}{probe && <div className="agent-caps"><span className="agent-cap">{probe.nonInteractive ? t('agents.nonInteractiveYes') : t('agents.nonInteractiveUnknown')}</span><span className="agent-cap">{probe.workspaceWrite ? t('agents.workspaceWriteYes') : t('agents.workspaceWriteNo')}</span><span className="agent-cap">{t(`agents.adapterStatus.${probe.adapterStatus}` as KeyPath)}</span></div>}{agent.detected && !canRunTasks(agent) && <small className="agent-reason">{t('agents.notExecutable')}</small>}<code className="agent-command">{agent.launchCommand}</code></div>
           <span className={`agent-status ${agent.detected ? 'detected' : 'missing'}`}>{agent.detected ? t('agents.detected') : t('agents.notDetected')}</span>
         </button>
-      ))}</div>}
+        );
+      })}</div>}
 
       {/* Agent Profiles */}
       {profiles.length > 0 && (
@@ -1744,11 +1758,14 @@ export function App() {
           <div className="agent-list">
             {profiles.map(profile => {
               const baseAgent = agents.find(a => a.id === profile.baseAgentId);
+              // A Profile inherits its base Agent's guarantee and cannot add one: the overrides narrow
+              // prompt, model and tools, they do not exercise an execution contract.
+              const runnable = canProfileRunTasks(profile, agents);
               const isSelected = selectedAgentId === profile.id;
               const isEditing = editingProfileId === profile.id;
               const isTesting = testingProfileId === profile.id;
               return (
-                <div className={`agent-item ${isSelected ? 'selected' : ''}`} key={profile.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedAgentId(profile.id)}>
+                <div className={`agent-item ${isSelected ? 'selected' : ''}`} key={profile.id} style={{ cursor: runnable ? 'pointer' : 'default' }} onClick={() => { if (runnable) setSelectedAgentId(profile.id); }}>
                   <div className="agent-info">
                     <div className="agent-header">
                       <strong>{profile.icon ? `${profile.icon} ` : ''}{profile.name}</strong>
@@ -1763,6 +1780,7 @@ export function App() {
                       {profile.overrides.allowedTools && <span className="agent-cap">{t('agents.overrideTools', { count: profile.overrides.allowedTools.length })}</span>}
                       {profile.overrides.env && <span className="agent-cap">{t('agents.overrideEnv', { count: Object.keys(profile.overrides.env).length })}</span>}
                     </div>
+                    {!runnable && <small className="agent-reason">{t('agents.notExecutable')}</small>}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                     <span className={`agent-status ${baseAgent?.detected ? 'detected' : 'missing'}`}>{baseAgent?.detected ? t('agents.baseReady') : t('agents.baseMissing')}</span>
@@ -2059,7 +2077,7 @@ export function App() {
 
             {view.kind === 'project' && view.tab === 'iteration' && <>
               {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">{t('featureTask.eyebrow')}</p><h3>{featureTask ? featureTask.title : t('featureTask.defineNext')}</h3><p>{featureTask ? t('featureTask.taskIs', { status: t(`status.${featureTask.status}` as KeyPath) }) : t('featureTask.createTaskDescription')}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{t(`status.${featureTask.status}` as KeyPath)}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">{t('featureTask.title')} <small>{t('featureTask.titleHint')}</small></label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder={t('featureTask.titlePlaceholder')} maxLength={120} /><label htmlFor="feature-objective">{t('featureTask.objective')} <small>{t('featureTask.objectiveHint')}</small></label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder={t('featureTask.objectivePlaceholder')} maxLength={2000} /><label htmlFor="feature-criteria">{t('featureTask.acceptanceCriteria')} <small>{t('featureTask.criteriaHint')}</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder={t('featureTask.criteriaPlaceholder')} maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? t('featureTask.creating') : t('featureTask.createTask')}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.pipeline && <div className="pipeline-section"><div className="pipeline-heading"><div><p className="eyebrow">{t('pipeline.eyebrow')}</p><h4>{t(featureTask.pipeline.steps.length === 1 ? 'pipeline.stepCountOne' : 'pipeline.stepCountMany', { count: featureTask.pipeline.steps.length, status: t(`pipeline.status.${featureTask.pipeline.status}` as KeyPath) })}</h4></div>{featureTask.status === 'draft' && <button className="secondary-button" type="button" onClick={() => editingPipeline ? setEditingPipeline(false) : startEditPipeline()}>{editingPipeline ? t('common.cancel') : t('pipeline.edit')}</button>}</div>{editingPipeline ? <div className="pipeline-editor">{pipelineDraft.map((step, i) => <div key={step.id} className="pipeline-edit-step"><div className="pipeline-edit-header"><strong>{t('pipeline.stepNumber', { number: i + 1 })}</strong>{pipelineDraft.length > 1 && <button className="icon-button" type="button" onClick={() => removePipelineStep(step.id)} title={t('pipeline.removeStep')}>×</button>}</div><label>{t('pipeline.name')}<input value={step.name} onChange={e => updatePipelineStep(step.id, 'name', e.target.value)} placeholder={t('pipeline.namePlaceholder')} maxLength={120} /></label><label>{t('pipeline.profile')}<select value={step.profileId} onChange={e => updatePipelineStep(step.id, 'profileId', e.target.value)}><option value="">{t('pipeline.profileSelect')}</option>{profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>{t('pipeline.prompt')}<textarea value={step.prompt} onChange={e => updatePipelineStep(step.id, 'prompt', e.target.value)} placeholder={t('pipeline.promptPlaceholder')} maxLength={4000} rows={3} /></label></div>)}<button className="secondary-button" type="button" onClick={addPipelineStep}>{t('pipeline.addStep')}</button><button className="primary-button" type="button" onClick={() => void savePipeline()} disabled={savingPipeline}>{t(savingPipeline ? 'pipeline.saving' : 'pipeline.save')}</button></div> : <ol className="pipeline-steps">{featureTask.pipeline.steps.map((step, i) => { const result = featureTask.pipeline!.results.find(r => r.stepId === step.id); const status = result?.status ?? 'pending'; return <li key={step.id}><span className={`step-dot ${status}`} aria-hidden="true" /> <strong>{i + 1}. {step.name}</strong> <em>({profiles.find(candidate => candidate.id === step.profileId)?.name ?? step.profileId})</em> <span className="pipeline-step-status">{t(`stepStatus.${status}` as KeyPath)}</span>{result?.error && <small className="pipeline-error">{result.error}</small>}</li>; })}</ol>}{!editingPipeline && featureTask.status === 'approved' && (featureTask.pipeline.status === 'idle' || featureTask.pipeline.status === 'failed' || featureTask.pipeline.status === 'paused') && <button className="primary-button" type="button" onClick={() => void executePipeline()} disabled={savingFeatureTask}>{savingFeatureTask ? t('pipeline.executing') : featureTask.pipeline.status === 'paused' ? t('pipeline.resume') : t('pipeline.execute')}<ArrowRight size={15} aria-hidden="true" /></button>}</div>}{featureTask.status === 'draft' ? <>{approverField('feature-approver', t('featureTask.whoApproves'))}<button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? t('featureTask.approving') : t('featureTask.approveForAgent')}<ShieldCheck size={15} aria-hidden="true" /></button></> : <small>{t('featureTask.approvedBy', { approvedBy: featureTask.approvedBy ?? '', date: featureTask.approvedAt ? formatDate(featureTask.approvedAt, locale) : '' })}</small>}</div>}</div>}
-              {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">{t('runtime.eyebrow')}{runtimeRun ? ` · ${agentDisplayName(runtimeRun.agentId)}` : selectedAgentId ? ` · ${agentDisplayName(selectedAgentId)}` : ''}</p><h3>{runtimeRun ? t('runtime.status', { mode: t(runtimeRun.plan.mode === 'execute' ? 'runtime.runMode.execute' : 'runtime.runMode.dryRun'), status: t(`runStatus.${runtimeRun.status}` as KeyPath) }) : t('runtime.runtimeNotPrepared')}</h3><p>{runtimeRun?.status === 'completed' ? t('runtime.completed', { agent: agentDisplayName(runtimeRun.agentId) }) : runtimeRun?.status === 'failed' ? t('runtime.failed', { agent: agentDisplayName(runtimeRun.agentId), attempts: runtimeRun.attempts }) : runtimeRun?.status === 'running' ? t('runtime.running', { agent: agentDisplayName(runtimeRun.agentId) }) : runtimeRun ? t('runtime.planned', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.prepareDescription')}</p></div>{runtimeRun?.status === 'planned' ? <div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.cancelling') : t('runtime.cancelDryRun')}<RefreshCw size={15} aria-hidden="true" /></button><button className="primary-button" type="button" onClick={() => void executeRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.runningAgent', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.runAgent', { agent: agentDisplayName(runtimeRun.agentId) })}<ArrowRight size={15} aria-hidden="true" /></button></div> : runtimeRun?.status === 'failed' ? <button className="primary-button" type="button" onClick={() => void retryRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.retryingAgent', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.retryAgent', { agent: agentDisplayName(runtimeRun.agentId) })}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.preparing') : t('runtime.prepare')}<ArrowRight size={15} aria-hidden="true" /></button>}</div>{gitEvidence && <div className="git-evidence"><span>{t('runtime.gitBranch')} <strong>{gitEvidence.branch}</strong></span><span>{t('runtime.gitHead')} <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>{t('runtime.gitWorkingTree')} <strong>{gitEvidence.status || t('runtime.gitClean')}</strong></span><span>{t('runtime.gitDiff')} <strong>{gitEvidence.diffStat || t('runtime.gitNoChanges')}</strong></span></div>}{runtimeRun?.result?.output && <pre className="provider-report">{runtimeRun.result.output}</pre>}{runtimeRun?.history.length ? <div className="runtime-history"><small>{runtimeRun.history.length} {runtimeRun.history.length === 1 ? t('runtime.attemptRecorded') : t('runtime.attemptsRecorded')}</small></div> : null}</div>}
+              {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">{t('runtime.eyebrow')}{runtimeRun ? ` · ${agentDisplayName(runtimeRun.agentId)}` : selectedAgentId ? ` · ${agentDisplayName(selectedAgentId)}` : ''}</p><h3>{runtimeRun ? t('runtime.status', { mode: t(runtimeRun.plan.mode === 'execute' ? 'runtime.runMode.execute' : 'runtime.runMode.dryRun'), status: t(`runStatus.${runtimeRun.status}` as KeyPath) }) : t('runtime.runtimeNotPrepared')}</h3><p>{runtimeRun?.status === 'completed' ? t('runtime.completed', { agent: agentDisplayName(runtimeRun.agentId) }) : runtimeRun?.status === 'failed' ? t('runtime.failed', { agent: agentDisplayName(runtimeRun.agentId), attempts: runtimeRun.attempts }) : runtimeRun?.status === 'running' ? t('runtime.running', { agent: agentDisplayName(runtimeRun.agentId) }) : runtimeRun ? t('runtime.planned', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.prepareDescription')}</p></div>{runtimeRun?.status === 'planned' ? <div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.cancelling') : t('runtime.cancelDryRun')}<RefreshCw size={15} aria-hidden="true" /></button><button className="primary-button" type="button" onClick={() => void executeRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.runningAgent', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.runAgent', { agent: agentDisplayName(runtimeRun.agentId) })}<ArrowRight size={15} aria-hidden="true" /></button></div> : runtimeRun?.status === 'failed' ? <button className="primary-button" type="button" onClick={() => void retryRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.retryingAgent', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.retryAgent', { agent: agentDisplayName(runtimeRun.agentId) })}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <><button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime || selectionBlocked}>{preparingRuntime ? t('runtime.preparing') : t('runtime.prepare')}<ArrowRight size={15} aria-hidden="true" /></button>{selectionBlocked && <p className="agent-reason">{t('agents.notExecutable')}</p>}</>}</div>{gitEvidence && <div className="git-evidence"><span>{t('runtime.gitBranch')} <strong>{gitEvidence.branch}</strong></span><span>{t('runtime.gitHead')} <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>{t('runtime.gitWorkingTree')} <strong>{gitEvidence.status || t('runtime.gitClean')}</strong></span><span>{t('runtime.gitDiff')} <strong>{gitEvidence.diffStat || t('runtime.gitNoChanges')}</strong></span></div>}{runtimeRun?.result?.output && <pre className="provider-report">{runtimeRun.result.output}</pre>}{runtimeRun?.history.length ? <div className="runtime-history"><small>{runtimeRun.history.length} {runtimeRun.history.length === 1 ? t('runtime.attemptRecorded') : t('runtime.attemptsRecorded')}</small></div> : null}</div>}
               {featureTask?.status === 'approved' && runtimeRun && <div className={`acceptance-panel ${acceptance?.status ?? 'pending'}`}><div className="runtime-heading"><div><p className="eyebrow">{t('acceptance.eyebrow')}</p><h3>{acceptance ? t('acceptance.acceptanceStatus', { status: t(`acceptanceStatus.${acceptance.status}` as KeyPath) }) : t('acceptance.submitTitle')}</h3><p>{acceptance?.status === 'blocked' ? t('acceptance.blocked', { status: t(`qualityStatus.${acceptance.qualityStatus}` as KeyPath) }) : t('acceptance.confirmCriteria')}</p></div>{acceptance?.status === 'ready' && <div className="acceptance-approval">{approverField('acceptance-approver', t('acceptance.whoAccepts'))}<button className="secondary-button" type="button" onClick={() => void approveDelivery()} disabled={submittingAcceptance}>{submittingAcceptance ? t('acceptance.approving') : t('acceptance.approveDelivery')}<ShieldCheck size={15} aria-hidden="true" /></button></div>}</div>{acceptance?.status !== 'approved' && <div className="acceptance-form"><label htmlFor="acceptance-summary">{t('acceptance.summary')} <small>{t('acceptance.summaryHint')}</small></label><textarea id="acceptance-summary" value={acceptanceSummary} onChange={event => setAcceptanceSummary(event.target.value)} placeholder={t('acceptance.summaryPlaceholder')} maxLength={2000} /><label className="check-row"><input type="checkbox" checked={criteriaConfirmed} onChange={event => setCriteriaConfirmed(event.target.checked)} /> {t('acceptance.reviewedCriteria')}</label><button className="primary-button" type="button" onClick={() => void submitAcceptance()} disabled={submittingAcceptance}>{submittingAcceptance ? t('acceptance.submitting') : t('acceptance.submitEvidence')}<ArrowRight size={15} aria-hidden="true" /></button></div>}</div>}
               {applyRun?.status !== 'completed' && <p className="empty-state">{t('featureTask.waitingForApply')}</p>}
             </>}
@@ -2129,34 +2147,37 @@ export function App() {
                       })
                       .map(({ agent, provider }) => {
                         const copy = agentCopyKeys(agent.id);
-                        const adapterVerified = agent.adapterStatus === 'verified';
+                        const adapter = adapterStatusOf(agent);
+                        const runnable = canRunTasks(agent);
                         return (
                           <label key={agent.id} className="agent-option">
                             <div className="agent-option-header">
-                              <input type="radio" name="runtime" checked={answers.runtimeProvider === provider} onChange={() => setAnswer('runtimeProvider', provider)} />
+                              <input type="radio" name="runtime" checked={answers.runtimeProvider === provider} onChange={() => setAnswer('runtimeProvider', provider)} disabled={!runnable} />
                               <span className="agent-name">{agent.name}{agent.version ? ` (${agent.version})` : ''}{agent.source === 'custom' ? ` · ${t('agents.custom')}` : ''}</span>
-                              {/* Being detected only means the CLI is installed. A candidate Adapter is
-                                  refused at execution time by the daemon, so stamping every installed
-                                  Agent "Verified" promised a guarantee this product does not have. */}
-                              <span className={`agent-badge ${adapterVerified ? 'verified' : 'candidate'}`}>{adapterVerified ? t('blueprint.runtimeVerified') : t('blueprint.runtimeCandidate')}</span>
+                              {/* Three states, not two. "Candidate" asserts an Adapter that has simply never
+                                  run a task; an Agent with no Adapter at all is a different fact, and the
+                                  old badge reported it as the first one. */}
+                              <span className={`agent-badge ${adapter}`}>{t(`blueprint.runtimeAdapter.${adapter}` as KeyPath)}</span>
                             </div>
                             {copy && <p className="agent-desc">{t(copy.desc)}</p>}
+                            {!runnable && <p className="agent-reason">{t('agents.notExecutable')}</p>}
                           </label>
                         );
                       })}
                     {profiles.map(profile => {
                       const baseAgent = agents.find(a => a.id === profile.baseAgentId);
-                      const ready = baseAgent?.detected ?? false;
+                      const runnable = canProfileRunTasks(profile, agents);
                       return (
-                        <label key={profile.id} className="agent-option" style={{ opacity: ready ? 1 : 0.5 }}>
+                        <label key={profile.id} className="agent-option" style={{ opacity: runnable ? 1 : 0.5 }}>
                           <div className="agent-option-header">
-                            <input type="radio" name="runtime" checked={answers.runtimeProvider === profile.id} onChange={() => setAnswer('runtimeProvider', profile.id)} disabled={!ready} />
+                            <input type="radio" name="runtime" checked={answers.runtimeProvider === profile.id} onChange={() => setAnswer('runtimeProvider', profile.id)} disabled={!runnable} />
                             {/* The badge already reads PROFILE, so repeating it inside the name said
                                 the same word twice in one row. */}
                             <span className="agent-name">{profile.icon ? `${profile.icon} ` : ''}{profile.name}</span>
                             <span className="agent-badge profile">{t('agents.profileBadge')}</span>
                           </div>
-                          <p className="agent-desc">{t('agents.basedOn', { name: baseAgent?.name ?? profile.baseAgentId })}{!ready && ` — ${t('blueprint.runtimeNotDetected')}`}</p>
+                          <p className="agent-desc">{t('agents.basedOn', { name: baseAgent?.name ?? profile.baseAgentId })}</p>
+                          {!runnable && <p className="agent-reason">{baseAgent?.detected ? t('agents.notExecutable') : t('blueprint.runtimeNotDetected')}</p>}
                         </label>
                       );
                     })}

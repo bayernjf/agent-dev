@@ -1,3 +1,4 @@
+import type { AgentCapabilityProbe } from '../../types';
 import type { Translations } from './en';
 
 export const zh = {
@@ -183,13 +184,20 @@ export const zh = {
     productTypeMobile: '移动端',
     productTypeApiTool: 'API 工具',
     runtime: '本地 Agent Runtime',
-    runtimeNote: '所选 Runtime 将在隔离工作区中实现功能任务。只能选择已检测到的 Agent；入门模式使用已验证的默认项。',
+    runtimeNote: '所选 Runtime 将在隔离工作区中实现功能任务。只有执行 Adapter 已验证的 Agent 才可被选中；入门模式使用已验证的默认项。',
     runtimeCatalogLoading: '正在检测可用的 Runtime...',
-    runtimeNoneDetected: '未检测到任何本地 Agent。请先安装一个（如 Codex、OpenCode、Claude）才能启用自定义选择。',
+    // 举例只给执行 Adapter 已验证的 Agent。这里点名 Claude Code 等于让用户去装一个装了也选不了的工具。
+    runtimeNoneDetected: '未检测到任何本地 Agent。请先安装一个执行 Adapter 已验证的 Agent（Codex、OpenCode、CodeBuddy、Hermes）才能启用自定义选择。',
     runtimeHowToInstall: '如何安装',
     runtimeRecommended: '推荐',
-    runtimeVerified: '已验证',
-    runtimeCandidate: '候选',
+    // 三态，与 daemon 随目录下发的 Adapter 状态对齐。“已检测到”只说明装了 CLI，
+    // 不等于执行契约被实测过；把“根本没有 Adapter”和“有 Adapter 但没跑过”都写成候选，
+    // 等于界面比注册表知道得少。
+    runtimeAdapter: {
+      verified: '已验证',
+      candidate: '候选',
+      unsupported: '无 Adapter',
+    } satisfies Record<AgentCapabilityProbe['adapterStatus'], string>,
     runtimeNotDetected: '未检测到',
     agentCodexDesc: 'OpenAI Codex CLI。快速、可靠，大多数任务的默认选择。支持非交互模式，适合自动化。',
     agentCodexInstall: 'npm install -g @openai/codex',
@@ -201,7 +209,7 @@ export const zh = {
     agentCodebuddyInstall: 'npm install -g @bytedance/codebuddy-cli',
     agentHermesDesc: 'Nous Research Hermes CLI。开源模型，指令遵循能力强。适合本地/离线使用。',
     agentHermesInstall: 'pip install hermes-agent',
-    agentOpenclawDesc: 'OpenClaw CLI。通过它的 agent 子命令跑一次本地嵌入式 agent turn。Adapter 仍为候选，执行链路未验证前只能生成 dry-run 计划。',
+    agentOpenclawDesc: 'OpenClaw CLI。通过它的 agent 子命令跑一次本地嵌入式 agent turn。Adapter 仍为候选，执行契约验证前不能被选为执行者。',
     agentAiderDesc: 'Aider AI 结对编程。Git 原生，支持多种模型。适合增量修改。',
     agentAiderInstall: 'pip install aider-chat',
     agentPiDesc: '只读代码分析 Agent。不修改文件。适合代码审查和理解。',
@@ -388,7 +396,16 @@ export const zh = {
     nonInteractiveUnknown: 'non-interactive: unknown',
     workspaceWriteYes: 'workspace-write: yes',
     workspaceWriteNo: 'workspace-write: no',
-    adapter: 'adapter: {status}',
+    // 这个 chip 曾把裸枚举插进句子里，中文界面于是显示 “adapter: unsupported”。
+    // 取值域与 blueprint.runtimeAdapter 相同，只是按这个位置的说法重写；冒号跟同一行
+    // 未译的技术标记（non-interactive: yes）保持一致。
+    adapterStatus: {
+      verified: 'adapter: 已验证',
+      candidate: 'adapter: 候选',
+      unsupported: 'adapter: 无',
+    } satisfies Record<AgentCapabilityProbe['adapterStatus'], string>,
+    // 装了 CLI 和能跑任务是两件事，被拒时要说清是哪一件不成立。
+    notExecutable: '该 Agent 没有已验证的执行 Adapter，不能在这里运行任务。',
     addCustomSummary: '添加自定义 Agent',
     namePlaceholder: '例如：My Custom Agent',
     commandPlaceholder: '例如：my-agent',
