@@ -351,6 +351,78 @@ export const en = {
       reason: 'Custom instructions are preserved, but are not automated until a supported module exists.',
     },
   },
+  manualAction: {
+    github: {
+      title: 'Authorize GitHub access',
+      reason: 'Repository ownership and protected-branch permissions belong to you.',
+      steps: {
+        '0': 'Confirm the intended GitHub account or organization.',
+        '1': 'Grant only repository, pull request and checks permissions.',
+        '2': 'Return to Agent-Dev for a read-only capability check.',
+      },
+      verification: 'Agent-Dev can read the selected account and list its permitted repositories.',
+    },
+    supabase: {
+      title: 'Authorize Supabase and choose an organization',
+      reason: 'Database region, plan and project ownership can affect cost and compliance.',
+      steps: {
+        '0': 'Sign in to Supabase.',
+        '1': 'Choose the organization and region.',
+        '2': 'Review the project plan before any project is created.',
+      },
+      verification: 'Agent-Dev can discover the chosen organization without reading database data.',
+    },
+    cloudflare: {
+      title: 'Authorize Cloudflare Pages',
+      reason: 'Pages deployment remains in your Cloudflare account.',
+      steps: {
+        '0': 'Sign in to Cloudflare.',
+        '1': 'Choose the account that owns the Pages project.',
+        '2': 'Approve Pages-only access; do not grant DNS access unless a custom domain is planned.',
+      },
+      verification: 'Agent-Dev can list Pages capabilities for the selected account.',
+    },
+    vercel: {
+      title: 'Authorize Vercel Functions',
+      reason: 'API deployment and server-side environment variables remain in your Vercel team.',
+      steps: {
+        '0': 'Sign in to Vercel.',
+        '1': 'Choose the team for the API project.',
+        '2': 'Review the required server-side environment variable targets.',
+      },
+      verification: 'Agent-Dev can discover the selected team and its deployment capabilities.',
+    },
+    privacyReview: {
+      title: 'Approve the sensitive-data boundary',
+      reason: 'Sensitive product data requires an explicit privacy, retention and access review.',
+      steps: {
+        '0': 'Define what sensitive data is collected.',
+        '1': 'Confirm who can access it and how long it is retained.',
+        '2': 'Approve the privacy notice and incident contact.',
+      },
+      verification: 'The approved policy is recorded before provisioning begins.',
+    },
+    analytics: {
+      title: 'Configure {provider}',
+      reason: 'Analytics changes the privacy boundary and requires an account-owned identifier.',
+      steps: {
+        '0': 'Confirm tracking is permitted for this product.',
+        '1': 'Create or select the analytics property.',
+        '2': 'Provide only the public measurement or project ID.',
+      },
+      verification: 'The public identifier is present in the environment contract and the client script is observable after consent.',
+    },
+    custom: {
+      title: 'Resolve the custom implementation note',
+      reason: 'The note is preserved but is not backed by an automation module yet.',
+      steps: {
+        '0': 'Review the requested note.',
+        '1': 'Decide whether it requires a supported module or a project-specific ADR.',
+        '2': 'Approve its acceptance criteria before implementation.',
+      },
+      verification: 'A linked implementation task or ADR records the resolution.',
+    },
+  },
   evidence: {
     title: 'Evidence bundle',
     finalDeliveryReport: 'Final Delivery Report',

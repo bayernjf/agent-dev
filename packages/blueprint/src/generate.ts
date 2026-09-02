@@ -13,9 +13,14 @@ export type GeneratedArtifact = {
 export type ManualAction = {
   id: string;
   title: string;
+  titleKey?: string;
+  titleParams?: Record<string, string | number>;
   reason: string;
+  reasonKey?: string;
   steps: string[];
+  stepsKeys?: string[];
   verification: string;
+  verificationKey?: string;
 };
 
 export type DryRunPlan = {
@@ -313,54 +318,83 @@ function environmentContract(blueprint: ProductBlueprint) {
 
 export function getManualActions(blueprint: ProductBlueprint): ManualAction[] {
   const providers = baselineProvidersFor(blueprint.spec.product.type);
-  const actions: ManualAction[] = ([
-    ['github', {
+  const providerActions: Record<string, ManualAction> = {
+    github: {
       id: 'authorize-github',
       title: 'Authorize GitHub access',
+      titleKey: 'manualAction.github.title',
       reason: 'Repository ownership and protected-branch permissions belong to you.',
+      reasonKey: 'manualAction.github.reason',
       steps: ['Confirm the intended GitHub account or organization.', 'Grant only repository, pull request and checks permissions.', 'Return to Agent-Dev for a read-only capability check.'],
+      stepsKeys: ['manualAction.github.steps.0', 'manualAction.github.steps.1', 'manualAction.github.steps.2'],
       verification: 'Agent-Dev can read the selected account and list its permitted repositories.',
-    }],
-    ['supabase', {
+      verificationKey: 'manualAction.github.verification',
+    },
+    supabase: {
       id: 'authorize-supabase',
       title: 'Authorize Supabase and choose an organization',
+      titleKey: 'manualAction.supabase.title',
       reason: 'Database region, plan and project ownership can affect cost and compliance.',
+      reasonKey: 'manualAction.supabase.reason',
       steps: ['Sign in to Supabase.', 'Choose the organization and region.', 'Review the project plan before any project is created.'],
+      stepsKeys: ['manualAction.supabase.steps.0', 'manualAction.supabase.steps.1', 'manualAction.supabase.steps.2'],
       verification: 'Agent-Dev can discover the chosen organization without reading database data.',
-    }],
-    ['cloudflare', {
+      verificationKey: 'manualAction.supabase.verification',
+    },
+    cloudflare: {
       id: 'authorize-cloudflare',
       title: 'Authorize Cloudflare Pages',
+      titleKey: 'manualAction.cloudflare.title',
       reason: 'Pages deployment remains in your Cloudflare account.',
+      reasonKey: 'manualAction.cloudflare.reason',
       steps: ['Sign in to Cloudflare.', 'Choose the account that owns the Pages project.', 'Approve Pages-only access; do not grant DNS access unless a custom domain is planned.'],
+      stepsKeys: ['manualAction.cloudflare.steps.0', 'manualAction.cloudflare.steps.1', 'manualAction.cloudflare.steps.2'],
       verification: 'Agent-Dev can list Pages capabilities for the selected account.',
-    }],
-    ['vercel', {
+      verificationKey: 'manualAction.cloudflare.verification',
+    },
+    vercel: {
       id: 'authorize-vercel',
       title: 'Authorize Vercel Functions',
+      titleKey: 'manualAction.vercel.title',
       reason: 'API deployment and server-side environment variables remain in your Vercel team.',
+      reasonKey: 'manualAction.vercel.reason',
       steps: ['Sign in to Vercel.', 'Choose the team for the API project.', 'Review the required server-side environment variable targets.'],
+      stepsKeys: ['manualAction.vercel.steps.0', 'manualAction.vercel.steps.1', 'manualAction.vercel.steps.2'],
       verification: 'Agent-Dev can discover the selected team and its deployment capabilities.',
-    }],
-  ] as const).filter(([provider]) => providers.includes(provider)).map(([, action]) => ({ ...action, steps: [...action.steps] }));
+      verificationKey: 'manualAction.vercel.verification',
+    },
+  };
+  const actions: ManualAction[] = (['github', 'supabase', 'cloudflare', 'vercel'] as const)
+    .filter(p => providers.includes(p))
+    .map(p => ({ ...providerActions[p], steps: [...providerActions[p].steps], stepsKeys: [...(providerActions[p].stepsKeys ?? [])] }));
 
   if (blueprint.spec.product.dataSensitivity === 'sensitive') {
     actions.unshift({
       id: 'privacy-review',
       title: 'Approve the sensitive-data boundary',
+      titleKey: 'manualAction.privacyReview.title',
       reason: 'Sensitive product data requires an explicit privacy, retention and access review.',
+      reasonKey: 'manualAction.privacyReview.reason',
       steps: ['Define what sensitive data is collected.', 'Confirm who can access it and how long it is retained.', 'Approve the privacy notice and incident contact.'],
+      stepsKeys: ['manualAction.privacyReview.steps.0', 'manualAction.privacyReview.steps.1', 'manualAction.privacyReview.steps.2'],
       verification: 'The approved policy is recorded before provisioning begins.',
+      verificationKey: 'manualAction.privacyReview.verification',
     });
   }
 
   for (const provider of blueprint.spec.analytics.providers) {
+    const label = provider === 'ga4' ? 'Google Analytics 4' : 'Microsoft Clarity';
     actions.push({
       id: `configure-${provider}`,
-      title: `Configure ${provider === 'ga4' ? 'Google Analytics 4' : 'Microsoft Clarity'}`,
+      title: `Configure ${label}`,
+      titleKey: 'manualAction.analytics.title',
+      titleParams: { provider: label },
       reason: 'Analytics changes the privacy boundary and requires an account-owned identifier.',
+      reasonKey: 'manualAction.analytics.reason',
       steps: ['Confirm tracking is permitted for this product.', 'Create or select the analytics property.', 'Provide only the public measurement or project ID.'],
+      stepsKeys: ['manualAction.analytics.steps.0', 'manualAction.analytics.steps.1', 'manualAction.analytics.steps.2'],
       verification: 'The public identifier is present in the environment contract and the client script is observable after consent.',
+      verificationKey: 'manualAction.analytics.verification',
     });
   }
 
@@ -368,9 +402,13 @@ export function getManualActions(blueprint: ProductBlueprint): ManualAction[] {
     actions.push({
       id: 'custom-instruction',
       title: 'Resolve the custom implementation note',
+      titleKey: 'manualAction.custom.title',
       reason: 'The note is preserved but is not backed by an automation module yet.',
+      reasonKey: 'manualAction.custom.reason',
       steps: ['Review the requested note.', 'Decide whether it requires a supported module or a project-specific ADR.', 'Approve its acceptance criteria before implementation.'],
+      stepsKeys: ['manualAction.custom.steps.0', 'manualAction.custom.steps.1', 'manualAction.custom.steps.2'],
       verification: 'A linked implementation task or ADR records the resolution.',
+      verificationKey: 'manualAction.custom.verification',
     });
   }
   return actions;

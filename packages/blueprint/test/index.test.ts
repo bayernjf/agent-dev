@@ -259,6 +259,26 @@ describe('ProductBlueprint', () => {
     expect(mcpPlan.resources[0].id).toBe('github-repository');
   });
 
+  it('emits stable i18n keys for every manual action', () => {
+    const blueprint = createBlueprint('Receipt Desk', { analyticsProviders: ['ga4', 'clarity'], dataSensitivity: 'sensitive', customInstructions: 'Use pnpm' }, 3);
+    const actions = getManualActions(blueprint);
+
+    expect(actions.length).toBeGreaterThan(0);
+    for (const action of actions) {
+      expect(action.titleKey, `action ${action.id} missing titleKey`).toBeDefined();
+      expect(action.titleKey!.startsWith('manualAction.')).toBe(true);
+      expect(action.reasonKey, `action ${action.id} missing reasonKey`).toBeDefined();
+      expect(action.verificationKey, `action ${action.id} missing verificationKey`).toBeDefined();
+      expect(action.stepsKeys, `action ${action.id} missing stepsKeys`).toBeDefined();
+      expect(action.stepsKeys!.length).toBe(action.steps.length);
+    }
+
+    // Analytics actions carry a parameterized title.
+    const ga4 = actions.find(a => a.id === 'configure-ga4');
+    expect(ga4?.titleKey).toBe('manualAction.analytics.title');
+    expect(ga4?.titleParams?.provider).toBe('Google Analytics 4');
+  });
+
   it('backs every declared quality check with a script that actually runs, for every generated product type', () => {
     // The gate is one `npm run quality` chain: a check declared in the contract but missing from
     // scripts stops the chain with "Missing script", so the product's CI can never go green.
