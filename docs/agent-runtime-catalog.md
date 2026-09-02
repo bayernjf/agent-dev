@@ -97,6 +97,8 @@ Structured output: Unknown
 
 2026-09-02 起，非 `verified` 的 Agent 在任何一层都拿不到计划：Studio 不让它被选中；`resolveRuntimeExecutor()` 只承认 `verified`，是“这个任务由谁执行”的唯一解析点（去 `local-` 命名空间、把 Agent Profile 解析到 base agent、再查注册表）；daemon 的两条 Runtime 路由与 storage 的两个写入点共用它，拒绝时返回 409 + `code: agent_not_executable` + `agentId`，绝不换一个 Agent 顶上。
 
+同一天补上的是客户端那一半：Studio 也不代替用户挑执行者。加载 `/api/runtime/catalog` 只清除已经失效的选择（不在目录里且不是 Profile 才算失效），不写入任何新选择；Runtime 面板头部允许印出的名字只来自 `runtimeExecutorId()` 的一条链——已准备的运行记录、用户的显式选择、已批准 Blueprint 的 provider（去掉命名空间）。此前它会默认选中目录里第一个可运行的 Agent，于是一份指名 Claude Code 的项目在页面上写着 Codex，而 Prepare 真的发出了一次 Codex 运行。
+
 此前 candidate 可以生成 dry-run 计划、只在执行阶段被 `buildAgentExecutionPlan` 拒——那次拒绝发生在用户已经看到计划之后，而计划里写着的是一条永远跑不起来的命令。更旧的行为更糟：解析不出来就回退 Codex，于是一份指名 Claude Code 的 Blueprint 会得到一份 Codex 的运行记录。409 同时被“还没有已批准任务”使用，所以两种事实必须靠 `code` 区分；Studio 侧因为浏览器不能 import 本包（顶层 `node:child_process`）镜像了同一个字面量，两边测试各自钉死该字符串。
 
 ## 4. 专业模式
