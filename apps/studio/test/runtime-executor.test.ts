@@ -1,22 +1,13 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_NOT_DETECTED_CODE, AGENT_NOT_EXECUTABLE_CODE, classifyRuntimeExecutorFailure, runtimeExecutorId, withoutProviderNamespace,
 } from '../src/lib/runtime-executor';
+import { readSource } from './source-evidence';
 
 // Why this exists: the daemon used to answer "this Agent cannot run the task" by building a Codex
 // plan, so the panel showed an executor nobody had picked. It now refuses, and Studio has to say so -
 // which means surviving the ambiguity of a 409 that GET .../runtime/plan also uses for "nothing has
 // been approved yet". A blank panel is not an answer to a refusal.
-
-const SRC = new URL('../src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-
-// Source evidence has one rule here: read the file with whole-line comments removed, so that
-// commenting a wiring row out is a failing change rather than a passing one.
-const code = (file: string) => readFileSync(`${SRC}/${file}`, 'utf8')
-  .split('\n')
-  .filter(line => !line.trim().startsWith('//'))
-  .join('\n');
 
 describe('a refused executor is told apart from an empty panel', () => {
   it('carries the same literal the daemon stamps', () => {
@@ -66,9 +57,9 @@ describe('a refused executor is told apart from an empty panel', () => {
 
 // The classifier is dead weight if a request path keeps treating every 409 the same, so both Runtime
 // requests are pinned here. Deleting a wiring row makes its case fail - and so does commenting the
-// row out, which is what `code` above is for.
+// row out, which is what `readSource` in test/source-evidence.ts is for.
 describe('both Runtime requests consult the classifier', () => {
-  const app = code('App.tsx');
+  const app = readSource('App.tsx');
 
   const SITES: { where: string; evidence: string }[] = [
     { where: 'plan load', evidence: 'const failure = classifyRuntimeExecutorFailure(response.status, rejection);' },
@@ -108,7 +99,7 @@ describe('a namespaced executor id still reads as one Agent', () => {
   });
 
   it('asks for the id as written before asking for the stripped one', () => {
-    expect(code('App.tsx')).toContain('nameFor(agentId) ?? nameFor(withoutProviderNamespace(agentId))');
+    expect(readSource('App.tsx')).toContain('nameFor(agentId) ?? nameFor(withoutProviderNamespace(agentId))');
   });
 });
 
@@ -146,7 +137,7 @@ describe('the panel names an executor it can account for', () => {
   });
 
   it('is the only source the Runtime header prints from', () => {
-    const app = code('App.tsx');
+    const app = readSource('App.tsx');
     const eyebrow = app.match(/<p className="eyebrow">\{t\('runtime\.eyebrow'\)\}[^<]*<\/p>/)?.[0] ?? '';
     expect(eyebrow, 'the Runtime header no longer renders the accounted-for executor').toContain('runtimeExecutorAgentId');
     expect(eyebrow).not.toMatch(/selectedAgentId|agents\[|catalog/);
