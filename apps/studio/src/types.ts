@@ -210,9 +210,11 @@ export type AgentDescriptor = {
 
 export type AgentCapabilityProbe = {
   agentId: string;
+  // Evidence about a help page, not a verdict about the Agent: what the three readings are is derived
+  // in src/lib/capability-verdict.ts. There is no workspace-write field here on purpose - the probe
+  // never observed one, and the row above already shows what the catalog declares.
   nonInteractive: boolean;
   nonInteractiveFlags: string[];
-  workspaceWrite: boolean;
   helpAvailable: boolean;
   adapterStatus: 'verified' | 'candidate' | 'unsupported';
 };
