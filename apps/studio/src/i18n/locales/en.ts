@@ -243,7 +243,9 @@ export const en = {
     title: 'Delivery decisions',
     plan: 'Delivery plan',
     baselineResources: 'Baseline resources',
-    readyForApproval: 'Ready for approval',
+    // readyForApproval used to be defined here. Nothing rendered it, and it duplicated the wording
+    // baseline.status.ready already owns; test/approval-labels.test.ts now refuses to pin a key that no
+    // component shows.
     ownershipRequired: 'Ownership required',
     approved: 'Approved',
     approvalNote: 'This records intent only. It does not create remote resources or reveal secrets.',
