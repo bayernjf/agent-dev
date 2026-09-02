@@ -437,11 +437,11 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 
     **不要把本条读成“v0.2 只剩 P1-2”**——上面 §8-3/§8-4/§8-7 各自还挂着未闭环子项，按对 Pilot 的影响排序：
 
-    1. **Studio 界面链路（§8-3 遗留，2026-08-14 起挂账，已于 2026-09-01 走完两阶段）**：历次端到端验证都是直接调 Daemon API，而外部用户只会点界面。现已用界面从「新建 Blueprint」走到 Apply 前（见「最近进度」2026-09-01 条目），冷启动鉴权缺陷正是走查时暴露的。**剩下的不再是「没走过」，而是走查查出的一串缺陷**：其中「决策卡内容与产品类型矛盾」已于 2026-09-02 修掉（那是内容错误，不是翻译问题），影响最大的仍是「后端生成文案无 i18n 边界」，需拍板（影响范围实测与三方案对比见 [领域文案 i18n 边界决策依据](docs/i18n-domain-prose-decision.md)，§9 决策表同步）。
+    1. ~~**Studio 界面链路（§8-3 遗留，2026-08-14 起挂账，已于 2026-09-01 走完两阶段）**~~：历次端到端验证都是直接调 Daemon API，而外部用户只会点界面。现已用界面从「新建 Blueprint」走到 Apply 前（见「最近进度」2026-09-01 条目），冷启动鉴权缺陷正是走查时暴露的。走查查出的缺陷已全部修掉：「决策卡内容与产品类型矛盾」已于 2026-09-02 修掉（`ebe7ec4`）；「后端生成文案无 i18n 边界」已于 2026-09-02 五批全部落地（`4019905`~`b22ec08`，见决策依据文档）。
     2. ~~**各 Agent 在实际安装环境的 Adapter 验证**（§8-4 遗留）~~：**已于 2026-09-02 完成**（`ecde9eb`）——八个内置 Agent 全量只读对账，六个能答且 Adapter flag 全部在帮助里有据；openclaw/pi 因 ambient node v20.20.2（启动器要求 ≥22）答不出，属环境而非产品缺陷。逐 Agent 明细见 [Agent Runtime Catalog](docs/agent-runtime-catalog.md) §3.5。
     3. **资源清单外部 ID/URL 与 Provider 控制台一致性逐项核对**（§8-3 遗留）。
     4. **Preview 遗留资源清理 + PR 关闭清理链路真实验证**（§8-7 与§7 段遗留；生产项目是交付物，不清理）。
-    5. **Windows 上 agent 执行路径不通（探测部分已于 2026-09-01 修复）**：`agent-runtime` 的版本探测与 PATH 发现已修（见「最近进度」同日条目，本机 6/6 agent 可探）；**尚余执行路径**：`runCodexProcess` 仍以无 shell 方式 spawn，npm shim 类 CLI（codex / claude / opencode / openclaw / codebuddy）一律 ENOENT，Windows 用户走 Apply → Feature Task 时 agent 起不来。修法待决策表「Windows agent 启动方式」拍板（`install-macos.sh` 表明 Pilot 目标为 macOS，因此推荐先显式降级而非引入注入面）。
+    5. **Windows 上 agent 执行路径不通（探测部分已于 2026-09-01 修复）**：`agent-runtime` 的版本探测与 PATH 发现已修（见「最近进度」同日条目，本机 6/6 agent 可探）；**尚余执行路径**：`runCodexProcess` 仍以无 shell 方式 spawn，npm shim 类 CLI（codex / claude / opencode / openclaw / codebuddy）一律 ENOENT，Windows 用户走 Apply → Feature Task 时 agent 起不来。修法待决策表「Windows agent 启动方式」拍板（`install-macos.sh` 表明 Pilot 目标为 macOS，因此推荐先显式降级而非引入注入面）。**当前开发环境为 macOS（2026-09-02 确认），Windows 相关无法真实验证，先搁置；待出现真实 Windows Pilot 用户再推进方案④（显式报错 + 可操作提示）。**
 
     走查进度：§8-11.1 已完成两个阶段——第一阶段（首屏 / 凭证面板 / Activity / zh 切换，只读）、第二阶段（界面建 Blueprint → 四个项目详情标签页中英各一遍 → Apply 前停手，无远端副作用）；冷启动鉴权缺陷已修复并验证；Windows 探测与发现路径已修。走查发现的具体缺陷与待办见「最近进度」2026-09-01 条目的「走查待办」子列。
 
