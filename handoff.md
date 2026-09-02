@@ -427,8 +427,8 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 
     **不要把本条读成“v0.2 只剩 P1-2”**——上面 §8-3/§8-4/§8-7 各自还挂着未闭环子项，按对 Pilot 的影响排序：
 
-    1. **Studio 界面链路（§8-3 遗留，2026-08-14 起挂账，已于 2026-09-01 走完两阶段）**：历次端到端验证都是直接调 Daemon API，而外部用户只会点界面。现已用界面从「新建 Blueprint」走到 Apply 前（见「最近进度」2026-09-01 条目），冷启动鉴权缺陷正是走查时暴露的。**剩下的不再是「没走过」，而是走查查出的一串缺陷**：其中「决策卡内容与产品类型矛盾」已于 2026-09-02 修掉（那是内容错误，不是翻译问题），影响最大的仍是「后端生成文案无 i18n 边界」，需拍板（见 §9 与「走查待办」子列）。
-    2. **各 Agent 在实际安装环境的 Adapter 验证**（§8-4 遗留）。
+    1. **Studio 界面链路（§8-3 遗留，2026-08-14 起挂账，已于 2026-09-01 走完两阶段）**：历次端到端验证都是直接调 Daemon API，而外部用户只会点界面。现已用界面从「新建 Blueprint」走到 Apply 前（见「最近进度」2026-09-01 条目），冷启动鉴权缺陷正是走查时暴露的。**剩下的不再是「没走过」，而是走查查出的一串缺陷**：其中「决策卡内容与产品类型矛盾」已于 2026-09-02 修掉（那是内容错误，不是翻译问题），影响最大的仍是「后端生成文案无 i18n 边界」，需拍板（影响范围实测与三方案对比见 [领域文案 i18n 边界决策依据](docs/i18n-domain-prose-decision.md)，§9 决策表同步）。
+    2. ~~**各 Agent 在实际安装环境的 Adapter 验证**（§8-4 遗留）~~：**已于 2026-09-02 完成**（`ecde9eb`）——八个内置 Agent 全量只读对账，六个能答且 Adapter flag 全部在帮助里有据；openclaw/pi 因 ambient node v20.20.2（启动器要求 ≥22）答不出，属环境而非产品缺陷。逐 Agent 明细见 [Agent Runtime Catalog](docs/agent-runtime-catalog.md) §3.5。
     3. **资源清单外部 ID/URL 与 Provider 控制台一致性逐项核对**（§8-3 遗留）。
     4. **Preview 遗留资源清理 + PR 关闭清理链路真实验证**（§8-7 与§7 段遗留；生产项目是交付物，不清理）。
     5. **Windows 上 agent 执行路径不通（探测部分已于 2026-09-01 修复）**：`agent-runtime` 的版本探测与 PATH 发现已修（见「最近进度」同日条目，本机 6/6 agent 可探）；**尚余执行路径**：`runCodexProcess` 仍以无 shell 方式 spawn，npm shim 类 CLI（codex / claude / opencode / openclaw / codebuddy）一律 ENOENT，Windows 用户走 Apply → Feature Task 时 agent 起不来。修法待决策表「Windows agent 启动方式」拍板（`install-macos.sh` 表明 Pilot 目标为 macOS，因此推荐先显式降级而非引入注入面）。
@@ -453,7 +453,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 | P1-2 Infisical 集成方式 | 已确认（2026-09-01） | 凭证系统后端化（`credentials.ts` 经 `SecretBackend` 抽象切换，默认 `local-file` 字节级不变），不恢复独立 secret-backend 路由 |
 | P1-2 真实验证时机 | 已确认（2026-09-01） | 延后：本轮交付代码 + 单元测试 + 探测脚本与配置指南；P1-2 标记「代码完成，真实验证待办」，不满足 ✅ |
 | Windows agent 启动方式 | 待确认（2026-09-01） | **探测与 PATH 发现已修（同日，无争议部分先落地）**；待定的只剩**执行路径** `runCodexProcess`。候选：① 引入 cross-spawn（社区维护的 shim 解析 + cmd 参数转义）；② 自实现同等逻辑（无新依赖，但转义正确性要自己扛测试）；③ 从 npm `.cmd` shim 解析出 `node <entry.js>` 后无 shell 启动（无注入面，依赖 shim 格式，非 npm 安装需回退）；④ **推荐**：Windows 上检测到 shim 就显式报错 + 给可操作提示（改用原生 exe / 指到真实可执行 / 走 WSL），因为 `scripts/install-macos.sh` 说明 Pilot 目标是 macOS，目前没有 Windows Pilot；待出现真实 Windows 用户再升级到 ①/② |
-| 领域文案的 i18n 边界 | 待确认（2026-09-01，走查产出） | 决策卡、dry-run 计划、manual actions、baseline plan 的英文文案目前**硬写在 `packages/blueprint` 里随 API 下发**，Studio 只翻译自身 chrome，中文用户在核心区看到整屏英文。候选：① 后端只发 id/枚举，文案全部上移到 Studio locale 表（真 i18n，但要给每条 decision/action 建稳定 id，改动面最大）；② plan 对象加 `*Key` 字段 + 保留英文原文作 fallback（渐进，代价是契约里多一堆平行字段）；③ 按 locale 参数让后端选文案（把语言塞进领域包，最不推荐）。**未定前不动 `packages/blueprint` 的文案。**原先并列在这里的另一条「`getBlueprintDecisions` 不看 productType，api-tool 项目渲染出 Web app golden path 与云厂商清单，与自身生成的 `PRODUCT_STANDARD.md` 矛盾」**已于 2026-09-02 修掉**——那是内容错误不是翻译问题，所以没有等本条拍板：两张卡改读 `PRODUCT_TYPE_DESCRIPTORS` / `baselineProvidersFor`。本条边界未定这件事本身没变，两张卡下发的仍是后端英文串，文案结构一行未动。 |
+| 领域文案的 i18n 边界 | 待确认（2026-09-01，走查产出；2026-09-02 已补齐决策依据） | 决策卡、dry-run 计划、manual actions、baseline plan 的英文文案目前**硬写在 `packages/blueprint` 里随 API 下发**，Studio 只翻译自身 chrome，中文用户在核心区看到整屏英文。**影响范围已实测**（288 份答案组合）：非 artifact 共 93 个模板（48 固定静态 + 5 固定带参 + 40 按类型/provider 分叉），artifact titles 跨六类型仅 78 个唯一 id 且后端已发 id。**决定性约束**：同一 prose 有两个消费方——Studio 要中文、MCP 桥要英文原文给外部 coding agent，据此淘汰方案①③，**推荐方案②**（保留英文 prose，并行发稳定 key+params，Studio key 查 locale、miss 回退英文，MCP 桥零改动），分四批落地。完整数据、字段形状、分批与风险见 [领域文案 i18n 边界决策依据](docs/i18n-domain-prose-decision.md)。候选：① 后端只发 id/枚举，文案全部上移到 Studio locale 表（真 i18n，但 MCP 桥拿 id 无法给外部 agent 指令，破坏契约）；② plan 对象加 `*Key` 字段 + 保留英文原文作 fallback（渐进，推荐）；③ 按 locale 参数让后端选文案（领域包耦合语言，最不推荐）。**未定前不动 `packages/blueprint` 的文案。**原先并列的「`getBlueprintDecisions` 不看 productType」**已于 2026-09-02 修掉**（`ebe7ec4`，内容错误不是翻译问题），两张卡下发的仍是后端英文串、文案结构一行未动。 |
 
 ## 10. 交接完成定义
 

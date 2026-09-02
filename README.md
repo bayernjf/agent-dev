@@ -53,6 +53,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - [对外 MCP 桥接](docs/mcp-bridge.md)：`agent-dev mcp` 的 20 工具清单、闸门边界与客户端配置。
 - [Studio 双主题设计方案](docs/studio-theme-design.md)：Studio 深/浅双主题 token 化视觉方案，已实施（`90696d4`）。
 - [Studio i18n 设计方案](docs/studio-i18n-design.md)：Studio 中/英双语方案，默认英文、术语保留英文，已实施（`90696d4`）；§6.1/§6.2 是枚举驱动 key 与插值 params 的两条强制规则（含种植实测的判据）。
+- [领域文案 i18n 边界决策依据](docs/i18n-domain-prose-decision.md)：后端 `packages/blueprint` 下发英文 prose 的 i18n 影响范围实测、三方案对比与推荐，待拍板。
 - [外部 Pilot 招募](docs/pilot-recruiting.md)：v0.2 外部 Pilot 参与条件、流程、激励与隐私边界，申请/反馈走仓库 Issue 模板。
 - [安全与质量审计 2026-08-31](docs/audit-2026-08-31.md)：全仓审计发现与整改方案（P0–P4），整改进度以此为准。
 - [项目交接](handoff.md)：当前分支、硬约束、已完成工作和下一步。
