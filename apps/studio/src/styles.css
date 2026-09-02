@@ -310,6 +310,13 @@ h2 { font-size: 16px; margin-bottom: 5px; color: var(--text-1); }
   font-weight: 700;
 }
 
+/* The project header is a plain block, so an inline span would stretch the badge background across
+   the whole row instead of hugging the label. */
+.project-state {
+  display: inline-block;
+  margin-top: 6px;
+}
+
 .empty-state {
   margin: 0;
   padding: 38px 12px;
@@ -474,10 +481,27 @@ select option {
   border-radius: 3px;
   font-weight: 600;
   text-transform: uppercase;
+  /* This badge is a flex item, so a long agent name could squeeze it below its own content width.
+     Latin text would have overflowed; Chinese can break between any two characters, which stacked it
+     one glyph per line. A badge must keep its label on one line. */
+  white-space: nowrap;
 }
 .agent-badge.verified { background: color-mix(in srgb, var(--status-ok) 12%, var(--surface)); color: var(--status-ok); }
+/* Deliberately not green: a candidate Adapter has an Adapter but no exercised execution contract. */
+.agent-badge.candidate { background: color-mix(in srgb, var(--status-pending) 18%, var(--surface)); color: var(--status-pending); }
+/* Weaker than candidate on purpose: there is no Adapter at all, so there is nothing waiting to be verified. */
+.agent-badge.unsupported { background: var(--surface-muted); color: var(--text-3); }
 .agent-badge.profile { background: color-mix(in srgb, var(--brand) 12%, var(--surface)); color: var(--brand); }
 .agent-badge.not-detected { background: var(--surface-muted); color: var(--text-3); }
+/* Why a visible Agent cannot be picked. Inline in the row, because the refusal has to be read next to
+   the name it applies to. */
+.agent-reason {
+  display: block;
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
 
 .diff-section { margin-bottom: 24px; padding: 16px; background: var(--surface-muted); border-radius: 8px; }
 .diff-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 12px; }
@@ -1188,9 +1212,28 @@ select option {
   transition: border-color .15s, background .15s;
 }
 
-.agent-item:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.agent-item:hover:not(.unavailable) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 .agent-item.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
-.agent-item:disabled { opacity: .55; cursor: not-allowed; }
+.agent-item.unavailable { opacity: .55; }
+
+/* A catalog row carries two intents that used to share one click: name this Agent as the executor,
+   and read out what its CLI can do. They are now two controls, so .agent-select adds no chrome of
+   its own - the row keeps its single border - and it stays a real <button>, because the split must
+   not cost the keyboard the thing it could already do. */
+.agent-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+}
+
+.agent-select:disabled { cursor: not-allowed; }
+.agent-side { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.agent-probe { width: 26px; height: 26px; }
 
 .agent-info { display: grid; gap: 3px; min-width: 0; }
 .agent-header { display: flex; align-items: center; gap: 8px; }
@@ -1291,6 +1334,17 @@ select option {
 
 .credential-status.connected { color: var(--status-ok); background: color-mix(in srgb, var(--status-ok) 12%, var(--surface)); }
 .credential-status.missing { color: var(--status-run); background: color-mix(in srgb, var(--status-run) 12%, var(--surface)); }
+
+.credential-backend {
+  display: inline-block;
+  margin: -6px 0 0;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.credential-backend.connected { color: var(--status-ok); background: color-mix(in srgb, var(--status-ok) 12%, var(--surface)); }
+.credential-backend.unavailable { color: var(--status-fail); background: color-mix(in srgb, var(--status-fail) 12%, var(--surface)); }
 
 .credential-hint { color: var(--text-2); font-size: 11px; line-height: 1.4; }
 .credential-tutorial { color: var(--accent); font-size: 11px; font-weight: 600; text-decoration: none; }

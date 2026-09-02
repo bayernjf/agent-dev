@@ -59,7 +59,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 ## 当前状态
 
-当前仓库处于 `v0.2` Pilot 阶段（版本 `0.2.0`）：四个真实项目已通过 BluePrint → Preview → Production 全周期交付上线，2026-08-31 完成全仓安全与质量审计并落地 P0–P4 全部整改（回环绑定 + token 鉴权、状态机事务化、清理一致性、Windows 兼容、测试补齐），全仓 220 例测试全绿。不是可用于生产的稳定版本。
+当前仓库处于 `v0.2` Pilot 阶段（版本 `0.2.0`）：四个真实项目已通过 BluePrint → Preview → Production 全周期交付上线，2026-08-31 完成全仓安全与质量审计并落地 P0–P4 全部整改（回环绑定 + token 鉴权、状态机事务化、清理一致性、Windows 兼容、测试补齐，当时 220 例），2026-09-01 P1-2 凭证后端化落地，同日 Studio 冷启动鉴权、Windows Agent 发现路径、以及 Runtime 列表把未验证的执行能力当成已验证展示这三个缺陷修复补测后全仓 259 例测试全绿；2026-09-02 完成 Studio 界面走查待办中不需要架构决策的全部条目（中英文案、产品类型列名、两个审批状态的区分、执行者契约、只读探测不再顺带任命执行者、能力探测只说它读到了什么，以及 Runtime 路由的第二种拒绝——本机没装该 CLI——拿到自己的 code，不再把后端英文句印上屏，两个响应也不再附带一份与执行者无关的 Codex 探测结果），现全仓 346 例测试全绿。不是可用于生产的稳定版本。
 
 本地可运行能力：
 
@@ -85,11 +85,12 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 依赖安装是独立的显式动作（`INSTALL_DEPENDENCIES`）：只在用户确认后运行 `npm install`，并生成 `dependency-install.json` 与 `DEPENDENCY_INSTALL_REPORT.md`；
 - Local Apply 完成后可在 Studio 创建 Feature Task，提交目标、验收标准和任务边界；人工批准后生成 `TASK_APPROVAL.md` 并提交到本地 feature 分支；
 - 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；默认仍先生成 dry-run 计划。
-- Runtime Adapter 能生成受 sandbox、workspace 和禁止路径约束的 Codex 计划，并通过环境变量白名单启动显式批准的 `workspace-write` 执行；2026-08-11 已在隔离生成工作区完成一次产生实际源码 diff 的真实 Codex feature task、质量门和 Git evidence 验证。Human Acceptance 仍由用户明确批准。
+- Runtime Adapter 能生成受 sandbox、workspace 和禁止路径约束的执行计划（命令按解析出的 Agent 拼），并通过环境变量白名单启动显式批准的 `workspace-write` 执行；2026-08-11 已在隔离生成工作区完成一次产生实际源码 diff 的真实 Codex feature task、质量门和 Git evidence 验证。Human Acceptance 仍由用户明确批准。
 - Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence、attempt 历史和 `RUNTIME_RUN_REPORT.md`；失败运行可通过 `RETRY_RUNTIME_RUN` 显式重试，历史不会被覆盖。
-- Studio 已展示 Runtime Run 状态、取消动作、显式 `Run Codex`/`Retry Codex` 按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
+- Studio 已展示 Runtime Run 状态、取消动作、按执行者命名的显式运行/重试按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
+- 「这个任务由谁执行」只有一个答案：Agent Profile 解到 base Agent、剥掉 `local-` 命名空间后查 `AGENT_ADAPTERS`，只有 `verified` 能承接任务；解析不通过时 daemon 直接拒（409 + `code: agent_not_executable` + `agentId`），**任何一层都不会把执行者换成另一个 Agent**，Studio 把被拒的 Agent 名字和“没换人”一起说出来。
 - Daemon 已提供 `/api/runtime/catalog`，内置 Agent 来自 `agents.builtin.conf`，可登记名称 + 启动命令的 custom Agent；内置未安装项隐藏，custom 未安装项置灰并保存到 `.agent-dev/agents.conf`。
-- Studio Agent Catalog 支持主动刷新和只读 Capability Probe，展示非交互、workspace-write 及 `verified`、`candidate`、`unsupported` Adapter 状态；未知能力不会被自动宣称为可执行。
+- Studio Agent Catalog 支持主动刷新和只读 Capability Probe：探测只读 CLI 的帮助输出，从不真的跑一次，所以 chip 印的是「Adapter 要用的参数在不在帮助里」，并区分「没列」与「帮助答不了」两种不是同一件事的 false；Adapter 状态仍为 `verified`、`candidate`、`unsupported`。未知能力不会被自动宣称为可执行。
 - 凭证管理 Phase 1 + Phase 2 已提供本地凭证文件、连接元数据、项目资源清单、`.env` 生成器、daemon API 和 Studio 引导/验证面板；Secret 不返回 API、不写入数据库。Supabase 自动 Adapter 按决策保持 Manual。
 - Acceptance Gate 已接入 Studio：提交验收总结和标准确认后，根据 Quality Gate/Git evidence 生成 `ACCEPTANCE_REPORT.md`；blocked 状态不能批准交付。
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。

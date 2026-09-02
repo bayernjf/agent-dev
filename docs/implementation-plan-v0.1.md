@@ -1,7 +1,7 @@
 # Agent-Dev v0.1 实施计划
 
-> 状态：阶段 A–F 骨架已实现，Phase 0 Spike 全部通过或已批准降级；剩余真实端到端交付验证  
-> 日期：2026-08-13（工程结构与模块映射已对齐真实代码）  
+> 状态：已完成——4 个真实项目（`Receipt Test` / `Workspace Verify Fresh` / `Link Vault` / `MCP Word Tools`）均走完 Blueprint → Preview → Production 全周期，v0.1 验收条目全部闭环；后续规划由 [v0.2 计划](implementation-plan-v0.2.md) 接棒  
+> 日期：2026-08-31（最近对齐；工程结构与模块映射已对齐真实代码）  
 > 上游文档：[v0.1 PRD](prd-v0.1.md)、[技术架构](technical-architecture-v0.1.md)
 
 ## 1. 实施目标
@@ -93,7 +93,7 @@ agent-dev/
 | Dry Run | Provider `discover/plan` | 无外部副作用，展示 Diff/权限/费用 |
 | 项目脚手架 | `blueprint/generate.ts`（Web SaaS 模板） | 本地可测试并具备 CI |
 | 平台连接 | `provider-cli`（GitHub/Vercel/Cloudflare + Supabase Manual 降级） | 创建后重新读取真实状态验证 |
-| 联合部署 | `deployment-composer` | API/页面 URL 均可访问并联合 smoke；Composer 已实现（7 步幂等编排含 Vercel SSO Protection 关闭、精确 CORS、临时项目清理），14 个单元测试通过，2026-08-14 已在真实云端跑通全部 7 步并取得 Evidence（PR 关闭清理仍待真实验证） |
+| 联合部署 | `deployment-composer` | API/页面 URL 均可访问并联合 smoke；Composer 已实现（7 步幂等编排含 Vercel SSO Protection 关闭、精确 CORS、临时项目清理），15 个单元测试通过，2026-08-14 已在真实云端跑通全部 7 步并取得 Evidence（PR 关闭清理仍待真实验证） |
 | Agent 执行 | `LocalCodexRuntime` + Runtime Catalog API | 隔离 worktree、范围受控、可取消；内置 Agent 探测、custom 名称/命令登记、Studio 选择和只读 Capability Probe 已完成 |
 | 质量门禁 | Quality Contract + GitHub Actions | 本地/CI 命令语义一致；Agent-Dev 自身门禁见 `.github/workflows/quality.yml` |
 | 人工 Gate | `workflow` + `approvals` | 暂停、重启进程、恢复后继续 |
