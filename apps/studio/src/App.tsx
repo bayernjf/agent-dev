@@ -2110,8 +2110,8 @@ export function App() {
                 <article className="plan-card"><h3>{t('plan.requiredFromYou')}</h3><ol>{dryRun.manualActions.map(action => <li key={action.id}><strong>{domainT(action.title, action.titleKey, action.titleParams)}</strong><span>{domainT(action.reason, action.reasonKey)}</span><small>{t('plan.verify', { verification: domainT(action.verification, action.verificationKey) })}</small></li>)}</ol></article>
               </div>
               <div className="artifact-heading"><div><h3>{t('plan.generatedPackage')}</h3><p>{t('common.previewOnly')}</p></div><button className="icon-button" type="button" onClick={() => void loadDryRun(selected.id)} aria-label={t('plan.refreshPlan')} title={t('plan.refreshPlan')}><RefreshCw size={17} /></button></div>
-              <div className="artifact-list">{dryRun.artifacts.map(artifact => <button className={`artifact-button ${selectedArtifact?.id === artifact.id ? 'selected' : ''}`} type="button" key={artifact.id} onClick={() => setSelectedArtifactId(artifact.id)}><strong>{artifact.title}</strong><span>{artifact.path}</span></button>)}</div>
-              {selectedArtifact && <article className="artifact-preview"><div><h3>{selectedArtifact.title}</h3><p>{selectedArtifact.path}</p></div><pre>{selectedArtifact.content}</pre></article>}
+              <div className="artifact-list">{dryRun.artifacts.map(artifact => <button className={`artifact-button ${selectedArtifact?.id === artifact.id ? 'selected' : ''}`} type="button" key={artifact.id} onClick={() => setSelectedArtifactId(artifact.id)}><strong>{domainT(artifact.title, artifact.titleKey)}</strong><span>{artifact.path}</span></button>)}</div>
+              {selectedArtifact && <article className="artifact-preview"><div><h3>{domainT(selectedArtifact.title, selectedArtifact.titleKey)}</h3><p>{selectedArtifact.path}</p></div><pre>{selectedArtifact.content}</pre></article>}
             </section>}
             </>}
 
