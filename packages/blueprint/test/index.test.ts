@@ -239,6 +239,26 @@ describe('ProductBlueprint', () => {
     expect(byId['analytics'].valueKey).toMatch(/^decision\.analytics\.value\./);
   });
 
+  it('emits stable i18n keys for the baseline plan summary and every resource', () => {
+    const blueprint = createBlueprint('Receipt Desk', {}, 3);
+    const plan = createBaselinePlan(blueprint);
+
+    expect(plan.summaryKey).toBeDefined();
+    expect(plan.summaryKey!.startsWith('baseline.summary.')).toBe(true);
+
+    for (const resource of plan.resources) {
+      expect(resource.titleKey, `resource ${resource.id} missing titleKey`).toBeDefined();
+      expect(resource.titleKey!.startsWith('baseline.resource.')).toBe(true);
+      expect(resource.reasonKey, `resource ${resource.id} missing reasonKey`).toBeDefined();
+    }
+
+    // A product type with no cloud providers only has the GitHub resource.
+    const mcpBlueprint = createBlueprint('Receipt Desk', { productType: 'api-tool' }, 3);
+    const mcpPlan = createBaselinePlan(mcpBlueprint);
+    expect(mcpPlan.resources).toHaveLength(1);
+    expect(mcpPlan.resources[0].id).toBe('github-repository');
+  });
+
   it('backs every declared quality check with a script that actually runs, for every generated product type', () => {
     // The gate is one `npm run quality` chain: a check declared in the contract but missing from
     // scripts stops the chain with "Missing script", so the product's CI can never go green.
