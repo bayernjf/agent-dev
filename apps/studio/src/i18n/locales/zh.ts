@@ -234,7 +234,8 @@ export const zh = {
     verify: '验证',
     generatedPackage: '生成的交付包',
     refreshPlan: '刷新交付计划',
-    baselineNote: '固定基线使用 React/Vite、Hono、Supabase、Cloudflare Pages 和 Vercel Functions。云账户和生产发布仍需人工批准。',
+    baselineNoteCloud: '固定基线使用 {providers}。云账户和生产发布仍需人工批准。',
+    baselineNoteRepositoryOnly: '该产品类型除 GitHub 仓库外不创建任何云资源：构建与质量门禁在本地运行，分发仍是人工步骤，生产发布仍需人工批准。',
     saveRevision: '保存新修订版本',
   },
   decisions: {

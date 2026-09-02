@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { baselineProvidersFor } from './generate.js';
+import { baselineProvidersFor, PRODUCT_TYPE_DESCRIPTORS, type BaselineProviderId } from './generate.js';
 export {
   baselineProvidersFor,
   createBaselinePlan,
@@ -197,15 +197,39 @@ export function createDefaultBlueprint(name: string): ProductBlueprint {
   return createBlueprint(name);
 }
 
+// How each cloud provider is named to a user. Keyed on every baseline provider except `github` —
+// GitHub is source control, not a cloud account, and the card this feeds is titled "Cloud account
+// connection". `satisfies` makes a seventh provider a compile error until it declares a label.
+const CLOUD_PROVIDER_LABELS = {
+  supabase: 'Supabase',
+  vercel: 'Vercel Functions',
+  cloudflare: 'Cloudflare Pages',
+} as const satisfies Record<Exclude<BaselineProviderId, 'github'>, string>;
+
+type CloudProviderId = keyof typeof CLOUD_PROVIDER_LABELS;
+
+function cloudProvidersOf(productType: ProductBlueprint['spec']['product']['type']): readonly CloudProviderId[] {
+  return baselineProvidersFor(productType).filter(
+    (provider): provider is CloudProviderId => provider !== 'github',
+  );
+}
+
 export function getBlueprintDecisions(blueprint: ProductBlueprint): BlueprintDecision[] {
   const analytics = blueprint.spec.analytics.providers;
+  const productType = blueprint.spec.product.type;
+  // Both cards below used to name one product type's stack and all four cloud providers for every
+  // blueprint, so an MCP server was offered a Supabase organization and a Vercel team while its own
+  // generated PRODUCT_STANDARD.md said data and auth were "Not provisioned for this product type".
+  // Reading the per-type table that writes that document is what makes the two unable to drift.
+  const descriptor = PRODUCT_TYPE_DESCRIPTORS[productType];
+  const cloudProviders = cloudProvidersOf(productType);
   const decisions: BlueprintDecision[] = [
     {
       id: 'stack',
       title: 'Application baseline',
-      value: 'React/Vite, Hono and npm workspaces',
+      value: `${descriptor.frontend} | ${descriptor.backend}`,
       mode: 'auto',
-      reason: 'This is the tested v0.1 Web app golden path.',
+      reason: 'The same delivery baseline is written into generated/PRODUCT_STANDARD.md.',
     },
     {
       id: 'source-control',
@@ -217,9 +241,13 @@ export function getBlueprintDecisions(blueprint: ProductBlueprint): BlueprintDec
     {
       id: 'providers',
       title: 'Cloud account connection',
-      value: 'Supabase, Cloudflare Pages and Vercel Functions',
+      value: cloudProviders.length === 0
+        ? 'None — this product type provisions nothing outside its GitHub repository'
+        : cloudProviders.map(provider => CLOUD_PROVIDER_LABELS[provider]).join(', '),
       mode: 'manual',
-      reason: 'Account authorization and resource ownership stay with you.',
+      reason: cloudProviders.length === 0
+        ? 'Authorizing GitHub remains yours to do; no cloud account is requested.'
+        : 'Account authorization and resource ownership stay with you.',
     },
     {
       id: 'production',
