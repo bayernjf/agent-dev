@@ -9,7 +9,7 @@ import { drizzle } from 'drizzle-orm/sql-js';
 import initSqlJs, { type Database } from 'sql.js';
 import type { ProductBlueprint } from '@agent-dev/blueprint';
 import { createBaselinePlan, createDryRunPlan, productBlueprintSchema } from '@agent-dev/blueprint';
-import { buildAgentExecutionPlan, executeCodexPlan, isAgentExecutable, type CodexExecutionPlan, type CodexExecutionResult, type CodexProcessRunner, type AgentProfile, resolvePipelinePrompt, getNextPipelineStep, isPipelineComplete, type FeatureTaskPipeline, type PipelineStep, type PipelineStepResult } from '@agent-dev/agent-runtime';
+import { buildAgentExecutionPlan, describeRuntimeExecutorRejection, executeCodexPlan, isAgentExecutable, resolveRuntimeExecutor, type CodexExecutionPlan, type CodexExecutionResult, type CodexProcessRunner, type AgentProfile, resolvePipelinePrompt, getNextPipelineStep, isPipelineComplete, type FeatureTaskPipeline, type PipelineStep, type PipelineStepResult } from '@agent-dev/agent-runtime';
 import { createNeedsInputRun, restoreDeliveryActor, isEventReplay, type DeliveryEvent, type DeliverySnapshot, type DeliveryState } from '@agent-dev/workflow';
 import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects, releaseRuns } from './schema.js';
 import { migrations } from './migrations.js';
@@ -939,17 +939,17 @@ export class AgentDevStore {
     const existing = await this.getRuntimeRun(projectId, blueprintRevision);
     if (existing) return existing;
     const now = new Date().toISOString();
-    // Blueprint runtime providers use a `local-` namespace prefix (e.g. `local-codebuddy`), but the
-    // adapter registry keys are bare (e.g. `codebuddy`). Strip the prefix before looking up the adapter.
-    const rawAdapterId = agentId.startsWith('local-') ? agentId.slice(6) : agentId;
-    // Check if the agentId refers to an Agent Profile. If so, resolve the base agent and pass the profile.
-    const profile = await this.profiles.getProfile(rawAdapterId);
-    const adapterId = profile ? profile.baseAgentId : rawAdapterId;
-    const executable = isAgentExecutable(adapterId);
-    const plan = executable
-      ? buildAgentExecutionPlan(task, task.workspacePath, adapterId, { profile: profile ?? undefined })
-      : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
-    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId, status: 'planned', plan, attempts: 0, history: [], createdAt: now, updatedAt: now };
+    // One resolution rule for every layer (see resolveRuntimeExecutor): strip the Blueprint provider
+    // namespace, resolve an Agent Profile to its base agent, and refuse when the result has no
+    // verified Adapter. This used to fall back to a Codex plan, which recorded an executor nobody
+    // asked for - the run report and the planned command then disagreed with the Blueprint.
+    const resolved = await resolveRuntimeExecutor(agentId, id => this.profiles.getProfile(id));
+    if (!resolved.ok) throw new Error(describeRuntimeExecutorRejection(resolved));
+    const plan = buildAgentExecutionPlan(task, task.workspacePath, resolved.agentId, { profile: resolved.profile });
+    // Record the narrowest true name of the executor: a Profile id keeps pointing at the Profile the
+    // user picked (its overrides are baked into the plan), a plain provider loses the `local-`
+    // namespace so the record and the Adapter registry speak the same key.
+    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId: resolved.profile ? resolved.requestedId : resolved.agentId, status: 'planned', plan, attempts: 0, history: [], createdAt: now, updatedAt: now };
     await writeFile(join(task.workspacePath, 'runtime-run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8');
     await writeFile(join(task.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(run, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
     await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: task.workspacePath });
@@ -981,12 +981,13 @@ export class AgentDevStore {
 
   private async executeRuntimeAttempt(task: FeatureTask, existing: RuntimeRun, runner?: CodexProcessRunner): Promise<RuntimeRun> {
     const attemptNumber = existing.attempts + 1;
-    const rawAdapterId = existing.agentId?.startsWith('local-') ? existing.agentId.slice(6) : existing.agentId;
-    // Resolve profile if the agentId refers to one.
-    const profile = rawAdapterId ? await this.profiles.getProfile(rawAdapterId) : null;
-    const adapterId = profile ? profile.baseAgentId : rawAdapterId;
-    const executable = adapterId && isAgentExecutable(adapterId);
-    const plan = buildAgentExecutionPlan(task, task.workspacePath, executable ? adapterId : 'codex', { execute: true, profile: profile ?? undefined });
+    // Resolving again here, instead of reusing run.plan, is what makes an attempt start from the
+    // executor the record names. The previous code substituted 'codex' whenever the stored id could
+    // not be resolved (a deleted Profile, a candidate provider), so the run report claimed one Agent
+    // while a different process was actually launched with an execute plan.
+    const resolved = await resolveRuntimeExecutor(existing.agentId ?? 'codex', id => this.profiles.getProfile(id));
+    if (!resolved.ok) throw new Error(describeRuntimeExecutorRejection(resolved));
+    const plan = buildAgentExecutionPlan(task, task.workspacePath, resolved.agentId, { execute: true, profile: resolved.profile });
     const startedAt = new Date().toISOString();
     const attempt: RuntimeAttempt = { attempt: attemptNumber, status: 'running', plan, startedAt };
 
