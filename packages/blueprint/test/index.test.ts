@@ -197,6 +197,26 @@ describe('ProductBlueprint', () => {
     ]));
   });
 
+  it('emits stable i18n keys alongside the dry-run English prose', () => {
+    const blueprint = createBlueprint('Receipt Desk', { analyticsProviders: ['ga4'] }, 3);
+    const plan = createDryRunPlan(blueprint);
+
+    // The English prose remains the contract (MCP bridge feeds it to external coding agents).
+    expect(plan.summary).toContain('generated artifacts');
+    expect(plan.automaticPreparation).toHaveLength(3);
+
+    // Parallel stable keys + params let Studio resolve locale translations, falling back to prose.
+    expect(plan.summaryKey).toBe('dryRun.summary');
+    expect(plan.summaryParams.artifactCount).toBe(plan.artifacts.length);
+    expect(plan.summaryParams.actionCount).toBe(plan.manualActions.length);
+    expect(plan.automaticPreparationKeys).toEqual([
+      'dryRun.automaticPreparation.validateSchema',
+      'dryRun.automaticPreparation.generateArtifacts',
+      'dryRun.automaticPreparation.classifyBoundaries',
+    ]);
+    expect(plan.automaticPreparationKeys).toHaveLength(plan.automaticPreparation.length);
+  });
+
   it('backs every declared quality check with a script that actually runs, for every generated product type', () => {
     // The gate is one `npm run quality` chain: a check declared in the contract but missing from
     // scripts stops the chain with "Missing script", so the product's CI can never go green.

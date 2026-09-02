@@ -276,6 +276,14 @@ export const en = {
     generatedPackage: 'Generated delivery package',
     refreshPlan: 'Refresh delivery plan',
   },
+  dryRun: {
+    summary: 'This dry run prepares {artifactCount} generated artifacts and {actionCount} manual actions. No cloud resource, credential or repository is changed.',
+    automaticPreparation: {
+      validateSchema: 'Validate the ProductBlueprint schema and selected module combination.',
+      generateArtifacts: 'Generate the product standard, agent constraints, delivery workflow, environment contract and handoff preview.',
+      classifyBoundaries: 'Classify approval boundaries and manual actions before any provider plan is created.',
+    },
+  },
   evidence: {
     title: 'Evidence bundle',
     finalDeliveryReport: 'Final Delivery Report',
