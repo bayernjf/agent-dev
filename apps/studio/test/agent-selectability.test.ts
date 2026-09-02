@@ -95,7 +95,7 @@ describe('every surface that presents an Agent asks the shared question', () => 
 
   const SITES: { where: string; evidence: string }[] = [
     { where: 'catalog load', evidence: 'return profiles.some(profile => profile.id === current) ? current : null;' },
-    { where: 'capability probe click', evidence: 'if (canRunTasks(agent)) setSelectedAgentId(agent.id);' },
+    { where: 'catalog row selection', evidence: 'onClick={() => { if (selectable) setSelectedAgentId(agent.id); }}' },
     { where: 'Blueprint Agent radio', evidence: 'const runnable = canRunTasks(agent);' },
     { where: 'Blueprint Profile radio', evidence: 'const runnable = canProfileRunTasks(profile, agents);' },
     { where: 'Profile row selection', evidence: 'onClick={() => { if (runnable) setSelectedAgentId(profile.id); }}' },
@@ -115,6 +115,23 @@ describe('every surface that presents an Agent asks the shared question', () => 
     // the executor of a task nobody had assigned to it.
     expect(app).not.toMatch(/setSelectedAgentId\(\s*(firstRunnable|payload\.agents)/);
     expect(app).not.toContain('firstRunnableAgent');
+  });
+
+  it('keeps the read-only capability probe out of the executor decision', () => {
+    // The probe reads a CLI's help output. Whatever else changes in this panel, that action must never
+    // decide who runs a task, so the pin sits on the probe body itself rather than on one call site:
+    // it used to end with `if (canRunTasks(agent)) setSelectedAgentId(agent.id)`, which made an
+    // inspection the same act as an appointment.
+    const probeBody = app.match(/const probeAgent = async \(agent: AgentDescriptor\) => \{[\s\S]*?\n  \};/)?.[0] ?? '';
+    expect(probeBody, 'probeAgent no longer has the shape this pin reads').not.toBe('');
+    expect(probeBody).not.toContain('setSelectedAgentId');
+    // Looking stayed a separate control once it stopped deciding. Exactly one control may probe on
+    // click: a second one means the two intents got fused back together somewhere.
+    expect(app.match(/onClick=\{\(\) => \{ void probeAgent\(agent\); \}\}/g) ?? []).toHaveLength(1);
+    // The row refuses rather than ignoring: a clickable-looking row that silently drops the click
+    // would put the promise back into the pointer and leave the reason on screen unread.
+    expect(app).toContain('<button className="agent-select" type="button" disabled={!selectable}');
+    expect(app).toContain('const selectable = canRunTasks(agent);');
   });
 
   it('names the Adapter state instead of printing the enum', () => {
