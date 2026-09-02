@@ -284,6 +284,73 @@ export const en = {
       classifyBoundaries: 'Classify approval boundaries and manual actions before any provider plan is created.',
     },
   },
+  decision: {
+    stack: {
+      title: 'Application baseline',
+      reason: 'The same delivery baseline is written into generated/PRODUCT_STANDARD.md.',
+    },
+    sourceControl: {
+      title: 'Git delivery workflow',
+      value: 'GitHub PRs from dev to main',
+      reason: 'Protected production delivery remains part of the baseline.',
+    },
+    providers: {
+      title: 'Cloud account connection',
+      reason: {
+        none: 'Authorizing GitHub remains yours to do; no cloud account is requested.',
+        hasProviders: 'Account authorization and resource ownership stay with you.',
+      },
+    },
+    production: {
+      title: 'Production release',
+      value: 'Human approval required',
+      reason: 'A production deployment must never be inferred from local work.',
+    },
+    privacy: {
+      title: 'Product data sensitivity',
+      value: {
+        sensitive: 'sensitive',
+        standard: 'standard',
+      },
+      reason: {
+        sensitive: 'Sensitive data requires an explicit privacy and access review.',
+        standard: 'Standard product data uses the default security baseline.',
+      },
+    },
+    preview: {
+      title: 'Preview strategy',
+      value: {
+        'per-pull-request': 'per pull request',
+        'stable-dev-api': 'stable dev api',
+      },
+      reason: {
+        perPullRequest: 'Each pull request can use an isolated preview by default.',
+        stableDevApi: 'A stable dev API changes a shared environment and needs confirmation.',
+      },
+    },
+    analytics: {
+      title: 'Analytics',
+      value: {
+        none: 'None',
+        hasProviders: '{providers}',
+      },
+      reason: {
+        none: 'No tracking setup is required.',
+        hasProviders: 'Analytics affects privacy notices, account authorization and environment variables.',
+      },
+    },
+    runtime: {
+      title: 'Local agent runtime',
+      reason: {
+        beginner: 'Beginner mode uses the verified default local agent (local-codex).',
+        professional: 'Professional mode selects which local agent runtime implements the feature tasks.',
+      },
+    },
+    custom: {
+      title: 'Custom implementation note',
+      reason: 'Custom instructions are preserved, but are not automated until a supported module exists.',
+    },
+  },
   evidence: {
     title: 'Evidence bundle',
     finalDeliveryReport: 'Final Delivery Report',
