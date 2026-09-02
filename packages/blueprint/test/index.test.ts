@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { baselineProvidersFor, createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, getBlueprintDecisions, getManualActions, productBlueprintSchema } from '../src/index.js';
+import { baselineProvidersFor, createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, generateArtifacts, getBlueprintDecisions, getManualActions, productBlueprintSchema } from '../src/index.js';
 
 describe('ProductBlueprint', () => {
   it('creates the fixed v0.1 Web app Golden Path', () => {
@@ -277,6 +277,37 @@ describe('ProductBlueprint', () => {
     const ga4 = actions.find(a => a.id === 'configure-ga4');
     expect(ga4?.titleKey).toBe('manualAction.analytics.title');
     expect(ga4?.titleParams?.provider).toBe('Google Analytics 4');
+  });
+
+  it('emits a titleKey for every generated artifact', () => {
+    const webApp = createBlueprint('Receipt Desk', { productType: 'web-app' }, 3);
+    const landing = createBlueprint('Receipt Desk', { productType: 'landing-page' }, 3);
+
+    for (const artifact of generateArtifacts(webApp)) {
+      expect(artifact.titleKey, `artifact ${artifact.id} missing titleKey`).toBeDefined();
+      expect(artifact.titleKey!.startsWith('artifact.')).toBe(true);
+    }
+
+    // The two type-specific titles encode the type in the key; all others use a flat id key.
+    const variableIds = new Set(['template-root-package', 'template-readme']);
+    for (const artifact of generateArtifacts(webApp)) {
+      if (variableIds.has(artifact.id)) {
+        expect(artifact.titleKey).toBe(`artifact.${artifact.id}.web-app`);
+      } else {
+        expect(artifact.titleKey).toBe(`artifact.${artifact.id}`);
+      }
+    }
+    for (const artifact of generateArtifacts(landing)) {
+      if (variableIds.has(artifact.id)) {
+        expect(artifact.titleKey).toBe(`artifact.${artifact.id}.landing-page`);
+      }
+    }
+
+    // The same variable id must produce different titles (and different keys) across types.
+    const webPkg = generateArtifacts(webApp).find(a => a.id === 'template-root-package')!;
+    const landPkg = generateArtifacts(landing).find(a => a.id === 'template-root-package')!;
+    expect(webPkg.title).not.toBe(landPkg.title);
+    expect(webPkg.titleKey).not.toBe(landPkg.titleKey);
   });
 
   it('backs every declared quality check with a script that actually runs, for every generated product type', () => {
