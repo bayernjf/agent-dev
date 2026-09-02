@@ -232,7 +232,8 @@ export const zh = {
     title: '交付决策',
     plan: '交付计划',
     baselineResources: '基线资源',
-    readyForApproval: '可批准',
+    // 这里原本有一个 readyForApproval：没有任何组件渲染它，而且和 baseline.status.ready 是同一个闸门的
+    // 第二套措辞。test/approval-labels.test.ts 现在拒绝为屏幕上看不到的 key 钉文案。
     ownershipRequired: '需要确认归属',
     approved: '已批准',
     approvalNote: '这仅记录意图，不会创建远程资源或泄露机密。',
