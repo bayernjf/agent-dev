@@ -6,14 +6,15 @@
 
 ## 最近进度
 
-- **领域文案 i18n 边界方案②四批全部落地（2026-09-02，4019905/ff5f664/caa3b07/6e1ee52；§9 决策项关闭）**：决策依据文档（`docs/i18n-domain-prose-decision.md`）实测 288 份答案组合后确认——非 artifact 共 93 个模板，同一 prose 有两个消费方（Studio 要中文、MCP 桥要英文原文给外部 coding agent），据此淘汰方案①③，采用方案②：blueprint 保留英文 prose 作契约，并行发稳定 key+params，Studio 用 key 查 locale、miss 回退英文，MCP 桥零改动。
+- **领域文案 i18n 边界方案②五批全部落地（2026-09-02，4019905/ff5f664/caa3b07/6e1ee52/b22ec08；§9 决策项关闭）**：决策依据文档（`docs/i18n-domain-prose-decision.md`）实测 288 份答案组合后确认——非 artifact 共 93 个模板 + artifact titles 80 key，同一 prose 有两个消费方（Studio 要中文、MCP 桥要英文原文给外部 coding agent），据此淘汰方案①③，采用方案②：blueprint 保留英文 prose 作契约，并行发稳定 key+params，Studio 用 key 查 locale、miss 回退英文，MCP 桥零改动。
   - **第 1 批 dryRun（4 模板）**：`DryRunPlan` 加 `summaryKey/summaryParams/automaticPreparationKeys`；Studio 新建 `useDomainText()` hook（`lib/domain-text.ts`），key 命中出中文、两 locale 都 miss 回退后端英文 prose、无 key 返回原文（增量迁移安全）；locale 加 `dryRun.*` 段。
   - **第 2 批 decisions（37）**：`BlueprintDecision` 加 `titleKey/valueKey/valueParams/reasonKey`；枚举值（dataSensitivity/previewStrategy）和 analytics 列表参数化；per-type stack/provider 值暂留英文（从 `PRODUCT_TYPE_DESCRIPTORS` 派生，后续加 per-type key）。
   - **第 3 批 baselinePlan（15）**：`BaselinePlan` 加 `summaryKey/summaryParams`（ready/blocked 两种，blocked 带 `{count}`）；`BaselinePlanResource` 加 `titleKey/reasonKey/reasonParams`（四个 provider 各有 title/missingReason，hasOwner 带 `{title}/{owner}`）。
   - **第 4 批 manualActions（37）**：`ManualAction` 加 `titleKey/titleParams/reasonKey/stepsKeys/verificationKey`；七个 action family（github/supabase/cloudflare/vercel/privacyReview/analytics/custom）全覆盖；analytics title 带 `{provider}` 参数；provider 过滤保持原顺序（github→supabase→cloudflare→vercel）。
-  - **测试纪律**：每批都配「blueprint 断言 key/params 存在且与 prose 对齐」+「Studio 断言每个 emitted key 在 en/zh 都能解析」。`domain-text.test.tsx` 从 9 例扩到 93 例（dryRun 4 + decision 37 + baseline 11 + manualAction 42）。踩坑：测试组件用 `key` 作 prop 名被 React 保留属性吞掉，改 `i18nKey`；locale 嵌套结构必须用对象嵌套（`reason: { none: ... }`），扁平的 `reason.none` 无法被 `getNestedValue` 按点号解析。
-  - **剩余**：artifact titles（87 唯一 id，title 随 productType 变化，不能用固定 `artifact.${id}` 作 key），需后端给 `GeneratedArtifact` 加 `titleKey` 后处理。
-  - **验证**：全仓 `npx vitest run` **35 files / 449 例全绿**；`npm run typecheck` 0 错；Studio `vite build` 干净。
+  - **第 5 批 artifact titles（80 key）**：`GeneratedArtifact` 加 `titleKey`，`generateArtifacts` 在唯一出口统一填充（不改每个 builder）。78 个唯一 id 中 76 个 title 跨类型固定，用 `artifact.${id}`；仅 `template-root-package` 和 `template-readme` 随类型变化，用 `artifact.${id}.${type}`。
+  - **测试纪律**：每批都配「blueprint 断言 key/params 存在且与 prose 对齐」+「Studio 断言每个 emitted key 在 en/zh 都能解析」。`domain-text.test.tsx` 从 9 例扩到 173 例（dryRun 4 + decision 37 + baseline 11 + manualAction 42 + artifact 80）。踩坑：测试组件用 `key` 作 prop 名被 React 保留属性吞掉，改 `i18nKey`；locale 嵌套结构必须用对象嵌套（`reason: { none: ... }`），扁平的 `reason.none` 无法被 `getNestedValue` 按点号解析。
+  - **全部完成**：五批覆盖 dryRun(4)、decisions(37)、baselinePlan(15)、manualActions(37)、artifact titles(80 key)。MCP 桥零改动，继续接收英文 prose。
+  - **验证**：全仓 `npx vitest run` **35 files / 530 例全绿**；`npm run typecheck` 0 错；Studio `vite build` 干净。
 
 - **决策卡与表单基线注记开始读产品类型：卡片不再和它自己的生成物对着说（2026-09-02，`ebe7ec4`；走查待办 2 与 §9 里并列的那条一并关闭）**：`getBlueprintDecisions` 此前不看 `productType`，两张卡对**每一种**类型都印 web-app 的那套：`Application baseline: React/Vite, Hono and npm workspaces` + 理由 `This is the tested v0.1 Web app golden path.`、`Cloud account connection: Supabase, Cloudflare Pages and Vercel Functions`。于是一个 MCP server 的决策台向用户索要 Supabase 组织与 Vercel team，而**同一个 Blueprint 自己生成的** `PRODUCT_STANDARD.md` 写着 `Frontend: None (MCP server; tools are the interface)` / `Data and auth: Not provisioned for this product type`。信卡片的用户会去授权一套这次交付根本不碰的云账户。
   - **两张卡都改读 `PRODUCT_TYPE_DESCRIPTORS` 与 `baselineProvidersFor(productType)`**——就是写 `PRODUCT_STANDARD.md` 与基线计划的那张表（缺陷 24 立的唯一事实源），所以卡片与文档只可能在「有一方不再读它」时才分歧。stack 卡的值是 `前端 | 后端`（分隔符用 `|` 而非 `;`，因为 api-tool 自己的前端串里就含分号）；云账户卡只列该类型真正供给的云 provider，`github` 按名排除——它是源码托管不是云账户，而这张卡的标题就叫「Cloud account connection」；四类不供给任何云资源的改印 `None — this product type provisions nothing outside its GitHub repository`。
@@ -462,7 +463,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 | P1-2 Infisical 集成方式 | 已确认（2026-09-01） | 凭证系统后端化（`credentials.ts` 经 `SecretBackend` 抽象切换，默认 `local-file` 字节级不变），不恢复独立 secret-backend 路由 |
 | P1-2 真实验证时机 | 已确认（2026-09-01） | 延后：本轮交付代码 + 单元测试 + 探测脚本与配置指南；P1-2 标记「代码完成，真实验证待办」，不满足 ✅ |
 | Windows agent 启动方式 | 待确认（2026-09-01） | **探测与 PATH 发现已修（同日，无争议部分先落地）**；待定的只剩**执行路径** `runCodexProcess`。候选：① 引入 cross-spawn（社区维护的 shim 解析 + cmd 参数转义）；② 自实现同等逻辑（无新依赖，但转义正确性要自己扛测试）；③ 从 npm `.cmd` shim 解析出 `node <entry.js>` 后无 shell 启动（无注入面，依赖 shim 格式，非 npm 安装需回退）；④ **推荐**：Windows 上检测到 shim 就显式报错 + 给可操作提示（改用原生 exe / 指到真实可执行 / 走 WSL），因为 `scripts/install-macos.sh` 说明 Pilot 目标是 macOS，目前没有 Windows Pilot；待出现真实 Windows 用户再升级到 ①/② |
-| 领域文案的 i18n 边界 | ✅ 方案②四批已落地（2026-09-02，4019905/ff5f664/caa3b07/6e1ee52）；artifact titles 待后续 | 决策卡、dry-run 计划、manual actions、baseline plan 的英文文案**已并行发稳定 key+params**，Studio 用 key 查 locale、miss 回退英文，MCP 桥零改动。四批覆盖非 artifact 全部 93 个模板：dryRun(4)、decisions(37)、baselinePlan(15)、manualActions(37)。全量 449 测试绿。**剩余**：artifact titles（87 id，title 随 productType 变化，需后端给 GeneratedArtifact 加 titleKey 后处理）。完整数据、字段形状、分批与风险见 [领域文案 i18n 边界决策依据](docs/i18n-domain-prose-decision.md)。 |
+| 领域文案的 i18n 边界 | ✅ 方案②五批全部落地（2026-09-02，4019905/ff5f664/caa3b07/6e1ee52/b22ec08） | 决策卡、dry-run 计划、manual actions、baseline plan、artifact titles 的英文文案**已全部并行发稳定 key+params**，Studio 用 key 查 locale、miss 回退英文，MCP 桥零改动。五批覆盖：dryRun(4)、decisions(37)、baselinePlan(15)、manualActions(37)、artifact titles(80 key，76 固定 + 2 可变×2 类型)。全量 530 测试绿。完整数据、字段形状、分批与风险见 [领域文案 i18n 边界决策依据](docs/i18n-domain-prose-decision.md)。 |
 
 ## 10. 交接完成定义
 
