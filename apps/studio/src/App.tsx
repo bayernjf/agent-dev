@@ -22,6 +22,7 @@ import type {
 import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
 import { agentCopyKeys } from './lib/agent-copy';
 import { adapterStatusOf, canProfileRunTasks, canRunSelectedAgent, canRunTasks, firstRunnableAgent } from './lib/agent-selectability';
+import { classifyRuntimeExecutorFailure, withoutProviderNamespace } from './lib/runtime-executor';
 import { PRODUCT_TYPE_LABEL_KEYS } from './lib/product-type';
 
 
@@ -50,6 +51,10 @@ export function App() {
   const [qualityGateResult, setQualityGateResult] = useState<QualityGateResult | null>(null);
   const [featureTask, setFeatureTask] = useState<FeatureTask | null>(null);
   const [runtimeRun, setRuntimeRun] = useState<RuntimeRun | null>(null);
+  // Bare id of the Agent the daemon refused to run the task with, or null. Kept apart from
+  // runtimeRun because a refusal means there is no run to show, and an empty panel on its own reads
+  // as "nothing approved yet".
+  const [refusedExecutorAgentId, setRefusedExecutorAgentId] = useState<string | null>(null);
   const [gitEvidence, setGitEvidence] = useState<GitEvidence | null>(null);
   const [acceptance, setAcceptance] = useState<AcceptanceRecord | null>(null);
   const [providerPlans, setProviderPlans] = useState<ProviderPlan[]>([]);
@@ -397,10 +402,20 @@ export function App() {
   const loadRuntimePlan = async (projectId: string) => {
     try {
       const response = await fetch(`/api/projects/${projectId}/runtime/plan`);
-      if (response.status === 409) { setRuntimeRun(null); return; }
+      if (response.status === 409) {
+        // Two facts share the 409: no approved run exists, and the executor this project names
+        // cannot run a task. The first one leaves the panel empty; the second is named out loud,
+        // because the daemon will no longer quietly hand the task to another Agent.
+        const rejection = await response.json().catch(() => ({})) as { code?: unknown; agentId?: unknown };
+        const failure = classifyRuntimeExecutorFailure(response.status, rejection);
+        setRuntimeRun(null);
+        setRefusedExecutorAgentId(failure.kind === 'agent-not-executable' ? failure.agentId : null);
+        return;
+      }
       if (!response.ok) throw new Error(t('errors.loadRuntimePlan'));
       const payload = await response.json() as { run: RuntimeRun | null };
       setRuntimeRun(payload.run);
+      setRefusedExecutorAgentId(null);
       if (payload.run) await loadGitEvidence(projectId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('errors.loadRuntimePlan'));
@@ -941,6 +956,9 @@ export function App() {
     setQualityGateResult(null);
     setFeatureTask(null);
     setRuntimeRun(null);
+    // A refusal belongs to the project that raised it. Carrying it into a blank form would tell the
+    // user an Agent cannot run a task that has not even been defined yet.
+    setRefusedExecutorAgentId(null);
     setGitEvidence(null);
     setAcceptance(null);
     setProviderPlans([]);
@@ -1259,16 +1277,31 @@ export function App() {
   // the record of who will actually be launched, so the name is resolved from it. A Profile id resolves
   // to the Profile's own name, because that is the thing the user picked; an id neither list knows is
   // shown as itself instead of quietly being reported as some other Agent.
-  const agentDisplayName = (agentId: string): string =>
-    profiles.find(candidate => candidate.id === agentId)?.name
-    ?? agents.find(candidate => candidate.id === agentId)?.name
-    ?? agentId;
+  // Catalog and Profile rows carry a bare id; an older run record may still carry the Blueprint's
+  // `local-` namespace. An id is looked up as written before that namespace is shed, because a Profile
+  // slug can begin with `local-` itself and its own name is then the answer.
+  const agentDisplayName = (agentId: string): string => {
+    const nameFor = (id: string) => profiles.find(candidate => candidate.id === id)?.name
+      ?? agents.find(candidate => candidate.id === id)?.name
+      ?? null;
+    return nameFor(agentId) ?? nameFor(withoutProviderNamespace(agentId)) ?? withoutProviderNamespace(agentId);
+  };
 
   // The daemon rejects a non-verified executor with a 409 whose explanation is backend prose, so the
   // refusal is surfaced here instead: the button stays inert and the reason is in the current language.
   // An empty selection is not a blocked one - the request then leaves the executor to the Blueprint.
   const selectionCanRun = canRunSelectedAgent(selectedAgentId, agents, profiles);
   const selectionBlocked = selectedAgentId !== null && !selectionCanRun;
+  // With no selection the request inherits the Blueprint provider, which is the executor the plan
+  // route just refused. Saying so before the click keeps Prepare from firing a request that can only
+  // come back as the same refusal.
+  const inheritedExecutorRefused = selectedAgentId === null && refusedExecutorAgentId !== null;
+  const prepareBlocked = selectionBlocked || inheritedExecutorRefused;
+  const prepareBlockedReason = selectionBlocked
+    ? t('agents.notExecutable')
+    : inheritedExecutorRefused
+      ? t('runtime.refusedAgent', { agent: agentDisplayName(refusedExecutorAgentId ?? '') })
+      : null;
 
   const prepareRuntime = async () => {
     if (!selected || !featureTask || featureTask.status !== 'approved' || preparingRuntime) return;
@@ -1278,9 +1311,17 @@ export function App() {
       const response = await fetch(`/api/projects/${selected.id}/runtime/run`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.PREPARE_RUNTIME_RUN, agentId: selectedAgentId }),
       });
-      const payload = await response.json() as { run?: RuntimeRun; error?: string };
-      if (!response.ok || !payload.run) throw new Error(payload.error ?? t('errors.prepareRuntime'));
+      const payload = await response.json() as { run?: RuntimeRun; error?: string; code?: unknown; agentId?: unknown };
+      if (!response.ok || !payload.run) {
+        const failure = classifyRuntimeExecutorFailure(response.status, payload);
+        if (failure.kind === 'agent-not-executable') {
+          setRefusedExecutorAgentId(failure.agentId);
+          throw new Error(t('runtime.refusedAgent', { agent: agentDisplayName(failure.agentId) }));
+        }
+        throw new Error(payload.error ?? t('errors.prepareRuntime'));
+      }
       setRuntimeRun(payload.run);
+      setRefusedExecutorAgentId(null);
       await loadGitEvidence(selected.id);
       setError('');
     } catch (cause) {
@@ -2077,7 +2118,7 @@ export function App() {
 
             {view.kind === 'project' && view.tab === 'iteration' && <>
               {applyRun?.status === 'completed' && <div className="feature-task"><div className="feature-task-heading"><div><p className="eyebrow">{t('featureTask.eyebrow')}</p><h3>{featureTask ? featureTask.title : t('featureTask.defineNext')}</h3><p>{featureTask ? t('featureTask.taskIs', { status: t(`status.${featureTask.status}` as KeyPath) }) : t('featureTask.createTaskDescription')}</p></div>{featureTask && <span className={`baseline-tag ${featureTask.status === 'approved' ? 'approved' : 'ready'}`}>{t(`status.${featureTask.status}` as KeyPath)}</span>}</div>{!featureTask ? <div className="feature-task-form"><label htmlFor="feature-title">{t('featureTask.title')} <small>{t('featureTask.titleHint')}</small></label><input id="feature-title" value={featureTitle} onChange={event => setFeatureTitle(event.target.value)} placeholder={t('featureTask.titlePlaceholder')} maxLength={120} /><label htmlFor="feature-objective">{t('featureTask.objective')} <small>{t('featureTask.objectiveHint')}</small></label><textarea id="feature-objective" value={featureObjective} onChange={event => setFeatureObjective(event.target.value)} placeholder={t('featureTask.objectivePlaceholder')} maxLength={2000} /><label htmlFor="feature-criteria">{t('featureTask.acceptanceCriteria')} <small>{t('featureTask.criteriaHint')}</small></label><textarea id="feature-criteria" value={featureCriteria} onChange={event => setFeatureCriteria(event.target.value)} placeholder={t('featureTask.criteriaPlaceholder')} maxLength={4000} /><button className="primary-button" type="button" onClick={() => void createFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? t('featureTask.creating') : t('featureTask.createTask')}<ArrowRight size={15} aria-hidden="true" /></button></div> : <div className="feature-task-detail"><p>{featureTask.objective}</p><ol>{featureTask.acceptanceCriteria.map(criterion => <li key={criterion}>{criterion}</li>)}</ol>{featureTask.pipeline && <div className="pipeline-section"><div className="pipeline-heading"><div><p className="eyebrow">{t('pipeline.eyebrow')}</p><h4>{t(featureTask.pipeline.steps.length === 1 ? 'pipeline.stepCountOne' : 'pipeline.stepCountMany', { count: featureTask.pipeline.steps.length, status: t(`pipeline.status.${featureTask.pipeline.status}` as KeyPath) })}</h4></div>{featureTask.status === 'draft' && <button className="secondary-button" type="button" onClick={() => editingPipeline ? setEditingPipeline(false) : startEditPipeline()}>{editingPipeline ? t('common.cancel') : t('pipeline.edit')}</button>}</div>{editingPipeline ? <div className="pipeline-editor">{pipelineDraft.map((step, i) => <div key={step.id} className="pipeline-edit-step"><div className="pipeline-edit-header"><strong>{t('pipeline.stepNumber', { number: i + 1 })}</strong>{pipelineDraft.length > 1 && <button className="icon-button" type="button" onClick={() => removePipelineStep(step.id)} title={t('pipeline.removeStep')}>×</button>}</div><label>{t('pipeline.name')}<input value={step.name} onChange={e => updatePipelineStep(step.id, 'name', e.target.value)} placeholder={t('pipeline.namePlaceholder')} maxLength={120} /></label><label>{t('pipeline.profile')}<select value={step.profileId} onChange={e => updatePipelineStep(step.id, 'profileId', e.target.value)}><option value="">{t('pipeline.profileSelect')}</option>{profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>{t('pipeline.prompt')}<textarea value={step.prompt} onChange={e => updatePipelineStep(step.id, 'prompt', e.target.value)} placeholder={t('pipeline.promptPlaceholder')} maxLength={4000} rows={3} /></label></div>)}<button className="secondary-button" type="button" onClick={addPipelineStep}>{t('pipeline.addStep')}</button><button className="primary-button" type="button" onClick={() => void savePipeline()} disabled={savingPipeline}>{t(savingPipeline ? 'pipeline.saving' : 'pipeline.save')}</button></div> : <ol className="pipeline-steps">{featureTask.pipeline.steps.map((step, i) => { const result = featureTask.pipeline!.results.find(r => r.stepId === step.id); const status = result?.status ?? 'pending'; return <li key={step.id}><span className={`step-dot ${status}`} aria-hidden="true" /> <strong>{i + 1}. {step.name}</strong> <em>({profiles.find(candidate => candidate.id === step.profileId)?.name ?? step.profileId})</em> <span className="pipeline-step-status">{t(`stepStatus.${status}` as KeyPath)}</span>{result?.error && <small className="pipeline-error">{result.error}</small>}</li>; })}</ol>}{!editingPipeline && featureTask.status === 'approved' && (featureTask.pipeline.status === 'idle' || featureTask.pipeline.status === 'failed' || featureTask.pipeline.status === 'paused') && <button className="primary-button" type="button" onClick={() => void executePipeline()} disabled={savingFeatureTask}>{savingFeatureTask ? t('pipeline.executing') : featureTask.pipeline.status === 'paused' ? t('pipeline.resume') : t('pipeline.execute')}<ArrowRight size={15} aria-hidden="true" /></button>}</div>}{featureTask.status === 'draft' ? <>{approverField('feature-approver', t('featureTask.whoApproves'))}<button className="primary-button" type="button" onClick={() => void approveFeatureTask()} disabled={savingFeatureTask}>{savingFeatureTask ? t('featureTask.approving') : t('featureTask.approveForAgent')}<ShieldCheck size={15} aria-hidden="true" /></button></> : <small>{t('featureTask.approvedBy', { approvedBy: featureTask.approvedBy ?? '', date: featureTask.approvedAt ? formatDate(featureTask.approvedAt, locale) : '' })}</small>}</div>}</div>}
-              {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">{t('runtime.eyebrow')}{runtimeRun ? ` · ${agentDisplayName(runtimeRun.agentId)}` : selectedAgentId ? ` · ${agentDisplayName(selectedAgentId)}` : ''}</p><h3>{runtimeRun ? t('runtime.status', { mode: t(runtimeRun.plan.mode === 'execute' ? 'runtime.runMode.execute' : 'runtime.runMode.dryRun'), status: t(`runStatus.${runtimeRun.status}` as KeyPath) }) : t('runtime.runtimeNotPrepared')}</h3><p>{runtimeRun?.status === 'completed' ? t('runtime.completed', { agent: agentDisplayName(runtimeRun.agentId) }) : runtimeRun?.status === 'failed' ? t('runtime.failed', { agent: agentDisplayName(runtimeRun.agentId), attempts: runtimeRun.attempts }) : runtimeRun?.status === 'running' ? t('runtime.running', { agent: agentDisplayName(runtimeRun.agentId) }) : runtimeRun ? t('runtime.planned', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.prepareDescription')}</p></div>{runtimeRun?.status === 'planned' ? <div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.cancelling') : t('runtime.cancelDryRun')}<RefreshCw size={15} aria-hidden="true" /></button><button className="primary-button" type="button" onClick={() => void executeRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.runningAgent', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.runAgent', { agent: agentDisplayName(runtimeRun.agentId) })}<ArrowRight size={15} aria-hidden="true" /></button></div> : runtimeRun?.status === 'failed' ? <button className="primary-button" type="button" onClick={() => void retryRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.retryingAgent', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.retryAgent', { agent: agentDisplayName(runtimeRun.agentId) })}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <><button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime || selectionBlocked}>{preparingRuntime ? t('runtime.preparing') : t('runtime.prepare')}<ArrowRight size={15} aria-hidden="true" /></button>{selectionBlocked && <p className="agent-reason">{t('agents.notExecutable')}</p>}</>}</div>{gitEvidence && <div className="git-evidence"><span>{t('runtime.gitBranch')} <strong>{gitEvidence.branch}</strong></span><span>{t('runtime.gitHead')} <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>{t('runtime.gitWorkingTree')} <strong>{gitEvidence.status || t('runtime.gitClean')}</strong></span><span>{t('runtime.gitDiff')} <strong>{gitEvidence.diffStat || t('runtime.gitNoChanges')}</strong></span></div>}{runtimeRun?.result?.output && <pre className="provider-report">{runtimeRun.result.output}</pre>}{runtimeRun?.history.length ? <div className="runtime-history"><small>{runtimeRun.history.length} {runtimeRun.history.length === 1 ? t('runtime.attemptRecorded') : t('runtime.attemptsRecorded')}</small></div> : null}</div>}
+              {featureTask?.status === 'approved' && <div className="runtime-panel"><div className="runtime-heading"><div><p className="eyebrow">{t('runtime.eyebrow')}{runtimeRun ? ` · ${agentDisplayName(runtimeRun.agentId)}` : selectedAgentId ? ` · ${agentDisplayName(selectedAgentId)}` : ''}</p><h3>{runtimeRun ? t('runtime.status', { mode: t(runtimeRun.plan.mode === 'execute' ? 'runtime.runMode.execute' : 'runtime.runMode.dryRun'), status: t(`runStatus.${runtimeRun.status}` as KeyPath) }) : t('runtime.runtimeNotPrepared')}</h3><p>{runtimeRun?.status === 'completed' ? t('runtime.completed', { agent: agentDisplayName(runtimeRun.agentId) }) : runtimeRun?.status === 'failed' ? t('runtime.failed', { agent: agentDisplayName(runtimeRun.agentId), attempts: runtimeRun.attempts }) : runtimeRun?.status === 'running' ? t('runtime.running', { agent: agentDisplayName(runtimeRun.agentId) }) : runtimeRun ? t('runtime.planned', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.prepareDescription')}</p></div>{runtimeRun?.status === 'planned' ? <div className="provider-actions"><button className="secondary-button" type="button" onClick={() => void cancelRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.cancelling') : t('runtime.cancelDryRun')}<RefreshCw size={15} aria-hidden="true" /></button><button className="primary-button" type="button" onClick={() => void executeRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.runningAgent', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.runAgent', { agent: agentDisplayName(runtimeRun.agentId) })}<ArrowRight size={15} aria-hidden="true" /></button></div> : runtimeRun?.status === 'failed' ? <button className="primary-button" type="button" onClick={() => void retryRuntime()} disabled={preparingRuntime}>{preparingRuntime ? t('runtime.retryingAgent', { agent: agentDisplayName(runtimeRun.agentId) }) : t('runtime.retryAgent', { agent: agentDisplayName(runtimeRun.agentId) })}<RefreshCw size={15} aria-hidden="true" /></button> : !runtimeRun && <><button className="secondary-button" type="button" onClick={() => void prepareRuntime()} disabled={preparingRuntime || prepareBlocked}>{preparingRuntime ? t('runtime.preparing') : t('runtime.prepare')}<ArrowRight size={15} aria-hidden="true" /></button>{prepareBlockedReason && <p className="agent-reason">{prepareBlockedReason}</p>}</>}</div>{gitEvidence && <div className="git-evidence"><span>{t('runtime.gitBranch')} <strong>{gitEvidence.branch}</strong></span><span>{t('runtime.gitHead')} <strong>{gitEvidence.head.slice(0, 10)}</strong></span><span>{t('runtime.gitWorkingTree')} <strong>{gitEvidence.status || t('runtime.gitClean')}</strong></span><span>{t('runtime.gitDiff')} <strong>{gitEvidence.diffStat || t('runtime.gitNoChanges')}</strong></span></div>}{runtimeRun?.result?.output && <pre className="provider-report">{runtimeRun.result.output}</pre>}{runtimeRun?.history.length ? <div className="runtime-history"><small>{runtimeRun.history.length} {runtimeRun.history.length === 1 ? t('runtime.attemptRecorded') : t('runtime.attemptsRecorded')}</small></div> : null}</div>}
               {featureTask?.status === 'approved' && runtimeRun && <div className={`acceptance-panel ${acceptance?.status ?? 'pending'}`}><div className="runtime-heading"><div><p className="eyebrow">{t('acceptance.eyebrow')}</p><h3>{acceptance ? t('acceptance.acceptanceStatus', { status: t(`acceptanceStatus.${acceptance.status}` as KeyPath) }) : t('acceptance.submitTitle')}</h3><p>{acceptance?.status === 'blocked' ? t('acceptance.blocked', { status: t(`qualityStatus.${acceptance.qualityStatus}` as KeyPath) }) : t('acceptance.confirmCriteria')}</p></div>{acceptance?.status === 'ready' && <div className="acceptance-approval">{approverField('acceptance-approver', t('acceptance.whoAccepts'))}<button className="secondary-button" type="button" onClick={() => void approveDelivery()} disabled={submittingAcceptance}>{submittingAcceptance ? t('acceptance.approving') : t('acceptance.approveDelivery')}<ShieldCheck size={15} aria-hidden="true" /></button></div>}</div>{acceptance?.status !== 'approved' && <div className="acceptance-form"><label htmlFor="acceptance-summary">{t('acceptance.summary')} <small>{t('acceptance.summaryHint')}</small></label><textarea id="acceptance-summary" value={acceptanceSummary} onChange={event => setAcceptanceSummary(event.target.value)} placeholder={t('acceptance.summaryPlaceholder')} maxLength={2000} /><label className="check-row"><input type="checkbox" checked={criteriaConfirmed} onChange={event => setCriteriaConfirmed(event.target.checked)} /> {t('acceptance.reviewedCriteria')}</label><button className="primary-button" type="button" onClick={() => void submitAcceptance()} disabled={submittingAcceptance}>{submittingAcceptance ? t('acceptance.submitting') : t('acceptance.submitEvidence')}<ArrowRight size={15} aria-hidden="true" /></button></div>}</div>}
               {applyRun?.status !== 'completed' && <p className="empty-state">{t('featureTask.waitingForApply')}</p>}
             </>}

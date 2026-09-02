@@ -97,7 +97,7 @@ describe('every surface that presents an Agent asks the shared question', () => 
     { where: 'Blueprint Agent radio', evidence: 'const runnable = canRunTasks(agent);' },
     { where: 'Blueprint Profile radio', evidence: 'const runnable = canProfileRunTasks(profile, agents);' },
     { where: 'Profile row selection', evidence: 'onClick={() => { if (runnable) setSelectedAgentId(profile.id); }}' },
-    { where: 'Runtime prepare gate', evidence: 'disabled={preparingRuntime || selectionBlocked}' },
+    { where: 'Runtime prepare gate', evidence: 'disabled={preparingRuntime || prepareBlocked}' },
   ];
 
   for (const site of SITES) {

@@ -764,6 +764,9 @@ export const zh = {
     running: '{agent} 正在已批准的工作区中工作。',
     planned: '尚未启动 {agent} 进程。请在显式启动执行前查看本地计划。',
     prepareDescription: '根据已批准的任务准备受保护的 Runtime 计划。',
+    // daemon 现在会直接拒绝让无法解析的 Agent 跑任务，而不是悄悄换成 Codex。只有把被拒的 Agent 名字和
+    // 「没有改用其他 Agent」一起说出来，面板才分得清“被拒绝”和“这个项目还没有批准的任务”。
+    refusedAgent: '{agent} 无法执行该任务，系统也不会改用其他 Agent。请先选择一个已验证的 Agent 再准备。',
     prepare: '准备 Runtime',
     preparing: '准备中...',
     cancelling: '正在取消...',
