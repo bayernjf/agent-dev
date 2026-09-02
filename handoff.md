@@ -11,6 +11,7 @@
   - **`mode` 一律保持 `manual`**：GitHub 授权仍然是人的动作，「没有云资源」不等于「没有闸门」——放掉这道门会让一份基线在零授权的情况下被批准。`CLOUD_PROVIDER_LABELS` 用 `satisfies Record<Exclude<BaselineProviderId, 'github'>, string>` 钉住：第五家 provider 不声明自己对用户叫什么，就编译不过。
   - **同一条假陈述在界面上还有第二处，一并修掉**：Blueprint 表单里那句 `blueprint.baselineNote`（`固定基线使用 React/Vite、Hono、Supabase、Cloudflare Pages 和 Vercel Functions`）就渲染在**用户挑产品类型的正下方**，对六种类型说着同一句话。拆成两个 key——`baselineNoteCloud`（插值 `{providers}`）与 `baselineNoteRepositoryOnly`——派生逻辑进 `apps/studio/src/lib/baseline-note.ts`（沿用 `lib/product-type.ts` 的显式表形状）。云 provider 名是专有名词、两种语言写法相同，所以只有**清单**在代码里拼，句子留在 locale 表里，`zh satisfies Translations` 与 key 解析测试才看得见它。§9 那条 i18n 边界**仍未拍板**，所以两张卡下发的照旧是后端英文串，`packages/blueprint` 的文案结构一行未动。
   - **证据（刻意不断言字符串，断言的是「卡片与文档说同一件事」）**：blueprint 新增 1 例，遍历 7 种类型/shell 组合，从 `createDryRunPlan(...).artifacts` 取出 `generated/PRODUCT_STANDARD.md`，用正则取回它自己写的 `- Frontend:` / `- Backend:` 两行，断言 stack 卡的值与之逐字相同；再对 supabase/vercel/cloudflare 逐家断言「卡片提到 ⟺ 该类型的 providers 里有它」，并断言每种类型的 `mode` 都是 `manual`。Studio 新增 `baseline-note.test.ts` 4 例：六种类型各自落到哪个 key、providers 串是什么；两个 key 在**两种** locale 都解析出真文案；每种 locale 的文案里 `{占位符}` 集合必须等于 `note.params` 的键集合（`t()` 对不认识的占位符原样印出，某一语言多写或漏写 `{providers}` 会把它直接印给用户，而别处不会红）；repository-only 那句不许含 `{providers}`、必须点名 GitHub（两句都是通顺的话，把 key 换过来在别处是隐形的）。渲染点接线用剔除注释后的源码证据钉住（`baselineNoteFor(answers.productType)` 与 `t(baselineNote.key, baselineNote.params)`）。
+  - **这套断言自己也被种植验过（2026-09-02 补做，规则已沉淀到 [i18n 文档 §6.2](docs/studio-i18n-design.md)）**：① 删掉 `en.ts` 里 `baselineNoteCloud` 的 `{providers}` → 两条用例红，且都点名 `en / blueprint.baselineNoteCloud`；② 在 `baselineNoteFor` 里交换两个候选 key → 「六种类型各自落到哪个 key」与「占位集合等于 params 键集合」两条红，而「两句语义不重叠」**仍然绿**——它只读字典本身，结构上看不见交换，所以那张逐个类型的期望表不是冗余。两处种植均已逐字节回滚（`git status` 干净），Studio 12 files / 81 例、全仓 34 files / 351 例恢复全绿。
   - **记下来而不是顺手改掉的一处不精确**：`PRODUCT_TYPE_DESCRIPTORS.desktop.frontend` 不随 `desktopShell` 变，所以 tauri 与 electron 两种 Blueprint 的 stack 卡都印「Tauri v2 by default, Electron in professional mode」——`PRODUCT_STANDARD.md` 里是同一句同样的不精确。本轮取「卡片与文档一致」，没有去改生成物的措辞。
   - **本轮没有浏览器复验，原因说清楚**：Blueprint 表单不在首屏初始渲染里（要点「New Blueprint」才出现），`renderToString` 的 smoke 套件够不到那句话——我先写了一例断言初始渲染含插值后的注记，实测变红（HTML 里根本没有这张表单），随即删掉，没有为了让它绿而放宽断言；本仓库也没有 DOM 测试环境（jsdom/happy-dom 属需用户拍板的新增依赖）。所以「切换产品类型时那句话跟着变」这一步**只在派生函数与源码证据层面成立，没在真浏览器里看过**。
   - **验证**：全仓 `npx vitest run` **34 files / 351 例全绿**（起点 346：blueprint +1、Studio +4）；`npm run typecheck` 全部 workspace 0 错；Studio `vite build` 干净（440.86 kB / gzip 124.48 kB）。
@@ -376,7 +377,7 @@ API 与页面不能无约束并发部署。两个部署和联合验证都成功�
 10. [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)
 11. [通用开发 SOP](ai-agent-development-sop.md)
 12. [Agent Runtime Catalog](docs/agent-runtime-catalog.md)
-13. [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目与模板引擎暴露的 23 个缺陷、架构规则、免费模型选型、环境前提与遗留资源
+13. [真实链路经验沉淀](docs/real-world-lessons.md)：四个真实项目、界面走查与模板引擎暴露的 31 个缺陷、11 条架构规则、免费模型选型、环境前提与遗留资源
 14. [安全与质量审计（2026-08-31）](docs/audit-2026-08-31.md)：全仓审计发现（含 4 条高危安全缺口）与五批整改方案
 
 市场判断和长期范围见 [市场分析](docs/market-analysis.md) 与 [路线图](docs/roadmap.md)。现有项目事实依据见 [项目组合复盘](portfolio-development-review.md)。
