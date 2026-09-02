@@ -107,13 +107,19 @@ function detect(command: string): DetectionResult {
     ...probeSpawnOptions,
   });
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
+  // A probe that never answered must not produce an answer. Two real Agents on this machine fail
+  // this way: one refuses to start under the ambient Node and prints its version requirement as the
+  // first line, another dies in a bundled stack trace. Taking the first line unconditionally put
+  // those sentences in the field Studio labels as the version, so the panel stated a version number
+  // the probe never obtained while its own detail line said the probe failed.
+  const probeAnswered = !result.error && result.status === 0;
   const detected = {
     // PATH presence is discovery; a failing version probe must not hide an installed Agent.
     detected: true,
     // Windows CLIs end their first line with CRLF; splitting on \n alone left a stray \r in the
     // version Studio displays.
-    version: output ? output.split(/\r?\n/)[0] : null,
-    detail: !result.error && result.status === 0
+    version: probeAnswered && output ? output.split(/\r?\n/)[0] : null,
+    detail: probeAnswered
       ? 'Detected on local PATH.'
       : 'Command found on local PATH; version probe failed.',
   };

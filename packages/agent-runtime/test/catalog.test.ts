@@ -48,6 +48,35 @@ describe('agent runtime catalog', () => {
     expect(agents.at(-1)).toMatchObject({ detected: true, name: 'Shell Fixture' });
   });
 
+  // Two of the eight built-ins on this machine fail this exact way - one refuses to start under the
+  // ambient Node and prints its version requirement as the first line, another dies inside a bundled
+  // stack trace. Both used to appear in Studio with that sentence in place of a version number.
+  it('does not read an error line as a version number', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-catalog-error-'));
+    try {
+      await writeFile(
+        join(directory, 'agent-dev-error-first-line'),
+        '#!/bin/sh\necho "Example: Node.js >=22 is required (current: v20.20.2)." >&2\nexit 1\n',
+        'utf8',
+      );
+      await chmod(join(directory, 'agent-dev-error-first-line'), 0o755);
+      const originalPath = process.env.PATH;
+      process.env.PATH = directory;
+      try {
+        const agents = discoverAgentRuntimes([{ name: 'Error Agent', launchCommand: 'agent-dev-error-first-line' }]);
+        expect(agents.at(-1)?.detected).toBe(true);
+        if (process.platform !== 'win32') {
+          expect(agents.at(-1)?.version).toBeNull();
+          expect(agents.at(-1)?.detail).toBe('Command found on local PATH; version probe failed.');
+        }
+      } finally {
+        process.env.PATH = originalPath;
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   // Discovery used to shell out to `which`, which does not exist on Windows, and the version probe
   // used to spawn without a shell, which Node refuses to do for an npm .cmd shim (CVE-2024-27980).
   // Together those made a Windows machine report every npm-installed Agent as absent or broken, so
