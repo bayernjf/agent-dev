@@ -99,6 +99,8 @@ Structured output: Unknown
 
 同一天补上的是客户端那一半：Studio 也不代替用户挑执行者。加载 `/api/runtime/catalog` 只清除已经失效的选择（不在目录里且不是 Profile 才算失效），不写入任何新选择；Runtime 面板头部允许印出的名字只来自 `runtimeExecutorId()` 的一条链——已准备的运行记录、用户的显式选择、已批准 Blueprint 的 provider（去掉命名空间）。此前它会默认选中目录里第一个可运行的 Agent，于是一份指名 Claude Code 的项目在页面上写着 Codex，而 Prepare 真的发出了一次 Codex 运行。
 
+同日还拆开了目录行上的两个意图：过去点一行会同时跑只读能力探测**和**把该 Agent 写成执行者，于是「看了一眼」与「派了活」是同一个动作。现在行本身只负责选定执行者（`canRunTasks` 不过就 `disabled`，理由仍写在行内），探测移到行右侧的独立按钮——任何已装上的 CLI 都可以探测，探测完不改变任何选择。`agent-selectability.test.ts` 钉住两点：`probeAgent` 函数体内不得出现 `setSelectedAgentId`，且全文件只有一个控件在 click 时调用探测。
+
 此前 candidate 可以生成 dry-run 计划、只在执行阶段被 `buildAgentExecutionPlan` 拒——那次拒绝发生在用户已经看到计划之后，而计划里写着的是一条永远跑不起来的命令。更旧的行为更糟：解析不出来就回退 Codex，于是一份指名 Claude Code 的 Blueprint 会得到一份 Codex 的运行记录。409 同时被“还没有已批准任务”使用，所以两种事实必须靠 `code` 区分；Studio 侧因为浏览器不能 import 本包（顶层 `node:child_process`）镜像了同一个字面量，两边测试各自钉死该字符串。
 
 ## 4. 专业模式

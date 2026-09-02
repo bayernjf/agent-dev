@@ -390,6 +390,7 @@ export const zh = {
     detecting: '正在检测本地 Agents...',
     notFound: '未找到任何 Agents。',
     runningProbe: '正在运行只读能力探测...',
+    probeCapabilities: '运行一次只读能力探测',
     detected: '已检测',
     notDetected: '未找到',
     nonInteractiveYes: 'non-interactive: yes',
