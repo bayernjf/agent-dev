@@ -104,6 +104,22 @@ describe('decision locale key coverage', () => {
   }
 });
 
+describe('manualAction locale key coverage', () => {
+  const actionNames = ['github', 'supabase', 'cloudflare', 'vercel', 'privacyReview', 'analytics', 'custom'] as const;
+  const fields = ['title', 'reason', 'steps.0', 'steps.1', 'steps.2', 'verification'] as const;
+  const keys = actionNames.flatMap(name => fields.map(f => `manualAction.${name}.${f}`));
+
+  for (const key of keys) {
+    it(`resolves ${key} in both locales`, () => {
+      for (const [dict, name] of dictionaries) {
+        const value = resolveKey(dict, key);
+        expect(value, `${name} missing ${key}`).toBeDefined();
+        expect(value!.length).toBeGreaterThan(0);
+      }
+    });
+  }
+});
+
 describe('baseline locale key coverage', () => {
   const keys = [
     'baseline.summary.ready', 'baseline.summary.blocked',
