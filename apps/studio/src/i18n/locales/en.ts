@@ -732,6 +732,31 @@ export const en = {
       approved: 'Approved',
       awaiting: 'Awaiting approval',
     },
+    summary: {
+        ready: 'All ownership targets are selected. Resource creation still requires one explicit approval and has not started.',
+        blocked: '{count} ownership target(s) still required before a baseline can be approved.',
+      },
+      resource: {
+        github: {
+          title: 'GitHub repository',
+          missingReason: 'Choose the GitHub owner or organization that will own the repository.',
+        },
+        supabase: {
+          title: 'Supabase project',
+          missingReason: 'Choose the Supabase organization and later confirm region and plan.',
+        },
+        vercel: {
+          title: 'Vercel API project',
+          missingReason: 'Choose the Vercel team that will own the API project.',
+        },
+        cloudflare: {
+          title: 'Cloudflare Pages project',
+          missingReason: 'Choose the Cloudflare account that will own the Pages project.',
+        },
+        reason: {
+          hasOwner: 'After approval, Agent-Dev may create the {title} in {owner}.',
+        },
+      },
   },
   qualityGate: {
     eyebrow: 'Local quality gate',

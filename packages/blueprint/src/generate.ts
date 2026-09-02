@@ -37,9 +37,12 @@ export type DryRunPlan = {
 export type BaselinePlanResource = {
   id: 'github-repository' | 'supabase-project' | 'vercel-api' | 'cloudflare-pages';
   title: string;
+  titleKey?: string;
   owner: string | null;
   status: 'blocked' | 'requires-approval';
   reason: string;
+  reasonKey?: string;
+  reasonParams?: Record<string, string | number>;
 };
 
 export type BaselinePlan = {
@@ -47,6 +50,8 @@ export type BaselinePlan = {
   noExternalChanges: true;
   readyForApproval: boolean;
   summary: string;
+  summaryKey?: string;
+  summaryParams?: Record<string, string | number>;
   resources: BaselinePlanResource[];
 };
 
@@ -777,19 +782,22 @@ export function createBaselinePlan(blueprint: ProductBlueprint): BaselinePlan {
   // past it would have had three cloud projects created that the product never touches.
   const providers = baselineProvidersFor(blueprint.spec.product.type);
   const selections = ([
-    ['github', 'github-repository', 'GitHub repository', blueprint.spec.sourceControl.owner, 'Choose the GitHub owner or organization that will own the repository.'],
-    ['supabase', 'supabase-project', 'Supabase project', blueprint.spec.data.organization, 'Choose the Supabase organization and later confirm region and plan.'],
-    ['vercel', 'vercel-api', 'Vercel API project', blueprint.spec.deployment.api.team, 'Choose the Vercel team that will own the API project.'],
-    ['cloudflare', 'cloudflare-pages', 'Cloudflare Pages project', blueprint.spec.deployment.web.account, 'Choose the Cloudflare account that will own the Pages project.'],
-  ] as const).filter(([provider]) => providers.includes(provider));
-  const resources: BaselinePlanResource[] = selections.map(([, id, title, owner, missingReason]) => ({
+    { provider: 'github' as const, id: 'github-repository' as const, title: 'GitHub repository', titleKey: 'baseline.resource.github.title', owner: blueprint.spec.sourceControl.owner, missingReason: 'Choose the GitHub owner or organization that will own the repository.', missingReasonKey: 'baseline.resource.github.missingReason' },
+    { provider: 'supabase' as const, id: 'supabase-project' as const, title: 'Supabase project', titleKey: 'baseline.resource.supabase.title', owner: blueprint.spec.data.organization, missingReason: 'Choose the Supabase organization and later confirm region and plan.', missingReasonKey: 'baseline.resource.supabase.missingReason' },
+    { provider: 'vercel' as const, id: 'vercel-api' as const, title: 'Vercel API project', titleKey: 'baseline.resource.vercel.title', owner: blueprint.spec.deployment.api.team, missingReason: 'Choose the Vercel team that will own the API project.', missingReasonKey: 'baseline.resource.vercel.missingReason' },
+    { provider: 'cloudflare' as const, id: 'cloudflare-pages' as const, title: 'Cloudflare Pages project', titleKey: 'baseline.resource.cloudflare.title', owner: blueprint.spec.deployment.web.account, missingReason: 'Choose the Cloudflare account that will own the Pages project.', missingReasonKey: 'baseline.resource.cloudflare.missingReason' },
+  ]).filter(s => providers.includes(s.provider));
+  const resources: BaselinePlanResource[] = selections.map(({ id, title, titleKey, owner, missingReason, missingReasonKey }) => ({
     id,
     title,
+    titleKey,
     owner: owner || null,
     status: owner ? 'requires-approval' : 'blocked',
     reason: owner
       ? `After approval, Agent-Dev may create the ${title.toLowerCase()} in ${owner}.`
       : missingReason,
+    reasonKey: owner ? 'baseline.resource.reason.hasOwner' : missingReasonKey,
+    reasonParams: owner ? { title: title.toLowerCase(), owner } : undefined,
   }));
   const blocked = resources.filter(resource => resource.status === 'blocked');
   return {
@@ -799,6 +807,8 @@ export function createBaselinePlan(blueprint: ProductBlueprint): BaselinePlan {
     summary: blocked.length === 0
       ? 'All ownership targets are selected. Resource creation still requires one explicit approval and has not started.'
       : `${blocked.length} ownership target${blocked.length === 1 ? ' is' : 's are'} still required before a baseline can be approved.`,
+    summaryKey: blocked.length === 0 ? 'baseline.summary.ready' : 'baseline.summary.blocked',
+    summaryParams: blocked.length === 0 ? undefined : { count: blocked.length },
     resources,
   };
 }
