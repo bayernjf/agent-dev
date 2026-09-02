@@ -2,14 +2,60 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'n
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { defaultRunner } from './cli.js';
+import { getActiveBackend } from './secret-backend/registry.js';
+import { InfisicalBackend } from './secret-backend/infisical.js';
 
 export type Credentials = Record<string, string>;
 export type CredentialMeta = { version: 1; updatedAt: string; keys: string[] };
 
+/**
+ * Credential storage backend selector.
+ *
+ * - `local-file` (default): reads/writes ~/.agent-dev/credentials.txt directly — the
+ *   historical behaviour, byte-for-byte unchanged.
+ * - `infisical` (AGENT_DEV_SECRET_BACKEND=infisical): delegates to the InfisicalBackend
+ *   via the SecretBackend abstraction. Reads come from a process-local snapshot hydrated
+ *   by `refreshCredentialCache()` at daemon startup and re-hydrated after every write, so
+ *   the synchronous `providerCredentialEnv()` call sites (25+ across the provider adapters
+ *   and composers) keep working without each one becoming async. External secret changes
+ *   made directly in the Infisical console between refreshes are picked up on the next
+ *   refresh, not mid-process. There is no silent fallback to the local file: if the
+ *   backend is unavailable, refresh throws and the daemon fails to start with the reason.
+ */
+export type CredentialBackendType = 'local-file' | 'infisical';
+
+export function credentialBackendType(): CredentialBackendType {
+  return process.env.AGENT_DEV_SECRET_BACKEND === 'infisical' ? 'infisical' : 'local-file';
+}
+
+let backendCache: { credentials: Credentials; fetchedAt: string } | null = null;
+
 export function credentialsPath() { return process.env.AGENT_DEV_CREDENTIALS_PATH ?? join(homedir(), '.agent-dev', 'credentials.txt'); }
 function metaPath() { return `${credentialsPath()}.meta.json`; }
 
+/**
+ * Hydrate the credential snapshot from the configured backend. No-op for the default
+ * local-file backend. Throws with the backend's reason when Infisical is unreachable or
+ * misconfigured — callers (daemon startup) treat that as fatal instead of silently
+ * reading an empty credential set.
+ */
+export async function refreshCredentialCache(): Promise<void> {
+  if (credentialBackendType() !== 'infisical') return;
+  const backend = getActiveBackend();
+  const availability = await backend.isAvailable();
+  if (!availability.available) {
+    throw new Error(`Secret backend "infisical" is not available: ${availability.reason ?? 'unknown reason'}`);
+  }
+  backendCache = { credentials: await backend.getAll(), fetchedAt: new Date().toISOString() };
+}
+
 export function loadCredentials(): Credentials {
+  if (credentialBackendType() === 'infisical') {
+    if (!backendCache) {
+      throw new Error('Infisical credential backend is configured but not hydrated. Await refreshCredentialCache() before reading credentials.');
+    }
+    return { ...backendCache.credentials };
+  }
   const path = credentialsPath();
   if (!existsSync(path)) return {};
   const result: Credentials = {};
@@ -25,7 +71,24 @@ export function loadCredentials(): Credentials {
   return result;
 }
 
-export function saveCredentials(credentials: Credentials) {
+export async function saveCredentials(credentials: Credentials): Promise<void> {
+  if (credentialBackendType() === 'infisical') {
+    const backend = getActiveBackend();
+    const current = backendCache?.credentials ?? {};
+    // Diff against the snapshot: upsert changed keys, delete removed ones. Individual
+    // backend failures throw; the snapshot is only advanced once every write succeeded,
+    // so a mid-way failure leaves the cache reflecting what Infisical actually holds
+    // before the failed run — re-saving retries exactly the missing writes.
+    const next: Credentials = { ...credentials };
+    for (const [key, value] of Object.entries(credentials)) {
+      if (current[key] !== value) await backend.set(key, value);
+    }
+    for (const key of Object.keys(current)) {
+      if (!(key in credentials)) await backend.delete(key);
+    }
+    backendCache = { credentials: next, fetchedAt: new Date().toISOString() };
+    return;
+  }
   const path = credentialsPath();
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const lines = ['# Agent-Dev credentials. Never commit or share this file.', `# Updated: ${new Date().toISOString()}`, ''];
@@ -38,7 +101,33 @@ export function saveCredentials(credentials: Credentials) {
 }
 
 export function getCredentialMeta(): CredentialMeta {
+  if (credentialBackendType() === 'infisical') {
+    // Keys only, from the hydrated snapshot; the updatedAt is when the snapshot was taken.
+    return { version: 1, updatedAt: backendCache?.fetchedAt ?? '', keys: Object.keys(backendCache?.credentials ?? {}).sort() };
+  }
   try { return JSON.parse(readFileSync(metaPath(), 'utf8')) as CredentialMeta; } catch { return { version: 1, updatedAt: '', keys: Object.keys(loadCredentials()).sort() }; }
+}
+
+/** Read-only backend status for the daemon's /api/credentials/backend route. No secret material. */
+export async function getCredentialBackendInfo(): Promise<{
+  type: CredentialBackendType;
+  available: boolean;
+  reason?: string;
+  projectId?: string;
+  environment?: string;
+}> {
+  const type = credentialBackendType();
+  if (type === 'local-file') return { type, available: true };
+  const backend = getActiveBackend();
+  const availability = await backend.isAvailable();
+  const infisical = backend instanceof InfisicalBackend ? backend : null;
+  return {
+    type,
+    available: availability.available,
+    ...(availability.reason ? { reason: availability.reason } : {}),
+    ...(infisical?.projectId ? { projectId: infisical.projectId } : {}),
+    ...(infisical ? { environment: infisical.environment } : {}),
+  };
 }
 
 export function providerCredentialEnv() {

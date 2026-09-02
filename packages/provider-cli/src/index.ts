@@ -7,4 +7,5 @@ export { defaultRunner, runCliJson, type CommandRunner, type CliResult, type Cli
 export * from './credentials.js';
 export * from './project-resources.js';
 export { generateEnvFile } from './env-generator.js';
+export { registerBackend, type Secret, type SecretVersion } from './secret-backend/index.js';
 export { createBackend, getActiveBackend, getDefaultBackendConfig, type SecretBackend, type SecretBackendConfig, type SecretBackendType, LocalFileBackend, InfisicalBackend } from './secret-backend/registry.js';

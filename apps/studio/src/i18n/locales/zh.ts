@@ -1,3 +1,5 @@
+import type { NonInteractiveVerdict } from '../../lib/capability-verdict';
+import type { AgentCapabilityProbe } from '../../types';
 import type { Translations } from './en';
 
 export const zh = {
@@ -46,8 +48,12 @@ export const zh = {
     namePlaceholder: '例如：Jiang Feng',
     egAcme: '例如：acme',
     language: '语言',
+    switchToLight: '切换到浅色主题',
+    switchToDark: '切换到深色主题',
   },
   nav: {
+    // 读屏软件播报侧边栏区域时用的 landmark；里面的每一项本来就是 key。
+    studioNavigation: 'Studio 导航',
     projects: '项目',
     decisions: '决策',
     connections: '连接',
@@ -64,11 +70,18 @@ export const zh = {
     title: '项目',
     description: '每个 Blueprint 都是一次交付运行的持久真实来源。',
     newBlueprint: '新建 Blueprint',
+    exportBlueprint: '导出',
+    exportBlueprintTitle: '将当前 Blueprint 导出为 JSON',
+    importBlueprint: '导入',
+    importBlueprintTitle: '从 JSON 导入 Blueprint',
+    showDiff: '显示差异',
+    hideDiff: '隐藏差异',
+    showDiffTitle: '与上一个 Revision 对比',
     loading: '正在加载项目...',
     empty: '暂无任何项目。创建 Blueprint 以建立交付基线。',
     table: {
       project: '项目',
-      mode: '模式',
+      productType: '产品类型',
       deliveryState: '交付状态',
       updated: '更新时间',
     },
@@ -79,6 +92,17 @@ export const zh = {
       delivery: '交付',
       iteration: '迭代',
       release: '发布',
+    },
+    // 差异面板要展示数量，所以标签自带 {count}，不让 JSX 把数字粘在词上。
+    diff: {
+      eyebrow: 'Blueprint 差异',
+      title: '相对上一个 Revision 的变更',
+      loading: '正在加载差异...',
+      added: '新增（{count}）',
+      removed: '删除（{count}）',
+      modified: '修改（{count}）',
+      noChanges: '相对上一个 Revision 没有变更。',
+      unavailable: '暂无可用的差异。',
     },
   },
   projectState: {
@@ -106,6 +130,26 @@ export const zh = {
     skipped: '已跳过',
     queued: '排队中',
     cancelled: '已取消',
+  },
+  // 跟 en.ts 里的同名分组一对一对应；那里由 Record<...> 卡住枚举成员，新增状态时不会只补一半。
+  runStatus: {
+    planned: '已出计划',
+    queued: '排队中',
+    running: '执行中',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+  },
+  acceptanceStatus: {
+    blocked: '被阻塞',
+    ready: '待验收',
+    approved: '已验收',
+  },
+  qualityStatus: {
+    passed: '已通过',
+    failed: '失败',
+    // 和“失败”不同：根本没跑过，没有结果可看。
+    missing: '尚未运行',
   },
   blueprint: {
     title: 'Blueprint',
@@ -141,13 +185,20 @@ export const zh = {
     productTypeMobile: '移动端',
     productTypeApiTool: 'API 工具',
     runtime: '本地 Agent Runtime',
-    runtimeNote: '所选 Runtime 将在隔离工作区中实现功能任务。只能选择已检测到的 Agent；入门模式使用已验证的默认项。',
+    runtimeNote: '所选 Runtime 将在隔离工作区中实现功能任务。只有执行 Adapter 已验证的 Agent 才可被选中；入门模式使用已验证的默认项。',
     runtimeCatalogLoading: '正在检测可用的 Runtime...',
-    runtimeNoneDetected: '未检测到任何本地 Agent。请先安装一个（如 Codex、OpenCode、Claude）才能启用自定义选择。',
+    // 举例只给执行 Adapter 已验证的 Agent。这里点名 Claude Code 等于让用户去装一个装了也选不了的工具。
+    runtimeNoneDetected: '未检测到任何本地 Agent。请先安装一个执行 Adapter 已验证的 Agent（Codex、OpenCode、CodeBuddy、Hermes）才能启用自定义选择。',
     runtimeHowToInstall: '如何安装',
     runtimeRecommended: '推荐',
-    runtimeVerified: '已验证',
-    runtimeCandidate: '候选',
+    // 三态，与 daemon 随目录下发的 Adapter 状态对齐。“已检测到”只说明装了 CLI，
+    // 不等于执行契约被实测过；把“根本没有 Adapter”和“有 Adapter 但没跑过”都写成候选，
+    // 等于界面比注册表知道得少。
+    runtimeAdapter: {
+      verified: '已验证',
+      candidate: '候选',
+      unsupported: '无 Adapter',
+    } satisfies Record<AgentCapabilityProbe['adapterStatus'], string>,
     runtimeNotDetected: '未检测到',
     agentCodexDesc: 'OpenAI Codex CLI。快速、可靠，大多数任务的默认选择。支持非交互模式，适合自动化。',
     agentCodexInstall: 'npm install -g @openai/codex',
@@ -159,6 +210,7 @@ export const zh = {
     agentCodebuddyInstall: 'npm install -g @bytedance/codebuddy-cli',
     agentHermesDesc: 'Nous Research Hermes CLI。开源模型，指令遵循能力强。适合本地/离线使用。',
     agentHermesInstall: 'pip install hermes-agent',
+    agentOpenclawDesc: 'OpenClaw CLI。通过它的 agent 子命令跑一次本地嵌入式 agent turn。Adapter 仍为候选，执行契约验证前不能被选为执行者。',
     agentAiderDesc: 'Aider AI 结对编程。Git 原生，支持多种模型。适合增量修改。',
     agentAiderInstall: 'pip install aider-chat',
     agentPiDesc: '只读代码分析 Agent。不修改文件。适合代码审查和理解。',
@@ -168,9 +220,9 @@ export const zh = {
     resourceOwnership: '资源归属',
     ownershipNote: '这些名称会保存在下一个 Blueprint 修订版本中。Discovery 仅确认当前 CLI 身份；请自行选择最终目标。',
     githubOwner: 'GitHub Owner 或组织',
-    supabaseOrganization: 'Supabase Organization',
-    vercelTeam: 'Vercel Team',
-    cloudflareAccount: 'Cloudflare Account',
+    supabaseOrganization: 'Supabase organization',
+    vercelTeam: 'Vercel team',
+    cloudflareAccount: 'Cloudflare account',
     generate: '生成 Blueprint',
     revising: '正在修订 Blueprint',
     revise: '修订 Blueprint',
@@ -189,7 +241,8 @@ export const zh = {
     title: '交付决策',
     plan: '交付计划',
     baselineResources: '基线资源',
-    readyForApproval: '等待批准',
+    // 这里原本有一个 readyForApproval：没有任何组件渲染它，而且和 baseline.status.ready 是同一个闸门的
+    // 第二套措辞。test/approval-labels.test.ts 现在拒绝为屏幕上看不到的 key 钉文案。
     ownershipRequired: '需要确认归属',
     approved: '已批准',
     approvalNote: '这仅记录意图，不会创建远程资源或泄露机密。',
@@ -260,6 +313,9 @@ export const zh = {
   credentials: {
     title: '凭证',
     note: 'Token 仅保存在本机 {path} 中，不会上传到任何服务器。',
+    backendStatus: '密钥后端：{type}',
+    backendUnavailable: '密钥后端 {type} 不可用 — {reason}',
+    noteInfisical: 'Token 保存在本机配置的 Infisical 密钥后端中，不会写入本地凭证文件。',
     guideMode: '引导模式',
     skipGuide: '跳过引导',
     step: '第 {current} 步，共 {total} 步',
@@ -270,8 +326,13 @@ export const zh = {
     saveToLocal: '保存到本地',
     verifying: '验证中...',
     verifyCredentials: '验证凭证',
-    supabaseConfiguration: 'Supabase Configuration',
-    supabaseStep1: '访问 {link} 并创建新项目',
+    supabaseConfiguration: 'Supabase 配置',
+    // t() 只返回字符串，所以这句必须围绕它提到的链接开刀。两种语言都把链接放在同一位置；
+    // 不这样排的语言要重构整行，而不是调换这两个片段。此处原本把链接渲染了两遍：
+    // 一遍是 {link} 参数，一遍是后面的 <a>。
+    supabaseStep1Before: '访问 ',
+    supabaseStep1After: ' 并创建新项目',
+    supabaseDashboard: 'Supabase Dashboard',
     supabaseStep2: '等待项目完成初始化',
     supabaseStep3: '复制 Project URL 和 anon/public key',
     supabaseStep4: '在项目仪表板中进入 Settings > API',
@@ -325,18 +386,34 @@ export const zh = {
     saveAgent: '保存 Agent',
     builtIn: '内置',
     custom: '自定义',
-    eyebrow: 'Local Runtime',
+    eyebrow: 'Local runtime',
     formNote: '检测到的 Agent 可以在这里检查。只有经过验证的执行适配器才能运行任务。自定义 Agent 保存在 .agent-dev/agents.conf 中。',
     detecting: '正在检测本地 Agents...',
     notFound: '未找到任何 Agents。',
     runningProbe: '正在运行只读能力探测...',
+    probeCapabilities: '运行一次只读能力探测',
     detected: '已检测',
     notDetected: '未找到',
-    nonInteractiveYes: 'non-interactive: yes',
-    nonInteractiveUnknown: 'non-interactive: unknown',
-    workspaceWriteYes: 'workspace-write: yes',
-    workspaceWriteNo: 'workspace-write: no',
-    adapter: 'adapter: {status}',
+    // 探测只读帮助输出，从不真的跑一次，所以这里说的是“读到了什么”，不是“结论是什么”。
+    // `false` 底下是两种事实：找过 Adapter 用的参数而帮助输出里没有；以及本来就没有可找的
+    // （或帮助输出根本没回答）。以前两者都印成 unknown，等于对着“查过”说“没人查过”。
+    // 判定在 src/lib/capability-verdict.ts。旁边不再放 workspace-write chip：那个字段从来不是
+    // 测出来的，它抄的是上方目录行自己已经展示的声明。
+    nonInteractiveVerdict: {
+      listed: 'non-interactive: 帮助输出里列了',
+      absent: 'non-interactive: 帮助输出里没列',
+      inconclusive: 'non-interactive: 帮助输出答不了',
+    } satisfies Record<NonInteractiveVerdict, string>,
+    // 这个 chip 曾把裸枚举插进句子里，中文界面于是显示 “adapter: unsupported”。
+    // 取值域与 blueprint.runtimeAdapter 相同，只是按这个位置的说法重写；冒号跟同一行
+    // 未译的技术标记（non-interactive: …）保持一致。
+    adapterStatus: {
+      verified: 'adapter: 已验证',
+      candidate: 'adapter: 候选',
+      unsupported: 'adapter: 无',
+    } satisfies Record<AgentCapabilityProbe['adapterStatus'], string>,
+    // 装了 CLI 和能跑任务是两件事，被拒时要说清是哪一件不成立。
+    notExecutable: '该 Agent 没有已验证的执行 Adapter，不能在这里运行任务。',
     addCustomSummary: '添加自定义 Agent',
     namePlaceholder: '例如：My Custom Agent',
     commandPlaceholder: '例如：my-agent',
@@ -430,6 +507,14 @@ export const zh = {
     missingDependencies: '缺少依赖',
     cancelled: '已取消',
   },
+  // 这里只放该组件自己的界面文案。分类标题、解释和修复步骤来自 @agent-dev/agent-runtime，
+  // 是英文散文，和 Blueprint 文本属于同一个未决边界。
+  failureDisplay: {
+    autoRetryable: '可自动重试',
+    showRemediation: '展开修复步骤（{count}）',
+    hideRemediation: '收起修复步骤（{count}）',
+    rawError: '原始错误',
+  },
   errors: {
     daemonUnavailable: '本地 Daemon 不可用。',
     loadProjects: '无法加载项目。',
@@ -514,9 +599,11 @@ export const zh = {
     runApplySimulator: '运行本地 Apply Simulator？它只在 .agent-dev 目录内写入，不会进行外部更改。',
     runNpmInstall: '在隔离的 Agent-Dev 工作区中运行 npm install？这可能会访问 npm registry，且只写入该工作区。',
     deletePreviewProjects: '删除 Vercel 和 Cloudflare 上的 Preview 项目？',
-    prepareRuntimeDryRun: '准备受保护的 Runtime Dry-run？不会启动任何 Codex 进程，也不会更改任何文件。',
-    startCodex: '在已批准的工作区中启动 Codex？它只修改该工作区，不会部署或访问生产资源。',
-    retryCodex: '在同一个已批准的工作区中重试 Codex？之前失败的尝试将被保留。',
+    // Dry-run 什么也不跑，所以这道闸门不提执行者；原先的文案在承诺「不会启动 Codex 进程」，
+    // 那是用户没问的问题。
+    prepareRuntimeDryRun: '准备受保护的 Runtime Dry-run？不会执行任何操作，也不会更改任何文件。',
+    startAgent: '在已批准的工作区中启动 {agent}？它只修改该工作区，不会部署或访问生产资源。',
+    retryAgent: '在同一个已批准的工作区中重试 {agent}？之前失败的尝试将被保留。',
     approveTask: '以 {approvedBy} 的身份批准此任务及其验收标准以供 Agent 执行？',
     approveDeliveryEvidence: '以 {approvedBy} 的身份批准此交付证据？这不会部署生产资源。',
     runFakeProviderSimulation: '运行 Fake Provider 模拟？它只更改内存中的模拟状态，不会创建任何云资源。',
@@ -542,7 +629,9 @@ export const zh = {
     notSelected: '未选择',
     status: {
       approved: '已批准',
-      ready: '等待批准',
+      // “可批准”是闸门已经打开、等你批；“等待批准”是已交上去、在等别人。两者在审批门控上是相反的状态，
+      // 不能共用一份文案。
+      ready: '可批准',
       blocked: '需要确认归属',
     },
     resourceStatus: {
@@ -570,9 +659,9 @@ export const zh = {
     completedDescription: 'API: {apiUrl} · Pages: {pagesUrl}',
     failedDescription: '部署失败。请查看步骤并在需要时清理。',
     defaultDescription: '将 Vercel API 与 Cloudflare Pages 作为联合 Preview 部署，并配置精确的 CORS。',
-    branch: 'Preview Branch',
+    branch: 'Preview branch',
     branchPlaceholder: '例如：pr-42 或 feature-x',
-    branchValidation: 'Preview Branch 只能包含小写字母、数字和连字符。',
+    branchValidation: 'Preview branch 只能包含小写字母、数字和连字符。',
     deploying: '正在部署 Preview...',
     deploy: '部署 Preview',
     api: 'API:',
@@ -620,6 +709,7 @@ export const zh = {
   },
   featureTask: {
     eyebrow: '功能交付',
+    waitingForApply: '功能任务需要 Local Apply 创建的工作区。请先到「交付」标签运行 Local Apply，完成后回到这里定义功能任务。',
     defineNext: '定义下一个功能',
     taskIs: '任务状态为 {status}。验收标准是 Agent 的边界。',
     createTaskDescription: '在让 Agent 修改代码之前，创建一个聚焦的任务包。',
@@ -639,23 +729,65 @@ export const zh = {
     whoApproves: '谁批准此任务？',
     approvedBy: '由 {approvedBy} 批准 · {date}',
   },
+  pipeline: {
+    eyebrow: 'Pipeline',
+    stepCountOne: '{count} 步 · {status}',
+    stepCountMany: '{count} 步 · {status}',
+    edit: '编辑 Pipeline',
+    stepNumber: '第 {number} 步',
+    removeStep: '删除该步骤',
+    name: '步骤名称',
+    namePlaceholder: '步骤名称',
+    profile: 'Agent 配置',
+    profileSelect: '选择配置...',
+    prompt: '提示词',
+    promptPlaceholder: '这一步要做什么...',
+    addStep: '+ 添加步骤',
+    saving: '正在保存...',
+    save: '保存 Pipeline',
+    executing: '正在执行...',
+    execute: '执行 Pipeline',
+    resume: '继续 Pipeline',
+    status: {
+      idle: '未开始',
+      running: '执行中',
+      completed: '已完成',
+      failed: '失败',
+      paused: '已暂停',
+    },
+  },
   runtime: {
-    eyebrow: 'Agent Runtime',
+    // 这些标签在中文里不译，只是原样搬运；搬运就得逐字搬，大小写也算文案。
+    // 由 test/cross-locale-identity.test.ts 兜住，不再靠人记。
+    eyebrow: 'Agent runtime',
     runtimeNotPrepared: 'Runtime 未准备',
-    status: '{mode} {status}',
-    completed: 'Codex 已完成。请检查 diff 并在验收前运行 Quality Gate。',
-    failed: 'Codex 在第 {attempts} 次尝试时失败。请查看报告或重试。',
-    running: 'Codex 正在已批准的工作区中工作。',
-    planned: '尚未启动任何 Codex 进程。请在显式启动执行前查看本地计划。',
+    status: '{mode} · {status}',
+    // 这次运行是只出计划，还是允许写入已批准的工作区。
+    runMode: {
+      dryRun: 'Dry run',
+      execute: '正式执行',
+    },
+    // 和 en.ts 里的同名分组一一对应：凡是指名执行者的文案，名字一律由 {agent} 传入（取自 RuntimeRun.agentId）。
+    // 原来这些句子把 Codex 写死，目录已有四个 verified Agent，选了别的就是在说一次不存在的运行。
+    completed: '{agent} 已完成。请检查 diff 并在验收前运行 Quality Gate。',
+    failed: '{agent} 在第 {attempts} 次尝试时失败。请查看报告或重试。',
+    running: '{agent} 正在已批准的工作区中工作。',
+    planned: '尚未启动 {agent} 进程。请在显式启动执行前查看本地计划。',
     prepareDescription: '根据已批准的任务准备受保护的 Runtime 计划。',
+    // daemon 现在会直接拒绝让无法解析的 Agent 跑任务，而不是悄悄换成 Codex。只有把被拒的 Agent 名字和
+    // 「没有改用其他 Agent」一起说出来，面板才分得清“被拒绝”和“这个项目还没有批准的任务”。
+    refusedAgent: '{agent} 无法执行该任务，系统也不会改用其他 Agent。请先选择一个已验证的 Agent 再准备。',
+    // 第二种拒绝：上一个说的是执行契约从没被验证过，这一个说的是该 Agent 的命令行工具不在本机。
+    // 后者装一下就好，不能当成“这个 Agent 干不了活”来说。
+    agentNotDetected: '{agent} 没有安装在本机上，系统也不会改用其他 Agent。请先安装它的命令行工具，或改选一个已验证的 Agent 再准备。',
     prepare: '准备 Runtime',
     preparing: '准备中...',
     cancelling: '正在取消...',
     cancelDryRun: '取消 Dry-run',
-    runningCodex: '正在运行 Codex...',
-    runCodex: '运行 Codex',
-    retryingCodex: '正在重试 Codex...',
-    retryCodex: '重试 Codex',
+    runningAgent: '正在运行 {agent}...',
+    runAgent: '运行 {agent}',
+    retryingAgent: '正在重试 {agent}...',
+    retryAgent: '重试 {agent}',
     gitBranch: 'Branch',
     gitHead: 'HEAD',
     gitWorkingTree: '工作树',
@@ -664,8 +796,8 @@ export const zh = {
     gitNoChanges: '无变更',
     attemptRecorded: '次尝试已记录',
     attemptsRecorded: '次尝试已记录',
-    executionFailed: 'Codex 执行失败，退出码 {exitCode}。',
-    retryFailed: 'Codex 重试失败，退出码 {exitCode}。',
+    executionFailed: '{agent} 执行失败，退出码 {exitCode}。',
+    retryFailed: '{agent} 重试失败，退出码 {exitCode}。',
   },
   acceptance: {
     eyebrow: '人工验收',

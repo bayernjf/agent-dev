@@ -29,13 +29,18 @@ export type SecretVersion = {
 export type Secret = {
   key: string;
   value: string;
-  /** Current version number. */
-  version: number;
+  /**
+   * Current version number. Optional: backends that cannot observe versions (the Infisical
+   * CLI path) omit it instead of fabricating one (docs/credential-management.md 4.2 — fields
+   * the backend did not confirm must not be presented as verified facts).
+   */
+  version?: number;
   /** Current status. */
   status: SecretStatus;
-  createdAt: string;
-  updatedAt: string;
-  /** Full version history (newest first). */
+  /** Backend-reported timestamps; backends that cannot observe them omit them. */
+  createdAt?: string;
+  updatedAt?: string;
+  /** Full version history (newest first). Only for backends that expose real history. */
   history?: SecretVersion[];
   /** Optional metadata: environment, project, etc. */
   metadata?: Record<string, string>;
