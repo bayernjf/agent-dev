@@ -219,9 +219,9 @@ export const zh = {
     resourceOwnership: '资源归属',
     ownershipNote: '这些名称会保存在下一个 Blueprint 修订版本中。Discovery 仅确认当前 CLI 身份；请自行选择最终目标。',
     githubOwner: 'GitHub Owner 或组织',
-    supabaseOrganization: 'Supabase Organization',
-    vercelTeam: 'Vercel Team',
-    cloudflareAccount: 'Cloudflare Account',
+    supabaseOrganization: 'Supabase organization',
+    vercelTeam: 'Vercel team',
+    cloudflareAccount: 'Cloudflare account',
     generate: '生成 Blueprint',
     revising: '正在修订 Blueprint',
     revise: '修订 Blueprint',
@@ -385,7 +385,7 @@ export const zh = {
     saveAgent: '保存 Agent',
     builtIn: '内置',
     custom: '自定义',
-    eyebrow: 'Local Runtime',
+    eyebrow: 'Local runtime',
     formNote: '检测到的 Agent 可以在这里检查。只有经过验证的执行适配器才能运行任务。自定义 Agent 保存在 .agent-dev/agents.conf 中。',
     detecting: '正在检测本地 Agents...',
     notFound: '未找到任何 Agents。',
@@ -651,9 +651,9 @@ export const zh = {
     completedDescription: 'API: {apiUrl} · Pages: {pagesUrl}',
     failedDescription: '部署失败。请查看步骤并在需要时清理。',
     defaultDescription: '将 Vercel API 与 Cloudflare Pages 作为联合 Preview 部署，并配置精确的 CORS。',
-    branch: 'Preview Branch',
+    branch: 'Preview branch',
     branchPlaceholder: '例如：pr-42 或 feature-x',
-    branchValidation: 'Preview Branch 只能包含小写字母、数字和连字符。',
+    branchValidation: 'Preview branch 只能包含小写字母、数字和连字符。',
     deploying: '正在部署 Preview...',
     deploy: '部署 Preview',
     api: 'API:',
@@ -749,12 +749,14 @@ export const zh = {
     },
   },
   runtime: {
-    eyebrow: 'Agent Runtime',
+    // 这些标签在中文里不译，只是原样搬运；搬运就得逐字搬，大小写也算文案。
+    // 由 test/cross-locale-identity.test.ts 兜住，不再靠人记。
+    eyebrow: 'Agent runtime',
     runtimeNotPrepared: 'Runtime 未准备',
     status: '{mode} · {status}',
     // 这次运行是只出计划，还是允许写入已批准的工作区。
     runMode: {
-      dryRun: 'Dry-run',
+      dryRun: 'Dry run',
       execute: '正式执行',
     },
     // 和 en.ts 里的同名分组一一对应：凡是指名执行者的文案，名字一律由 {agent} 传入（取自 RuntimeRun.agentId）。
