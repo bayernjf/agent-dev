@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToString } from 'react-dom/server';
-import { I18nProvider } from '../src/i18n/i18n';
+import { I18nProvider, type KeyPath } from '../src/i18n/i18n';
 import { useDomainText } from '../src/lib/domain-text';
 import { dictionaries, resolveKey } from './key-resolution';
 
@@ -107,12 +107,107 @@ describe('decision locale key coverage', () => {
 describe('manualAction locale key coverage', () => {
   const actionNames = ['github', 'supabase', 'cloudflare', 'vercel', 'privacyReview', 'analytics', 'custom'] as const;
   const fields = ['title', 'reason', 'steps.0', 'steps.1', 'steps.2', 'verification'] as const;
-  const keys = actionNames.flatMap(name => fields.map(f => `manualAction.${name}.${f}`));
+  const keys = actionNames.flatMap(name => fields.map(f => `manualAction.${name}.${f}` as KeyPath));
 
   for (const key of keys) {
     it(`resolves ${key} in both locales`, () => {
       for (const [dict, name] of dictionaries) {
         const value = resolveKey(dict, key);
+        expect(value, `${name} missing ${key}`).toBeDefined();
+        expect(value!.length).toBeGreaterThan(0);
+      }
+    });
+  }
+});
+
+describe('artifact locale key coverage', () => {
+  const keys = [
+    'artifact.agent-instructions',
+    'artifact.delivery-handoff',
+    'artifact.delivery-workflow',
+    'artifact.desktop-build-rs',
+    'artifact.desktop-cargo-toml',
+    'artifact.desktop-gitignore',
+    'artifact.desktop-icon-script',
+    'artifact.desktop-index-html',
+    'artifact.desktop-lib-rs',
+    'artifact.desktop-main-rs',
+    'artifact.desktop-main-ts',
+    'artifact.desktop-package',
+    'artifact.desktop-quality-workflow',
+    'artifact.desktop-readme',
+    'artifact.desktop-styles',
+    'artifact.desktop-tauri-conf',
+    'artifact.desktop-tsconfig',
+    'artifact.desktop-vite-config',
+    'artifact.distribution-guide',
+    'artifact.environment-contract',
+    'artifact.ext-background-ts',
+    'artifact.ext-content-ts',
+    'artifact.ext-gitignore',
+    'artifact.ext-manifest-config',
+    'artifact.ext-options-html',
+    'artifact.ext-options-ts',
+    'artifact.ext-package',
+    'artifact.ext-popup-css',
+    'artifact.ext-popup-html',
+    'artifact.ext-popup-ts',
+    'artifact.ext-quality-workflow',
+    'artifact.ext-readme',
+    'artifact.ext-tsconfig',
+    'artifact.ext-vite-config',
+    'artifact.mcp-entry',
+    'artifact.mcp-eslint-config',
+    'artifact.mcp-gitignore',
+    'artifact.mcp-package',
+    'artifact.mcp-quality-workflow',
+    'artifact.mcp-readme',
+    'artifact.mcp-server',
+    'artifact.mcp-test',
+    'artifact.mcp-tsconfig',
+    'artifact.mcp-tsconfig-build',
+    'artifact.mcp-vitest-config',
+    'artifact.mobile-app-json',
+    'artifact.mobile-babel-config',
+    'artifact.mobile-eas-json',
+    'artifact.mobile-gitignore',
+    'artifact.mobile-home-screen',
+    'artifact.mobile-layout',
+    'artifact.mobile-package',
+    'artifact.mobile-quality-workflow',
+    'artifact.mobile-readme',
+    'artifact.mobile-tsconfig',
+    'artifact.product-standard',
+    'artifact.template-api-index',
+    'artifact.template-api-package',
+    'artifact.template-api-test',
+    'artifact.template-api-vercel',
+    'artifact.template-app-js',
+    'artifact.template-build-script',
+    'artifact.template-cloudflare',
+    'artifact.template-eslint-config',
+    'artifact.template-forms-gitignore',
+    'artifact.template-gitignore',
+    'artifact.template-index',
+    'artifact.template-quality-workflow',
+    'artifact.template-readme.landing-page',
+    'artifact.template-readme.web-app',
+    'artifact.template-root-package.landing-page',
+    'artifact.template-root-package.web-app',
+    'artifact.template-root-tsconfig',
+    'artifact.template-smoke-script',
+    'artifact.template-styles',
+    'artifact.template-vite-config',
+    'artifact.template-web-index',
+    'artifact.template-web-main',
+    'artifact.template-web-package',
+    'artifact.template-web-styles',
+  ] as const;
+
+  for (const key of keys) {
+    it(`resolves ${key} in both locales`, () => {
+      for (const [dict, name] of dictionaries) {
+        const value = resolveKey(dict, key as KeyPath);
         expect(value, `${name} missing ${key}`).toBeDefined();
         expect(value!.length).toBeGreaterThan(0);
       }

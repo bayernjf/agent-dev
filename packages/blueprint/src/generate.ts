@@ -6,6 +6,7 @@ import type { ProductBlueprint } from './index.js';
 export type GeneratedArtifact = {
   id: string;
   title: string;
+  titleKey?: string;
   path: string;
   content: string;
 };
@@ -773,20 +774,37 @@ function buildApiTool(blueprint: ProductBlueprint): GeneratedArtifact[] {
 }
 
 export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifact[] {
-  switch (blueprint.spec.product.type) {
+  const type = blueprint.spec.product.type;
+  let artifacts: GeneratedArtifact[];
+  switch (type) {
     case 'web-app':
-      return [...buildGovernanceArtifacts(blueprint), ...buildWebSaaS(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildWebSaaS(blueprint)];
+      break;
     case 'landing-page':
-      return [...buildGovernanceArtifacts(blueprint), ...buildLandingPage(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildLandingPage(blueprint)];
+      break;
     case 'browser-extension':
-      return [...buildGovernanceArtifacts(blueprint), ...buildBrowserExtension(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildBrowserExtension(blueprint)];
+      break;
     case 'desktop':
-      return [...buildGovernanceArtifacts(blueprint), ...buildDesktop(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildDesktop(blueprint)];
+      break;
     case 'mobile':
-      return [...buildGovernanceArtifacts(blueprint), ...buildMobile(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildMobile(blueprint)];
+      break;
     case 'api-tool':
-      return [...buildGovernanceArtifacts(blueprint), ...buildApiTool(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildApiTool(blueprint)];
+      break;
   }
+  // Two artifact ids carry a type-specific title (template-root-package, template-readme); every other
+  // id has the same title across all product types. The key encodes the type only when needed.
+  const variableTitleIds = new Set(['template-root-package', 'template-readme']);
+  for (const artifact of artifacts) {
+    artifact.titleKey = variableTitleIds.has(artifact.id)
+      ? `artifact.${artifact.id}.${type}`
+      : `artifact.${artifact.id}`;
+  }
+  return artifacts;
 }
 
 export function createDryRunPlan(blueprint: ProductBlueprint): DryRunPlan {
