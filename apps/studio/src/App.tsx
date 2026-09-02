@@ -1327,6 +1327,13 @@ export function App() {
           setRefusedExecutorAgentId(failure.agentId);
           throw new Error(t('runtime.refusedAgent', { agent: agentDisplayName(failure.agentId) }));
         }
+        // The other refusal is about this machine rather than about a contract: the Agent can run tasks,
+        // its CLI is simply not here right now. Calling that "cannot run this task" would be a lie in
+        // the other direction, and it needs no panel state - nothing about the project's executor
+        // changed, only what is installed changed under it.
+        if (failure.kind === 'agent-not-detected') {
+          throw new Error(t('runtime.agentNotDetected', { agent: agentDisplayName(failure.agentId) }));
+        }
         throw new Error(payload.error ?? t('errors.prepareRuntime'));
       }
       setRuntimeRun(payload.run);

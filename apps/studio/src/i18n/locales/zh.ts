@@ -777,6 +777,9 @@ export const zh = {
     // daemon 现在会直接拒绝让无法解析的 Agent 跑任务，而不是悄悄换成 Codex。只有把被拒的 Agent 名字和
     // 「没有改用其他 Agent」一起说出来，面板才分得清“被拒绝”和“这个项目还没有批准的任务”。
     refusedAgent: '{agent} 无法执行该任务，系统也不会改用其他 Agent。请先选择一个已验证的 Agent 再准备。',
+    // 第二种拒绝：上一个说的是执行契约从没被验证过，这一个说的是该 Agent 的命令行工具不在本机。
+    // 后者装一下就好，不能当成“这个 Agent 干不了活”来说。
+    agentNotDetected: '{agent} 没有安装在本机上，系统也不会改用其他 Agent。请先安装它的命令行工具，或改选一个已验证的 Agent 再准备。',
     prepare: '准备 Runtime',
     preparing: '准备中...',
     cancelling: '正在取消...',

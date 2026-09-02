@@ -11,7 +11,7 @@ import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
 import { CONFIRMATIONS, runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore, type ReleaseStep } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { AGENT_NOT_EXECUTABLE_CODE, buildAgentExecutionPlan, describeRuntimeExecutorRejection, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, resolveRuntimeExecutor, runDoctor, type CustomAgentInput, type AgentProfile, type RuntimeExecutor, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
+import { AGENT_NOT_DETECTED_CODE, AGENT_NOT_EXECUTABLE_CODE, buildAgentExecutionPlan, describeRuntimeExecutorRejection, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, resolveRuntimeExecutor, runDoctor, type CustomAgentInput, type AgentProfile, type RuntimeExecutor, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
 import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialBackendInfo, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
 import type { ReleaseSource } from '@agent-dev/deployment-composer';
 import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin, releaseIdempotencyKey, releaseStepPlan } from '@agent-dev/deployment-composer';
@@ -26,6 +26,15 @@ import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
 // two different facts, and Studio has to say which one it means in the interface language.
 function runtimeExecutorRejection(executor: RuntimeExecutor) {
   return { error: describeRuntimeExecutorRejection(executor), code: AGENT_NOT_EXECUTABLE_CODE, agentId: executor.agentId };
+}
+
+// "Can this Agent run a task?" is answered once, by resolveRuntimeExecutor, against the Adapter
+// registry. "Is its command actually on this machine?" is a separate fact that only this daemon can
+// answer, and it gets its own code so a caller never has to guess which of the two failed from one
+// sentence. An id that no registry knows at all never reaches here - the resolver already refuses it
+// as having no Adapter, which is the literal truth for a typo.
+function agentNotDetectedRejection(agentId: string) {
+  return { error: `Agent "${agentId}" is not detected on this machine's PATH.`, code: AGENT_NOT_DETECTED_CODE, agentId };
 }
 
 // `z.string().url()` accepts any scheme, including `ext::` (executes arbitrary commands when
@@ -156,6 +165,12 @@ export type DaemonDependencies = {
   resolveGitHubWebhookSecret?: () => string | undefined;
   cleanupPreview?: (options: { vercelProject?: string; cloudflareProject?: string; workspacePath: string }) => Promise<CleanupResult>;
   deployRelease?: (options: { workspacePath: string; projectName: string; source: ReleaseSource }) => Promise<ReleaseResult>;
+  /**
+   * "Is this Agent's CLI installed here?" - the catalog's `detected` fact, asked of a resolved bare
+   * Agent id. Injectable because the honest answer depends on the machine running the daemon, and a
+   * refusal that depends on the machine has to be testable without uninstalling an Agent.
+   */
+  isAgentDetected?: (agentId: string) => boolean;
 };
 
 const githubPullRequestWebhookSchema = z.object({
@@ -228,6 +243,10 @@ export type DaemonAppOptions = {
 export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBus(), dependencies: DaemonDependencies = {}, dataDirectory?: string, options: DaemonAppOptions = {}) {
   const app = new Hono();
   const customAgents: CustomAgentInput[] = dataDirectory ? loadCustomAgents(dataDirectory) : [];
+  // The catalog only carries what was found on PATH, so asking it is how the route learns the
+  // machine-local fact. `detect()` caches per command, so repeat requests do not re-spawn.
+  const isAgentDetected = dependencies.isAgentDetected
+    ?? ((agentId: string) => discoverAgentRuntimes(customAgents).some(agent => agent.id === agentId));
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
   // Registered before all routes so nothing slips past the check.
@@ -723,7 +742,11 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     );
     if (!resolved.ok) return context.json(runtimeExecutorRejection(resolved), 409);
     const plan = buildAgentExecutionPlan(task, task.workspacePath, resolved.agentId, { profile: resolved.profile });
-    return context.json({ probe: probeCodexRuntime(), plan, run });
+    // No `probe` field here any more. It carried `probeCodexRuntime()` - a health report about Codex -
+    // on a response whose `plan` and `run` are about whichever Agent the resolver named, so a Claude
+    // Code plan arrived stamped with someone else's verdict. The route that answers about Codex is
+    // GET /api/runtime/probe; this one has nothing to say about it.
+    return context.json({ plan, run });
   });
 
   app.post('/api/projects/:projectId/runtime/run', async context => {
@@ -732,31 +755,24 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const parsed = runtimePrepareSchema.safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: 'Runtime preparation requires confirmation PREPARE_RUNTIME_RUN.' }, 400);
     const body = parsed.data;
-    if (body.agentId) {
-      const catalog = discoverAgentRuntimes(customAgents);
-      // Check if the agentId refers to an Agent Profile first.
-      const profile = await store.profiles.getProfile(body.agentId);
-      if (profile) {
-        const baseAgent = catalog.find(a => a.id === profile.baseAgentId);
-        if (!baseAgent) return context.json({ error: `Profile base agent "${profile.baseAgentId}" was not found in the catalog.` }, 404);
-        if (!baseAgent.detected) return context.json({ error: `Profile base agent "${baseAgent.name}" is not detected on PATH.` }, 409);
-        if (!isAgentExecutable(profile.baseAgentId)) return context.json({ error: `Profile base agent "${baseAgent.name}" does not have a verified non-interactive execution adapter.` }, 409);
-      } else {
-        const agent = catalog.find(a => a.id === body.agentId);
-        if (!agent) return context.json({ error: 'The selected Agent was not found in the catalog.' }, 404);
-        if (!agent.detected) return context.json({ error: `Agent "${agent.name}" is not detected on PATH.` }, 409);
-        if (!isAgentExecutable(agent.id)) return context.json({ error: `Agent "${agent.name}" is detected, but does not have a verified non-interactive execution adapter.` }, 409);
-      }
-    }
     try {
       // A request may override the runtime; otherwise the Blueprint-selected provider is used. Both
       // are resolved with the one rule, so a Blueprint that names an Agent the Adapter registry does
       // not trust cannot quietly produce a run record for Codex.
+      //
+      // This route used to re-ask the executability question itself, six branches of prose beside the
+      // resolver's one answer, and the two copies disagreed: the catalog it consulted only lists what
+      // is installed, so a named-but-missing Agent came back as a 404 "not found", and none of the
+      // refusals carried a code, which left Studio printing this server's English sentence in an
+      // interface that can say both facts in the user's language.
       const requested = body.agentId ?? project.blueprint.spec.runtime?.provider ?? 'codex';
       const resolved = await resolveRuntimeExecutor(requested, id => store.profiles.getProfile(id));
       if (!resolved.ok) return context.json(runtimeExecutorRejection(resolved), 409);
+      // Everything the registry can answer has been answered. What is left is machine-local, and a run
+      // record for a CLI that is not here would only move the failure to the spawn.
+      if (!isAgentDetected(resolved.agentId)) return context.json(agentNotDetectedRejection(resolved.agentId), 409);
       const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision, requested);
-      return context.json({ run, probe: probeCodexRuntime() }, 201);
+      return context.json({ run }, 201);
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to prepare the Runtime run.' }, 409);
     }

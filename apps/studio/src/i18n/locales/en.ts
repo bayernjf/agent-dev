@@ -799,6 +799,10 @@ export const en = {
     // Codex. Naming the refused Agent - and the fact that nothing was substituted - is the only way
     // the panel can tell this apart from a project that simply has no approved run.
     refusedAgent: '{agent} cannot run this task, and no other Agent was substituted. Pick a verified Agent before preparing.',
+    // A second refusal sentence, because the daemon refuses two different things: an execution contract
+    // it has never verified, and a CLI that is not on this machine. The second is fixable by installing
+    // it, so it must not be worded like an Agent that cannot do the work.
+    agentNotDetected: '{agent} is not installed on this machine, and no other Agent was substituted. Install its CLI, or pick a different verified Agent before preparing.',
     prepare: 'Prepare Runtime',
     preparing: 'Preparing...',
     cancelling: 'Cancelling...',

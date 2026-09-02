@@ -222,6 +222,14 @@ export type RuntimeExecutorResolution =
 // test suites pin both copies to this string.
 export const AGENT_NOT_EXECUTABLE_CODE = 'agent_not_executable';
 
+// A second code, because the two questions a Runtime route can refuse on are not the same question.
+// `agent_not_executable` is answered by the Adapter registry and holds on every machine; whether a CLI
+// is installed here is answered by PATH and changes when someone uninstalls it. One code for both
+// would make the registry's answer depend on the machine it ran on, and Studio would have one sentence
+// for a contract it cannot verify and a binary it could not find. Mirrored in
+// apps/studio/src/lib/runtime-executor.ts for the same browser-import reason as the code above.
+export const AGENT_NOT_DETECTED_CODE = 'agent_not_detected';
+
 /**
  * The single answer to "which Agent runs this task?".
  *

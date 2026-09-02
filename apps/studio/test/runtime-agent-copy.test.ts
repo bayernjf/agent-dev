@@ -29,6 +29,8 @@ const EXECUTOR_COPY: KeyPath[] = [
   'runtime.executionFailed', 'runtime.retryFailed',
   // The daemon refuses to swap the executor, so the refusal has to name the Agent it refused.
   'runtime.refusedAgent',
+  // And the second refusal - the same Agent, only not installed on this machine - names it too.
+  'runtime.agentNotDetected',
   'confirmations.startAgent', 'confirmations.retryAgent',
 ];
 
