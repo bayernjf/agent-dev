@@ -90,7 +90,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - Studio 已展示 Runtime Run 状态、取消动作、按执行者命名的显式运行/重试按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
 - 「这个任务由谁执行」只有一个答案：Agent Profile 解到 base Agent、剥掉 `local-` 命名空间后查 `AGENT_ADAPTERS`，只有 `verified` 能承接任务；解析不通过时 daemon 直接拒（409 + `code: agent_not_executable` + `agentId`），**任何一层都不会把执行者换成另一个 Agent**，Studio 把被拒的 Agent 名字和“没换人”一起说出来。
 - Daemon 已提供 `/api/runtime/catalog`，内置 Agent 来自 `agents.builtin.conf`，可登记名称 + 启动命令的 custom Agent；内置未安装项隐藏，custom 未安装项置灰并保存到 `.agent-dev/agents.conf`。
-- Studio Agent Catalog 支持主动刷新和只读 Capability Probe，展示非交互、workspace-write 及 `verified`、`candidate`、`unsupported` Adapter 状态；未知能力不会被自动宣称为可执行。
+- Studio Agent Catalog 支持主动刷新和只读 Capability Probe：探测只读 CLI 的帮助输出，从不真的跑一次，所以 chip 印的是「Adapter 要用的参数在不在帮助里」，并区分「没列」与「帮助答不了」两种不是同一件事的 false；Adapter 状态仍为 `verified`、`candidate`、`unsupported`。未知能力不会被自动宣称为可执行。
 - 凭证管理 Phase 1 + Phase 2 已提供本地凭证文件、连接元数据、项目资源清单、`.env` 生成器、daemon API 和 Studio 引导/验证面板；Secret 不返回 API、不写入数据库。Supabase 自动 Adapter 按决策保持 Manual。
 - Acceptance Gate 已接入 Studio：提交验收总结和标准确认后，根据 Quality Gate/Git evidence 生成 `ACCEPTANCE_REPORT.md`；blocked 状态不能批准交付。
 - `GET /api/projects/:projectId/delivery-report` 汇总所有本地证据，Studio 展示 Final Delivery Report；报告明确区分本地完成、人工批准和未执行的外部交付。

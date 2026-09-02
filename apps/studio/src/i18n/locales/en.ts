@@ -1,4 +1,5 @@
 import type { DeliveryState } from '@agent-dev/workflow';
+import type { NonInteractiveVerdict } from '../../lib/capability-verdict';
 import type { AcceptanceRecord, AgentCapabilityProbe, ApplyRun, PreviewDeploymentResult, RuntimeRun } from '../../types';
 
 export const en = {
@@ -408,10 +409,18 @@ export const en = {
     probeCapabilities: 'Run a read-only capability probe',
     detected: 'Detected',
     notDetected: 'Not found',
-    nonInteractiveYes: 'non-interactive: yes',
-    nonInteractiveUnknown: 'non-interactive: unknown',
-    workspaceWriteYes: 'workspace-write: yes',
-    workspaceWriteNo: 'workspace-write: no',
+    // The probe reads a help page and never runs the Agent, so these say what it read rather than
+    // what it concluded. `false` is two different facts - looked for the switches our Adapter passes
+    // and did not find them, versus nothing to look for or the page never answered - and the old
+    // single `unknown` reported "nobody looked" for the first and "nobody can tell" for the second.
+    // Which reading applies is derived in src/lib/capability-verdict.ts. There is no workspace-write
+    // chip beside these any more: the probe had copied it out of the catalog's own declaration, which
+    // the same row already prints one line above.
+    nonInteractiveVerdict: {
+      listed: 'non-interactive: listed in help',
+      absent: 'non-interactive: not listed in help',
+      inconclusive: 'non-interactive: help cannot tell',
+    } satisfies Record<NonInteractiveVerdict, string>,
     // The chip used to print the raw enum into this sentence, so a Chinese interface read
     // "adapter: unsupported". Same domain as blueprint.runtimeAdapter, phrased for this slot.
     adapterStatus: {

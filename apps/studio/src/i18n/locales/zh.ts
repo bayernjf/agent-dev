@@ -1,3 +1,4 @@
+import type { NonInteractiveVerdict } from '../../lib/capability-verdict';
 import type { AgentCapabilityProbe } from '../../types';
 import type { Translations } from './en';
 
@@ -393,13 +394,19 @@ export const zh = {
     probeCapabilities: '运行一次只读能力探测',
     detected: '已检测',
     notDetected: '未找到',
-    nonInteractiveYes: 'non-interactive: yes',
-    nonInteractiveUnknown: 'non-interactive: unknown',
-    workspaceWriteYes: 'workspace-write: yes',
-    workspaceWriteNo: 'workspace-write: no',
+    // 探测只读帮助输出，从不真的跑一次，所以这里说的是“读到了什么”，不是“结论是什么”。
+    // `false` 底下是两种事实：找过 Adapter 用的参数而帮助输出里没有；以及本来就没有可找的
+    // （或帮助输出根本没回答）。以前两者都印成 unknown，等于对着“查过”说“没人查过”。
+    // 判定在 src/lib/capability-verdict.ts。旁边不再放 workspace-write chip：那个字段从来不是
+    // 测出来的，它抄的是上方目录行自己已经展示的声明。
+    nonInteractiveVerdict: {
+      listed: 'non-interactive: 帮助输出里列了',
+      absent: 'non-interactive: 帮助输出里没列',
+      inconclusive: 'non-interactive: 帮助输出答不了',
+    } satisfies Record<NonInteractiveVerdict, string>,
     // 这个 chip 曾把裸枚举插进句子里，中文界面于是显示 “adapter: unsupported”。
     // 取值域与 blueprint.runtimeAdapter 相同，只是按这个位置的说法重写；冒号跟同一行
-    // 未译的技术标记（non-interactive: yes）保持一致。
+    // 未译的技术标记（non-interactive: …）保持一致。
     adapterStatus: {
       verified: 'adapter: 已验证',
       candidate: 'adapter: 候选',
