@@ -403,6 +403,9 @@ export const en = {
     detecting: 'Detecting local Agents...',
     notFound: 'No Agents found.',
     runningProbe: 'Running read-only capability probe...',
+    // The row names the executor; this control only looks. Splitting them meant giving the looking its
+    // own button, so the label has to say what it does not do.
+    probeCapabilities: 'Run a read-only capability probe',
     detected: 'Detected',
     notDetected: 'Not found',
     nonInteractiveYes: 'non-interactive: yes',
