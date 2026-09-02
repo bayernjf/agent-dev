@@ -46,6 +46,8 @@ export const en = {
     namePlaceholder: 'e.g. Jiang Feng',
     egAcme: 'e.g. acme',
     language: 'Language',
+    switchToLight: 'Switch to light theme',
+    switchToDark: 'Switch to dark theme',
   },
   nav: {
     projects: 'Projects',
@@ -64,6 +66,13 @@ export const en = {
     title: 'Projects',
     description: 'Each Blueprint is the durable source of truth for a delivery run.',
     newBlueprint: 'New Blueprint',
+    exportBlueprint: 'Export',
+    exportBlueprintTitle: 'Export this Blueprint as JSON',
+    importBlueprint: 'Import',
+    importBlueprintTitle: 'Import a Blueprint from JSON',
+    showDiff: 'Show diff',
+    hideDiff: 'Hide diff',
+    showDiffTitle: 'Compare against the previous revision',
     loading: 'Loading projects...',
     empty: 'No projects yet. Start a Blueprint to establish a delivery baseline.',
     table: {
