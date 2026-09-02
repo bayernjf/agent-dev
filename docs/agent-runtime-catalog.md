@@ -103,6 +103,20 @@ Structured output: Unknown
 
 此前 candidate 可以生成 dry-run 计划、只在执行阶段被 `buildAgentExecutionPlan` 拒——那次拒绝发生在用户已经看到计划之后，而计划里写着的是一条永远跑不起来的命令。更旧的行为更糟：解析不出来就回退 Codex，于是一份指名 Claude Code 的 Blueprint 会得到一份 Codex 的运行记录。409 同时被“还没有已批准任务”使用，所以两种事实必须靠 `code` 区分；Studio 侧因为浏览器不能 import 本包（顶层 `node:child_process`）镜像了同一个字面量，两边测试各自钉死该字符串。
 
+### 3.3 探测读的是帮助输出，不是能力（2026-09-02 补充）
+
+`probeAgentCapabilities()` 只做一件事：读进一页 CLI 的 help 输出，检查**我们自己的 Adapter 会传的那几个参数**在不在里面。它从不启动一次真实运行，因此：
+
+- `nonInteractive: true` 的意思是“帮助输出把它要找的参数列为一项”，不是“这个 Agent 能非交互运行”。后一句由 `AGENT_ADAPTERS` 的 `verified` 记录，那是真跑过一次、退出码为 0 才写下的。
+- `nonInteractive: false` 底下是两种事实，Studio 必须分开渲染（`apps/studio/src/lib/capability-verdict.ts`）：帮助输出答了而参数不在（`absent`）；帮助输出没答，或本来就没有参数可找（`inconclusive`）。此前两者都印成 `unknown`，等于对着“查过且没找到”说“没人查过”。OpenCode 2.0 属于后者——它的非交互路径是 driver 脚本里的 `opencode api POST /api/session`：本机实测它的 `--help` 连 `api` 这个词都不出现，所以旧表拿 `api` 当期望永远命中不了；而即使某一版帮助页列出了这个子命令，一个子命令名也说不清“这一趟运行不需要人应答”，那张期望表只会凭空白给出一份判定。
+- 参数只有独立成一个 token 才算列出：`--json-lines` 不能替 `--json` 作证，`--permission-mode` 里含的 `-p` 也不是 Claude Code 的 `-p`。原子串匹配两处都会给出确认。
+- help 只有在命令真的跑起来且退出码为 0 时才算答案。win32 下探测带 `shell: true`，一个不存在的命令也会由 cmd.exe 回一段“不是内部或外部命令”的文本；把它当帮助页读，就会对一个压根没装上的 Agent 得出“帮助输出说它不支持”这个反过来的结论。
+- 问的是哪一层 help 由参数表决定：`codex --help` 根本不列 `--json`，`codex exec --help` 才列。此前只读顶层，于是把一个已实测过执行契约的 Agent 报成缺能力——假阴性出在问题问错了地方，而不是出在那个 Agent 上。
+
+参数表在 `src/non-interactive-switches.ts`，每一条都必须是 `AGENT_ADAPTERS` 真正传的参数。两个表分处两个文件、曾经漂移过：aider 查的是 `--yes`（Adapter 传的是 `--yes-always`，靠子串侥幸命中），openclaw 查的是它并没有的 `exec` 子命令。`test/capability-probe.test.ts` 逐条比对二者，并用注入的假 help 输出覆盖上面每一条判据，不再依赖跑测试这台机器装了哪些 CLI。
+
+探测行原来还有一枚 `workspace-write` chip 已删除：那个字段是名为 probe 的函数从 `BUILT_IN_CAPABILITIES` 的静态声明里抄来的，而同一行上一排 chip 展示的就是那份声明。探测不该为自己没测的东西作证；声明留在声明的位置。本机实测（`codex`/`claude`/`codebuddy`/`hermes` 四个）改造后全部为 `listed`，`opencode` 为 `inconclusive`，未安装的 `aider` 与超时的 `openclaw` 也是 `inconclusive`——改造前 `codex` 报的是 `unknown`。
+
 ## 4. 专业模式
 
 自动探测失败时，专业模式才允许补充完整执行参数：
