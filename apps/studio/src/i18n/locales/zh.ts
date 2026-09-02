@@ -272,6 +272,73 @@ export const zh = {
       classifyBoundaries: '在创建任何 Provider 计划前，划分审批边界与人工动作。',
     },
   },
+  decision: {
+    stack: {
+      title: '应用基线',
+      reason: '同一份交付基线写入生成的 PRODUCT_STANDARD.md。',
+    },
+    sourceControl: {
+      title: 'Git 交付工作流',
+      value: 'GitHub PR 从 dev 到 main',
+      reason: '受保护的生产交付仍是基线的一部分。',
+    },
+    providers: {
+      title: '云账户连接',
+      reason: {
+        none: 'GitHub 授权仍由你完成；不请求任何云账户。',
+        hasProviders: '账户授权与资源所有权归你所有。',
+      },
+    },
+    production: {
+      title: '生产发布',
+      value: '需要人工批准',
+      reason: '生产部署绝不能从本地工作推断。',
+    },
+    privacy: {
+      title: '产品数据敏感度',
+      value: {
+        sensitive: '敏感',
+        standard: '标准',
+      },
+      reason: {
+        sensitive: '敏感数据需要明确的隐私与访问审查。',
+        standard: '标准产品数据使用默认安全基线。',
+      },
+    },
+    preview: {
+      title: '预览策略',
+      value: {
+        'per-pull-request': '每个 PR 独立预览',
+        'stable-dev-api': '稳定 dev API',
+      },
+      reason: {
+        perPullRequest: '每个 PR 默认可使用独立预览。',
+        stableDevApi: '稳定 dev API 会改变共享环境，需要确认。',
+      },
+    },
+    analytics: {
+      title: '分析统计',
+      value: {
+        none: '无',
+        hasProviders: '{providers}',
+      },
+      reason: {
+        none: '无需配置追踪。',
+        hasProviders: '分析统计影响隐私声明、账户授权与环境变量。',
+      },
+    },
+    runtime: {
+      title: '本地 Agent 运行时',
+      reason: {
+        beginner: '新手模式使用已验证的默认本地 Agent（local-codex）。',
+        professional: '专业模式选择由哪个本地 Agent 运行时执行功能任务。',
+      },
+    },
+    custom: {
+      title: '自定义实现说明',
+      reason: '自定义说明会保留，但在存在支持模块前不会自动化。',
+    },
+  },
   evidence: {
     title: '证据包',
     finalDeliveryReport: '最终交付报告',

@@ -217,6 +217,28 @@ describe('ProductBlueprint', () => {
     expect(plan.automaticPreparationKeys).toHaveLength(plan.automaticPreparation.length);
   });
 
+  it('emits stable i18n keys for every decision title and reason', () => {
+    const blueprint = createBlueprint('Receipt Desk', { analyticsProviders: ['ga4'], mode: 'professional' }, 3);
+    const decisions = getBlueprintDecisions(blueprint);
+
+    // Every decision must carry a titleKey and reasonKey; values may be dynamic (per-type stack,
+    // runtime provider, custom instructions) and are allowed to omit a key.
+    for (const decision of decisions) {
+      expect(decision.titleKey, `decision ${decision.id} missing titleKey`).toBeDefined();
+      expect(decision.titleKey!.startsWith('decision.')).toBe(true);
+      expect(decision.reasonKey, `decision ${decision.id} missing reasonKey`).toBeDefined();
+      expect(decision.reasonKey!.startsWith('decision.')).toBe(true);
+    }
+
+    // Known fixed decisions carry valueKeys too.
+    const byId = Object.fromEntries(decisions.map(d => [d.id, d]));
+    expect(byId['source-control'].valueKey).toBe('decision.sourceControl.value');
+    expect(byId['production'].valueKey).toBe('decision.production.value');
+    expect(byId['privacy'].valueKey).toMatch(/^decision\.privacy\.value\./);
+    expect(byId['preview'].valueKey).toMatch(/^decision\.preview\.value\./);
+    expect(byId['analytics'].valueKey).toMatch(/^decision\.analytics\.value\./);
+  });
+
   it('backs every declared quality check with a script that actually runs, for every generated product type', () => {
     // The gate is one `npm run quality` chain: a check declared in the contract but missing from
     // scripts stops the chain with "Missing script", so the product's CI can never go green.
