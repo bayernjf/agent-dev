@@ -1,6 +1,6 @@
 # 领域文案 i18n 边界决策依据
 
-> 状态：**方案②已落地四批（dryRun / decisions / baselinePlan / manualActions），全量 449 测试绿。artifact titles（87 id，title 随 productType 变化）留待后续加 titleKey。**
+> 状态：**方案②五批全部落地（dryRun / decisions / baselinePlan / manualActions / artifact titles），全量 530 测试绿。MCP 桥零改动，继续接收英文 prose。**
 > 产出时间：2026-09-02
 > 测量脚本：`.scratch/i18n-blast-radius.ts`、`.scratch/i18n-decision-matrix.ts`、`.scratch/artifact-ids.ts`（本地草稿，已 gitignore，不入库）
 > 关联：[Studio i18n 设计](studio-i18n-design.md)、[handoff](../handoff.md) §9、2026-09-01/02 Studio 走查待办 1
@@ -96,7 +96,7 @@ Studio 侧加一个 `domainT(field, key, params)`：优先 `t(key, params)`，lo
 2. **第 2 批｜decisions（37）✅ 已落地（ff5f664）**：固定 26 个先上；11 个 per-type 复用 `PRODUCT_TYPE_DESCRIPTORS` 派生 key。BlueprintDecision 加 titleKey/valueKey/valueParams/reasonKey。
 3. **第 3 批｜baselinePlan（15）✅ 已落地（caa3b07）**：provider 资源按 `provider.<vendor>.*` 建 key。BaselinePlan 加 summaryKey/summaryParams；BaselinePlanResource 加 titleKey/reasonKey/reasonParams。
 4. **第 4 批｜manualActions（37）✅ 已落地（6e1ee52）**：shared 19 + provider 18。ManualAction 加 titleKey/titleParams/reasonKey/stepsKeys/verificationKey。
-5. **artifact titles（87 id）⏳ 待后续**：同一 artifact id 在不同 productType 下 title 不同（如 `template-root-package` 在 web-app 下是 'Web app workspace package'，在 landing-page 下是 'Landing page package'），不能用固定 `artifact.${id}` 作 key。需后端给 GeneratedArtifact 加 titleKey（按类型维度建 key）后处理。
+5. **artifact titles（80 key）✅ 已落地（b22ec08）**：78 个唯一 id 中 76 个 title 跨类型固定，用 `artifact.${id}` 作 key；仅 `template-root-package` 和 `template-readme` 两个 id 的 title 随类型变化（web-app vs landing-page），用 `artifact.${id}.${type}` 作 key。`GeneratedArtifact` 加 `titleKey`，`generateArtifacts` 在唯一出口统一填充，不改每个 builder。
 6. 每批都配「locale 表每个 key 在 en/zh 都能解析」的测试（沿用 `agent-copy.test.ts` 已立的纪律），并保留英文 prose 契约测试（保护 MCP 桥）。
 
 ## 7. 风险与未决
