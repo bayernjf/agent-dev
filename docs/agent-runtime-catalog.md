@@ -117,6 +117,17 @@ Structured output: Unknown
 
 探测行原来还有一枚 `workspace-write` chip 已删除：那个字段是名为 probe 的函数从 `BUILT_IN_CAPABILITIES` 的静态声明里抄来的，而同一行上一排 chip 展示的就是那份声明。探测不该为自己没测的东西作证；声明留在声明的位置。本机实测（`codex`/`claude`/`codebuddy`/`hermes` 四个）改造后全部为 `listed`，`opencode` 为 `inconclusive`，未安装的 `aider` 与超时的 `openclaw` 也是 `inconclusive`——改造前 `codex` 报的是 `unknown`。
 
+### 3.4 发现的代价，以及测试因此要注入（2026-09-02 补充）
+
+`discoverAgentRuntimes()` 是顺序探测：内置目录里 **8 个 Agent** 一个个查，`--version` 与 `--help` 的预算各 5 s（`src/catalog.ts`），最坏 40 s。而 vitest 单用例默认预算也是 5 s，所以**任何在测试里顺手调一次真发现的用例，都在赌这台机器当时有多闲**。2026-09-02 连跑 8 次全量量到 2 次超时（`apps/cli/test/mcp.test.ts` 的只读工具用例、`packages/agent-runtime/test/catalog.test.ts` 的内置过滤用例），红讯都是 `Test timed out in 5000ms`；`vitest.config.ts` 的 `fileParallelism: false` 只把这条不等式变缓，没有改变它。
+
+两条纪律：
+
+- **问接线的测试注入目录**：daemon 的 `DaemonDependencies.discoverRuntimes`（与 `isAgentDetected` 同一模式）让 MCP 桥那类用例只付自己那一份，链路仍是 MCP client → bridge → HTTP → daemon route → store 全程真跑。注入的目录是夹具，看不见 `POST /api/runtime/catalog` 刚追加的 custom Agent，要断言新条目就得走真发现。
+- **问过滤的用例把 PATH 指到夹具目录**：`catalog.test.ts` 第一例只放一个内置命令的临时目录前置到 PATH，断言结果恰好是那一个。改之前它走真 PATH，而 `every()` 对空数组恒真——一台什么都没装的机器会让它绿着，测到的是本机装了什么，不是过滤器。另外 `detect()` 按命令缓存：这一跑会把其余七个内置名字缓存成「不在」，所以同文件后面的用例只能继续探自己的夹具命令，「期待某个真内置 Agent 被检出」的用例不能再加进这个文件。
+
+`apps/daemon/test/app.test.ts` 是**故意**保留真发现的：它断言的是真路由契约（每条 agent 的 `adapterStatus === getAgentAdapterStatus(id)`、custom agent 为 `unsupported`），换成夹具就等于把契约本身换成夹具。代价是它仍带着同样的贴边风险。
+
 ## 4. 专业模式
 
 自动探测失败时，专业模式才允许补充完整执行参数：
