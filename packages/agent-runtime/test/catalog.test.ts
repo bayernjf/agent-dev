@@ -1,15 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discoverAgentRuntimes, resolveExecutablePath } from '../src/index.js';
 
 describe('agent runtime catalog', () => {
-  it('returns only detected built-in runtimes', () => {
-    const agents = discoverAgentRuntimes();
-    expect(agents.every(agent => agent.source === 'built-in')).toBe(true);
-    expect(agents.every(agent => agent.detected)).toBe(true);
-    expect(agents.every(agent => agent.launchCommand.length > 0)).toBe(true);
+  // What is under test is the filter: a built-in this machine does not have is not returned at all,
+  // and one it does have comes back detected with its launch command. Walking the real PATH for that
+  // made the answer a fact about the machine — `every()` over an empty array passed on a runner with
+  // nothing installed — and cost up to eight sequential 5 s version probes against the 5 s a test is
+  // given, which is how this case timed out on a loaded machine. So PATH is a fixture directory
+  // holding exactly one built-in command.
+  //
+  // `detect()` caches per command, so this leaves the other seven built-in names cached as absent for
+  // the rest of this file. Every later case here probes a custom fixture command instead, which is
+  // what makes that safe; a case that expects a real built-in to be detected must not be added below.
+  it('returns only the built-in runtimes this machine has', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-catalog-built-in-'));
+    try {
+      await writeFile(join(directory, 'opencode'), '#!/bin/sh\necho fixture\n', 'utf8');
+      await chmod(join(directory, 'opencode'), 0o755);
+      const originalPath = process.env.PATH;
+      process.env.PATH = directory;
+      try {
+        const agents = discoverAgentRuntimes();
+        expect(agents.map(agent => agent.id)).toEqual(['opencode']);
+        expect(agents[0]).toMatchObject({ source: 'built-in', detected: true, launchCommand: 'opencode' });
+        // The fixture is a POSIX script, so cmd.exe cannot run it on Windows. That is not a failure of
+        // discovery: PATH presence is the claim, and a version probe that cannot run must not hide an
+        // installed Agent. Where it can run, the version it produced is the fixture's own output.
+        if (process.platform !== 'win32') expect(agents[0]?.version).toBe('fixture');
+      } finally {
+        process.env.PATH = originalPath;
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('supports minimal custom Agent configuration', () => {
