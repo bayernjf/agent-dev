@@ -1,6 +1,5 @@
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { componentSources } from './source-evidence';
 
 // Why this exists: every string the interface owns has to reach the user through t(), because a
 // literal left in JSX is unreadable for half the audience and invisible to `zh satisfies
@@ -10,19 +9,11 @@ import { describe, expect, it } from 'vitest';
 // Deliberately an over-approximation of "user-visible copy", so the exclusions are part of the
 // contract and are listed per shape. It cannot see copy assembled at render time, and it does not
 // judge text that arrives from a backend package — that boundary is still open elsewhere.
-
-const SRC = new URL('../src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-
-function sourceFiles(dir: string): string[] {
-  const found: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...sourceFiles(full));
-    // The locale tables are the translations themselves; English and Chinese literals are their job.
-    else if (/\.tsx$/.test(entry.name) && !full.includes(join('i18n', 'locales'))) found.push(full);
-  }
-  return found;
-}
+//
+// This scan reads its files verbatim, comments and all, unlike the evidence readers in
+// test/source-evidence.ts: the assertion below is negative, so a comment can only add a finding, never
+// hide one. Stripping would let a literal be silenced by commenting its line out instead of
+// translating it, and copy that is dead rather than moved is not a passing state.
 
 // Names that stay as written in both locales. Matched case-insensitively so this list cannot drift
 // into being a second place where copy gets decided.
@@ -72,9 +63,9 @@ function scan(relative: string, text: string): Finding[] {
 
 describe('studio copy goes through the locale tables', () => {
   it('scans the component tree rather than nothing', () => {
-    const files = sourceFiles(SRC);
-    expect(files.some(f => f.endsWith('App.tsx'))).toBe(true);
-    expect(files.some(f => f.endsWith('FailureDisplay.tsx'))).toBe(true);
+    const files = componentSources();
+    expect(files.some(f => f.relative.endsWith('App.tsx'))).toBe(true);
+    expect(files.some(f => f.relative.endsWith('FailureDisplay.tsx'))).toBe(true);
   });
 
   it('catches each shape it claims to catch', () => {
@@ -103,8 +94,8 @@ describe('studio copy goes through the locale tables', () => {
   });
 
   it('finds no string the interface owns left as a literal in JSX', () => {
-    const findings = sourceFiles(SRC)
-      .flatMap(file => scan(file.slice(SRC.length + 1).replace(/\\/g, '/'), readFileSync(file, 'utf8')))
+    const findings = componentSources()
+      .flatMap(source => scan(source.relative, source.text))
       .map(f => `${f.where}  ${f.why}`);
     expect(
       findings,
