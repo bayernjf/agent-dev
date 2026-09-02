@@ -190,7 +190,7 @@ export const zh = {
     title: '交付决策',
     plan: '交付计划',
     baselineResources: '基线资源',
-    readyForApproval: '等待批准',
+    readyForApproval: '可批准',
     ownershipRequired: '需要确认归属',
     approved: '已批准',
     approvalNote: '这仅记录意图，不会创建远程资源或泄露机密。',
@@ -546,7 +546,9 @@ export const zh = {
     notSelected: '未选择',
     status: {
       approved: '已批准',
-      ready: '等待批准',
+      // “可批准”是闸门已经打开、等你批；“等待批准”是已交上去、在等别人。两者在审批门控上是相反的状态，
+      // 不能共用一份文案。
+      ready: '可批准',
       blocked: '需要确认归属',
     },
     resourceStatus: {
