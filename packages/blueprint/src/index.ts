@@ -120,9 +120,13 @@ export type ProductBlueprint = z.infer<typeof productBlueprintSchema>;
 export type BlueprintDecision = {
   id: string;
   title: string;
+  titleKey?: string;
   value: string;
+  valueKey?: string;
+  valueParams?: Record<string, string | number>;
   mode: 'auto' | 'ask' | 'manual';
   reason: string;
+  reasonKey?: string;
 };
 
 // Every check named here has to be a real script in that product type's generated package.json,
@@ -227,20 +231,26 @@ export function getBlueprintDecisions(blueprint: ProductBlueprint): BlueprintDec
     {
       id: 'stack',
       title: 'Application baseline',
+      titleKey: 'decision.stack.title',
       value: `${descriptor.frontend} | ${descriptor.backend}`,
       mode: 'auto',
       reason: 'The same delivery baseline is written into generated/PRODUCT_STANDARD.md.',
+      reasonKey: 'decision.stack.reason',
     },
     {
       id: 'source-control',
       title: 'Git delivery workflow',
+      titleKey: 'decision.sourceControl.title',
       value: 'GitHub PRs from dev to main',
+      valueKey: 'decision.sourceControl.value',
       mode: 'auto',
       reason: 'Protected production delivery remains part of the baseline.',
+      reasonKey: 'decision.sourceControl.reason',
     },
     {
       id: 'providers',
       title: 'Cloud account connection',
+      titleKey: 'decision.providers.title',
       value: cloudProviders.length === 0
         ? 'None — this product type provisions nothing outside its GitHub repository'
         : cloudProviders.map(provider => CLOUD_PROVIDER_LABELS[provider]).join(', '),
@@ -248,50 +258,73 @@ export function getBlueprintDecisions(blueprint: ProductBlueprint): BlueprintDec
       reason: cloudProviders.length === 0
         ? 'Authorizing GitHub remains yours to do; no cloud account is requested.'
         : 'Account authorization and resource ownership stay with you.',
+      reasonKey: cloudProviders.length === 0
+        ? 'decision.providers.reason.none'
+        : 'decision.providers.reason.hasProviders',
     },
     {
       id: 'production',
       title: 'Production release',
+      titleKey: 'decision.production.title',
       value: 'Human approval required',
+      valueKey: 'decision.production.value',
       mode: 'ask',
       reason: 'A production deployment must never be inferred from local work.',
+      reasonKey: 'decision.production.reason',
     },
   ];
 
   decisions.push({
     id: 'privacy',
     title: 'Product data sensitivity',
+    titleKey: 'decision.privacy.title',
     value: blueprint.spec.product.dataSensitivity,
+    valueKey: `decision.privacy.value.${blueprint.spec.product.dataSensitivity}`,
     mode: blueprint.spec.product.dataSensitivity === 'sensitive' ? 'ask' : 'auto',
     reason: blueprint.spec.product.dataSensitivity === 'sensitive'
       ? 'Sensitive data requires an explicit privacy and access review.'
       : 'Standard product data uses the default security baseline.',
+    reasonKey: blueprint.spec.product.dataSensitivity === 'sensitive'
+      ? 'decision.privacy.reason.sensitive'
+      : 'decision.privacy.reason.standard',
   });
 
   decisions.push({
     id: 'preview',
     title: 'Preview strategy',
+    titleKey: 'decision.preview.title',
     value: blueprint.spec.deployment.previewStrategy.replaceAll('-', ' '),
+    valueKey: `decision.preview.value.${blueprint.spec.deployment.previewStrategy}`,
     mode: blueprint.spec.deployment.previewStrategy === 'per-pull-request' ? 'auto' : 'ask',
     reason: blueprint.spec.deployment.previewStrategy === 'per-pull-request'
       ? 'Each pull request can use an isolated preview by default.'
       : 'A stable dev API changes a shared environment and needs confirmation.',
+    reasonKey: blueprint.spec.deployment.previewStrategy === 'per-pull-request'
+      ? 'decision.preview.reason.perPullRequest'
+      : 'decision.preview.reason.stableDevApi',
   });
 
   decisions.push({
     id: 'analytics',
     title: 'Analytics',
+    titleKey: 'decision.analytics.title',
     value: analytics.length === 0 ? 'None' : analytics.join(', ').toUpperCase(),
+    valueKey: analytics.length === 0 ? 'decision.analytics.value.none' : 'decision.analytics.value.hasProviders',
+    valueParams: analytics.length > 0 ? { providers: analytics.join(', ').toUpperCase() } : undefined,
     mode: analytics.length === 0 ? 'auto' : 'ask',
     reason: analytics.length === 0
       ? 'No tracking setup is required.'
       : 'Analytics affects privacy notices, account authorization and environment variables.',
+    reasonKey: analytics.length === 0
+      ? 'decision.analytics.reason.none'
+      : 'decision.analytics.reason.hasProviders',
   });
 
   const runtimeProvider = blueprint.spec.runtime.provider;
   decisions.push({
     id: 'runtime',
     title: 'Local agent runtime',
+    titleKey: 'decision.runtime.title',
     value: runtimeProvider,
     // In beginner mode the verified default is chosen automatically. In professional mode the caller
     // passes an explicit runtimeProvider (ask), so we surface it as a confirmed choice.
@@ -300,15 +333,21 @@ export function getBlueprintDecisions(blueprint: ProductBlueprint): BlueprintDec
       blueprint.metadata.mode === 'beginner'
         ? 'Beginner mode uses the verified default local agent (local-codex).'
         : 'Professional mode selects which local agent runtime implements the feature tasks.',
+    reasonKey:
+      blueprint.metadata.mode === 'beginner'
+        ? 'decision.runtime.reason.beginner'
+        : 'decision.runtime.reason.professional',
   });
 
   if (blueprint.metadata.customInstructions) {
     decisions.push({
       id: 'custom',
       title: 'Custom implementation note',
+      titleKey: 'decision.custom.title',
       value: blueprint.metadata.customInstructions,
       mode: 'manual',
       reason: 'Custom instructions are preserved, but are not automated until a supported module exists.',
+      reasonKey: 'decision.custom.reason',
     });
   }
   return decisions;

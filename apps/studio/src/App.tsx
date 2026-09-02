@@ -2099,7 +2099,7 @@ export function App() {
             {selected && <section className="decision-section" id="decisions">
               <div className="section-heading"><div><p className="eyebrow">{t('decisions.eyebrowRevision', { revision: selected.blueprint.metadata.revision })}</p><h2>{t('decisions.title')}</h2></div><span className="mode-tag">{selected.blueprint.metadata.mode === 'beginner' ? t('blueprint.beginner') : t('blueprint.professional')}</span></div>
               <div className="decision-list">{decisions.map(decision => <article className="decision" key={decision.id}>
-                <div><h3>{decision.title}</h3><p>{decision.value}</p><small>{decision.reason}</small></div><span className={`decision-mode ${decision.mode}`}>{decision.mode === 'auto' ? t('decisions.mode.auto') : decision.mode === 'ask' ? t('decisions.mode.ask') : t('decisions.mode.manual')}</span>
+                <div><h3>{domainT(decision.title, decision.titleKey)}</h3><p>{domainT(decision.value, decision.valueKey, decision.valueParams)}</p><small>{domainT(decision.reason, decision.reasonKey)}</small></div><span className={`decision-mode ${decision.mode}`}>{decision.mode === 'auto' ? t('decisions.mode.auto') : decision.mode === 'ask' ? t('decisions.mode.ask') : t('decisions.mode.manual')}</span>
               </article>)}</div>
             </section>}
 
