@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, getBlueprintDecisions, getManualActions, productBlueprintSchema } from '../src/index.js';
+import { baselineProvidersFor, createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, getBlueprintDecisions, getManualActions, productBlueprintSchema } from '../src/index.js';
 
 describe('ProductBlueprint', () => {
   it('creates the fixed v0.1 Web app Golden Path', () => {
@@ -111,6 +111,46 @@ describe('ProductBlueprint', () => {
     expect(ids('web-app')).toEqual(['authorize-github', 'authorize-supabase', 'authorize-cloudflare', 'authorize-vercel']);
     expect(ids('api-tool')).toEqual(['authorize-github']);
     expect(ids('landing-page')).toEqual(['authorize-github', 'authorize-cloudflare']);
+  });
+
+  // The decision cards are the first thing a user reads about what will be built, and both of them
+  // used to describe the web-app golden path for every type: an MCP server was offered a Supabase
+  // organization and a Vercel team while its own generated PRODUCT_STANDARD.md said data and auth
+  // were "Not provisioned for this product type". The strings are not asserted here on purpose —
+  // what has to hold is that the card and the document that type generates say the same thing.
+  it('describes each product type with the baseline its own generated standard documents', () => {
+    const combos = [
+      { productType: 'web-app' },
+      { productType: 'landing-page' },
+      { productType: 'browser-extension' },
+      { productType: 'desktop', desktopShell: 'tauri' },
+      { productType: 'desktop', desktopShell: 'electron' },
+      { productType: 'mobile' },
+      { productType: 'api-tool' },
+    ] as const;
+
+    for (const combo of combos) {
+      const blueprint = createBlueprint('Decision Desk', combo, 1);
+      const card = (id: string) => getBlueprintDecisions(blueprint).find(decision => decision.id === id)!;
+      const standard = createDryRunPlan(blueprint).artifacts
+        .find(artifact => artifact.path === 'generated/PRODUCT_STANDARD.md')!.content;
+      const documented = (field: string) => standard.match(new RegExp(`^- ${field}: (.+)$`, 'm'))![1];
+
+      expect(card('stack').value, `${combo.productType}: stack card disagrees with PRODUCT_STANDARD.md`)
+        .toBe(`${documented('Frontend')} | ${documented('Backend')}`);
+
+      const providers = baselineProvidersFor(combo.productType);
+      const named = card('providers').value;
+      for (const [provider, label] of [['supabase', 'Supabase'], ['vercel', 'Vercel'], ['cloudflare', 'Cloudflare']] as const) {
+        expect(
+          named.includes(label),
+          `${combo.productType}: cloud card ${providers.includes(provider) ? 'omits' : 'names'} ${label}`,
+        ).toBe(providers.includes(provider));
+      }
+      // No cloud provider still leaves a human step: authorizing GitHub. Dropping the gate for
+      // repository-only types would let a baseline be approved without any authorization at all.
+      expect(card('providers').mode, `${combo.productType}: authorization gate dropped`).toBe('manual');
+    }
   });
 
   it('preserves professional answers and surfaces their approval boundaries', () => {
