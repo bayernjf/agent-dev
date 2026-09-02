@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { classifyFailure, categoryLabel, severityLabel, type FailureClassification } from '@agent-dev/agent-runtime/failure-classification';
+import { useI18n } from '../i18n/i18n';
 
 type FailureDisplayProps = {
   error: string;
 };
 
 export function FailureDisplay({ error }: FailureDisplayProps) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const classification: FailureClassification = classifyFailure(error);
 
@@ -24,7 +26,7 @@ export function FailureDisplay({ error }: FailureDisplayProps) {
           {categoryLabel(classification.category)}
         </span>
         <span className="failure-severity">{severityLabel(classification.severity)}</span>
-        {classification.autoRetryable && <span className="failure-retryable">Auto-retryable</span>}
+        {classification.autoRetryable && <span className="failure-retryable">{t('failureDisplay.autoRetryable')}</span>}
       </div>
       <p className="failure-title">{classification.title}</p>
       <p className="failure-explanation">{classification.explanation}</p>
@@ -36,7 +38,9 @@ export function FailureDisplay({ error }: FailureDisplayProps) {
             className="failure-toggle"
             onClick={() => setExpanded(!expanded)}
           >
-            {expanded ? 'Hide' : 'Show'} remediation steps ({classification.remediation.length})
+            {expanded
+              ? t('failureDisplay.hideRemediation', { count: classification.remediation.length })
+              : t('failureDisplay.showRemediation', { count: classification.remediation.length })}
           </button>
           {expanded && (
             <ol>
@@ -49,7 +53,7 @@ export function FailureDisplay({ error }: FailureDisplayProps) {
       )}
 
       <details className="failure-raw">
-        <summary>Raw error</summary>
+        <summary>{t('failureDisplay.rawError')}</summary>
         <pre>{error}</pre>
       </details>
     </div>
