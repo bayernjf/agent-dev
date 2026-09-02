@@ -22,7 +22,14 @@ export type DryRunPlan = {
   blueprintRevision: number;
   noExternalChanges: true;
   summary: string;
+  // Stable i18n key + params for the summary. Studio resolves the key against its locale table and
+  // falls back to `summary` (English prose) when the key is missing. The MCP bridge keeps reading
+  // `summary` so external coding agents always receive English instructions.
+  summaryKey: string;
+  summaryParams: { artifactCount: number; actionCount: number };
   automaticPreparation: string[];
+  // One key per entry in automaticPreparation, same order.
+  automaticPreparationKeys: string[];
   manualActions: ManualAction[];
   artifacts: GeneratedArtifact[];
 };
@@ -741,16 +748,24 @@ export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifac
 
 export function createDryRunPlan(blueprint: ProductBlueprint): DryRunPlan {
   const artifacts = generateArtifacts(blueprint);
+  const manualActions = getManualActions(blueprint);
   return {
     blueprintRevision: blueprint.metadata.revision,
     noExternalChanges: true,
-    summary: `This dry run prepares ${artifacts.length} generated artifacts and ${getManualActions(blueprint).length} manual actions. No cloud resource, credential or repository is changed.`,
+    summary: `This dry run prepares ${artifacts.length} generated artifacts and ${manualActions.length} manual actions. No cloud resource, credential or repository is changed.`,
+    summaryKey: 'dryRun.summary',
+    summaryParams: { artifactCount: artifacts.length, actionCount: manualActions.length },
     automaticPreparation: [
       'Validate the ProductBlueprint schema and selected module combination.',
       'Generate the product standard, agent constraints, delivery workflow, environment contract and handoff preview.',
       'Classify approval boundaries and manual actions before any provider plan is created.',
     ],
-    manualActions: getManualActions(blueprint),
+    automaticPreparationKeys: [
+      'dryRun.automaticPreparation.validateSchema',
+      'dryRun.automaticPreparation.generateArtifacts',
+      'dryRun.automaticPreparation.classifyBoundaries',
+    ],
+    manualActions,
     artifacts,
   };
 }
