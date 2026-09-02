@@ -660,6 +660,36 @@ export const en = {
     whoApproves: 'Who approves this task?',
     approvedBy: 'Approved by {approvedBy} · {date}',
   },
+  // Every string in this block is owned by the interface: the editor changes a draft feature task's
+  // steps before any Agent runs them, so none of it came from the backend and none of it was
+  // unreachable. It had simply never been moved out of JSX.
+  pipeline: {
+    eyebrow: 'Pipeline',
+    stepCountOne: '{count} step · {status}',
+    stepCountMany: '{count} steps · {status}',
+    edit: 'Edit Pipeline',
+    stepNumber: 'Step {number}',
+    removeStep: 'Remove step',
+    name: 'Name',
+    namePlaceholder: 'Step name',
+    profile: 'Profile',
+    profileSelect: 'Select profile...',
+    prompt: 'Prompt',
+    promptPlaceholder: 'Instructions for this step...',
+    addStep: '+ Add step',
+    saving: 'Saving...',
+    save: 'Save Pipeline',
+    executing: 'Executing...',
+    execute: 'Execute Pipeline',
+    resume: 'Resume Pipeline',
+    status: {
+      idle: 'Idle',
+      running: 'Running',
+      completed: 'Completed',
+      failed: 'Failed',
+      paused: 'Paused',
+    },
+  },
   runtime: {
     eyebrow: 'Agent runtime',
     runtimeNotPrepared: 'Runtime not prepared',
