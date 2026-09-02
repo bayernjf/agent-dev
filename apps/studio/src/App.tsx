@@ -25,7 +25,7 @@ import { adapterStatusOf, canProfileRunTasks, canRunSelectedAgent, canRunTasks }
 import { nonInteractiveVerdict } from './lib/capability-verdict';
 import { classifyRuntimeExecutorFailure, runtimeExecutorId, withoutProviderNamespace } from './lib/runtime-executor';
 import { PRODUCT_TYPE_LABEL_KEYS } from './lib/product-type';
-
+import { baselineNoteFor } from './lib/baseline-note';
 
 export function App() {
   const { t, locale, setLocale } = useI18n();
@@ -1527,6 +1527,8 @@ export function App() {
     ] as const).filter(([provider]) => providers.includes(provider)).map(([, field]) => field);
   }, [answers.productType]);
 
+  const baselineNote = useMemo(() => baselineNoteFor(answers.productType), [answers.productType]);
+
   const toggleAnalytics = (provider: 'ga4' | 'clarity') => {
     setAnswers(current => ({
       ...current,
@@ -2269,7 +2271,7 @@ export function App() {
                 <textarea id="custom-instructions" value={answers.customInstructions} onChange={event => setAnswer('customInstructions', event.target.value)} placeholder={t('blueprint.customInstructionsPlaceholder')} maxLength={1000} />
               </>}
 
-              <p className="form-note">{t('blueprint.baselineNote')}</p>
+              <p className="form-note">{t(baselineNote.key, baselineNote.params)}</p>
               <button className="primary-button" type="submit" disabled={saving}>{saving ? t('common.loading') : selected ? t('blueprint.saveRevision') : t('blueprint.generate')}<ArrowRight size={16} aria-hidden="true" /></button>
             </form>
             <section className="connector-panel" id="connections">

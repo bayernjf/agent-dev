@@ -245,7 +245,8 @@ export const en = {
     verify: 'Verify',
     generatedPackage: 'Generated delivery package',
     refreshPlan: 'Refresh delivery plan',
-    baselineNote: 'The fixed baseline uses React/Vite, Hono, Supabase, Cloudflare Pages and Vercel Functions. Cloud accounts and production releases remain human-approved.',
+    baselineNoteCloud: 'The fixed baseline uses {providers}. Cloud accounts and production releases remain human-approved.',
+    baselineNoteRepositoryOnly: 'This product type provisions nothing outside its GitHub repository: the build and quality gate run locally, distribution stays a manual step, and production release still requires human approval.',
     saveRevision: 'Save new revision',
   },
   decisions: {
