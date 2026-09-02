@@ -111,7 +111,7 @@ Approval         none        Preview UAT       integration    production Gate
 
 ### 后续版本
 
-可将 Infisical 或 Doppler 作为 Secret Backend Adapter，负责版本、审批、轮换和跨平台同步。Agent-Dev 仍负责 Env Contract、Policy 和验证，不自己重造 Vault。
+**Infisical Secret Backend Adapter 已实现（2026-09-01，凭证系统后端化集成）**：`AGENT_DEV_SECRET_BACKEND=infisical` 时凭证读写切换到 Infisical（默认 `local-file` 行为不变），详见 [凭证管理方案 §3.5](credential-management.md)。支持轮换；版本/审批/历史等后端未确认的字段如实省略而非伪造，审批走 Infisical 控制台。**真实 Infisical 云端验证待办**——`spikes/infisical-backend/probe.mjs --online` 是既定验证入口。Doppler 仍是后续选项，接口已留位。Agent-Dev 仍负责 Env Contract、Policy 和验证，不自己重造 Vault。
 
 ## 7. Connector 状态
 

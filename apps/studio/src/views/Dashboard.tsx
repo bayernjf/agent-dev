@@ -2,6 +2,7 @@ import { FolderKanban } from 'lucide-react';
 import { useI18n } from '../i18n/i18n';
 import type { Project, ProjectDetail } from '../types';
 import { formatDate } from '../lib/utils';
+import { productTypeLabelKey } from '../lib/product-type';
 
 export type DashboardProps = {
   projects: Project[];
@@ -26,7 +27,7 @@ export function Dashboard({ projects, selected, loading, onSelectProject }: Dash
         <div className="project-table" role="table" aria-label={t('projects.title')}>
           <div className="table-head" role="row">
             <span>{t('projects.table.project')}</span>
-            <span>{t('projects.table.mode')}</span>
+            <span>{t('projects.table.productType')}</span>
             <span>{t('projects.table.deliveryState')}</span>
             <span>{t('projects.table.updated')}</span>
           </div>
@@ -44,7 +45,13 @@ export function Dashboard({ projects, selected, loading, onSelectProject }: Dash
                 key={project.id}
               >
                 <strong>{project.name}</strong>
-                <span>{project.productType}</span>
+                {/* The column is headed by what it actually contains. It was labelled "Mode", which in
+                    this product means Beginner or Professional — a value the table never showed and
+                    the cell never held. */}
+                <span>{(() => {
+                  const labelKey = productTypeLabelKey(project.productType);
+                  return labelKey ? t(labelKey) : project.productType;
+                })()}</span>
                 <span className="state">{t(`projectState.${project.state}`)}</span>
                 <time dateTime={project.updatedAt}>{formatDate(project.updatedAt, locale)}</time>
               </button>

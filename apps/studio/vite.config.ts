@@ -1,27 +1,37 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { createDaemonAuthHandler, type ProxyRequestLike } from './dev-proxy-auth';
 
-// The daemon requires `Authorization: Bearer <token>` on every /api/* route
-// (docs/audit-2026-08-31.md §6.1-2). The token lives outside the repo, next to the daemon's other
-// user-level state; reading it here lets the browser side attach it without a per-request setup.
-// The token is persistent, so reading it once at dev-server start is stable across daemon restarts.
-const daemonTokenPath = process.env.AGENT_DEV_DAEMON_TOKEN_PATH ?? join(homedir(), '.agent-dev', 'daemon-token');
-const daemonToken = existsSync(daemonTokenPath) ? readFileSync(daemonTokenPath, 'utf8').trim() : '';
+// The daemon binds to 127.0.0.1 explicitly, so proxy to that literal address instead of
+// `localhost`, which can resolve to ::1 first on Windows and miss the listener.
+const daemonOrigin = 'http://127.0.0.1:3737';
+
+type ProxyServerLike = {
+  on(event: string, listener: (proxyRequest: ProxyRequestLike) => void): void;
+};
+
+// The daemon bearer token is attached here, in the proxy, and never reaches the browser (see
+// dev-proxy-auth.ts for why not). `/events` is an SSE stream outside the authenticated /api/*
+// surface: EventSource cannot carry headers, and it publishes delivery metadata only.
+const proxy = {
+  '/api': {
+    target: daemonOrigin,
+    configure: (proxyServer: ProxyServerLike) => {
+      proxyServer.on('proxyReq', createDaemonAuthHandler());
+    },
+  },
+  '/events': daemonOrigin,
+};
 
 export default defineConfig({
   plugins: [react()],
-  define: {
-    __DAEMON_TOKEN__: JSON.stringify(daemonToken),
-  },
   server: {
     port: 5173,
     strictPort: true,
-    proxy: {
-      '/api': 'http://localhost:3737',
-      '/events': 'http://localhost:3737',
-    },
+    proxy,
+  },
+  // `vite preview` needs the same plumbing, otherwise a built Studio has no way to reach the API.
+  preview: {
+    proxy,
   },
 });

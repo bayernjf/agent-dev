@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-export { discoverAgentRuntimes, probeAgentCapabilities, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource, type CapabilityProbe } from './catalog.js';
+export { discoverAgentRuntimes, probeAgentCapabilities, resolveExecutablePath, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource, type CapabilityProbe } from './catalog.js';
 export {
   type AgentProfile,
   type AgentProfileOverrides,
@@ -187,6 +187,87 @@ export function buildAgentExecutionPlan(
 
 export function isAgentExecutable(agentId: string): boolean {
   return AGENT_ADAPTERS[agentId]?.status === 'verified';
+}
+
+// Blueprint runtime providers are namespaced (`local-opencode`) to say the runtime lives on this
+// machine; the Adapter registry keys are bare (`opencode`). The strip lived inline in two storage
+// methods and nowhere else, so every caller that resolved a Blueprint provider against the registry
+// got 'unsupported' for a perfectly verified Agent and quietly fell back to Codex.
+//
+// Agent Profile ids are unprefixed, so they pass through untouched and are resolved against the
+// Profile store afterwards by resolveRuntimeExecutor.
+export function runtimeProviderAgentId(provider: string): string {
+  return provider.startsWith('local-') ? provider.slice('local-'.length) : provider;
+}
+
+/** Who a run would actually be launched as, after the provider namespace and Profile resolution. */
+export type RuntimeExecutor = {
+  /** Id exactly as the caller named it (`local-opencode`, a Profile id, or a bare agent id). */
+  requestedId: string;
+  /** Bare Adapter registry key the task would run on. */
+  agentId: string;
+  adapterStatus: AgentAdapterStatus;
+  /** Present when requestedId referred to an Agent Profile. */
+  profile?: AgentProfile;
+};
+
+export type RuntimeExecutorResolution =
+  | ({ ok: true } & RuntimeExecutor)
+  | ({ ok: false; reason: 'no-adapter' | 'unverified-adapter' } & RuntimeExecutor);
+
+// Carried on the 409 of any Runtime route that refuses an executor. GET .../runtime/plan already
+// answers 409 for "nothing approved yet", so the status alone cannot tell the two facts apart and
+// Studio would render a refusal as an empty panel. The browser cannot import this module (it pulls
+// in node:child_process), so apps/studio/src/lib/runtime-executor.ts mirrors the literal; the two
+// test suites pin both copies to this string.
+export const AGENT_NOT_EXECUTABLE_CODE = 'agent_not_executable';
+
+// A second code, because the two questions a Runtime route can refuse on are not the same question.
+// `agent_not_executable` is answered by the Adapter registry and holds on every machine; whether a CLI
+// is installed here is answered by PATH and changes when someone uninstalls it. One code for both
+// would make the registry's answer depend on the machine it ran on, and Studio would have one sentence
+// for a contract it cannot verify and a binary it could not find. Mirrored in
+// apps/studio/src/lib/runtime-executor.ts for the same browser-import reason as the code above.
+export const AGENT_NOT_DETECTED_CODE = 'agent_not_detected';
+
+/**
+ * The single answer to "which Agent runs this task?".
+ *
+ * Before it existed, the strip + Profile lookup was copy-pasted per layer and each copy disagreed:
+ * the daemon's plan route resolved a Blueprint provider without stripping, so every provider that
+ * route knew about looked up as 'unsupported' and the route silently built a Codex plan instead -
+ * a run record whose executor nobody had asked for. Callers that cannot resolve an executor must
+ * refuse; substituting another Agent is what this function exists to make detectable.
+ *
+ * Executability is judged against the Adapter registry only, never against the catalog or PATH, so
+ * the answer stays machine-independent. "Installed here" is a separate fact (`detected`) that the
+ * routes report on their own.
+ */
+export async function resolveRuntimeExecutor(
+  requestedId: string,
+  getProfile: (id: string) => Promise<AgentProfile | null>,
+): Promise<RuntimeExecutorResolution> {
+  const stripped = runtimeProviderAgentId(requestedId);
+  // A Profile owns its entire id, and Profile slugs come from user-chosen names, so one can begin with
+  // `local-` on its own. Looking the id up as written first keeps such a Profile resolvable; falling
+  // back to the stripped form still resolves `local-<profileId>`, which is how a Blueprint stores it.
+  const profile = (await getProfile(requestedId))
+    ?? (requestedId === stripped ? null : await getProfile(stripped))
+    ?? undefined;
+  const agentId = profile?.baseAgentId ?? stripped;
+  const adapterStatus = getAgentAdapterStatus(agentId);
+  if (adapterStatus === 'verified') return { ok: true, requestedId, agentId, adapterStatus, profile };
+  return { ok: false, reason: adapterStatus === 'candidate' ? 'unverified-adapter' : 'no-adapter', requestedId, agentId, adapterStatus, profile };
+}
+
+/** Refusal sentence shared by every layer that rejects an executor, so the record and the API agree. */
+export function describeRuntimeExecutorRejection(executor: RuntimeExecutor): string {
+  const subject = executor.profile
+    ? `Profile "${executor.profile.name}" (base agent ${executor.agentId})`
+    : `Agent "${executor.agentId}"`;
+  return executor.adapterStatus === 'candidate'
+    ? `${subject} has a candidate Adapter that has not passed non-interactive execution verification, so it cannot run this task.`
+    : `${subject} has no execution Adapter at all, so it cannot run this task.`;
 }
 
 export function getAgentAdapterStatus(agentId: string): AgentAdapterStatus {

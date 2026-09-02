@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname, parse } from 'node:path';
 import { AgentDevStore } from '@agent-dev/storage';
+import { refreshCredentialCache } from '@agent-dev/provider-cli';
 import { createDaemonApp } from './app.js';
 import { loadOrCreateDaemonToken } from './auth.js';
 import { DaemonEventBus } from './events.js';
@@ -43,6 +44,9 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
   const dataDirectory = dirname(databasePath);
   const store = await AgentDevStore.open(databasePath);
   const authToken = loadOrCreateDaemonToken();
+  // No-op unless AGENT_DEV_SECRET_BACKEND=infisical; a misconfigured/unreachable backend
+  // fails startup loudly rather than silently serving empty credentials (no fallback).
+  await refreshCredentialCache();
   const { app, events } = createDaemonApp(store, new DaemonEventBus(), {}, dataDirectory, { authToken });
   // Loopback only, on purpose: the API is unauthenticated beyond the bearer token
   // (see docs/audit-2026-08-31.md, S1 and §6.1-2).

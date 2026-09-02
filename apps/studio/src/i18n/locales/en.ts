@@ -1,4 +1,6 @@
 import type { DeliveryState } from '@agent-dev/workflow';
+import type { NonInteractiveVerdict } from '../../lib/capability-verdict';
+import type { AcceptanceRecord, AgentCapabilityProbe, ApplyRun, PreviewDeploymentResult, RuntimeRun } from '../../types';
 
 export const en = {
   common: {
@@ -46,8 +48,12 @@ export const en = {
     namePlaceholder: 'e.g. Jiang Feng',
     egAcme: 'e.g. acme',
     language: 'Language',
+    switchToLight: 'Switch to light theme',
+    switchToDark: 'Switch to dark theme',
   },
   nav: {
+    // The landmark a screen reader announces for the sidebar; the items inside it were already keys.
+    studioNavigation: 'Studio navigation',
     projects: 'Projects',
     decisions: 'Decisions',
     connections: 'Connections',
@@ -64,11 +70,18 @@ export const en = {
     title: 'Projects',
     description: 'Each Blueprint is the durable source of truth for a delivery run.',
     newBlueprint: 'New Blueprint',
+    exportBlueprint: 'Export',
+    exportBlueprintTitle: 'Export this Blueprint as JSON',
+    importBlueprint: 'Import',
+    importBlueprintTitle: 'Import a Blueprint from JSON',
+    showDiff: 'Show diff',
+    hideDiff: 'Hide diff',
+    showDiffTitle: 'Compare against the previous revision',
     loading: 'Loading projects...',
     empty: 'No projects yet. Start a Blueprint to establish a delivery baseline.',
     table: {
       project: 'Project',
-      mode: 'Mode',
+      productType: 'Product type',
       deliveryState: 'Delivery state',
       updated: 'Updated',
     },
@@ -79,6 +92,18 @@ export const en = {
       delivery: 'Delivery',
       iteration: 'Iteration',
       release: 'Release',
+    },
+    // The revision comparison panel renders counts, so the labels carry {count} rather than letting
+    // JSX glue a number onto an English word.
+    diff: {
+      eyebrow: 'Blueprint Diff',
+      title: 'Changes since previous revision',
+      loading: 'Loading diff...',
+      added: 'Added ({count})',
+      removed: 'Removed ({count})',
+      modified: 'Modified ({count})',
+      noChanges: 'No changes since previous revision.',
+      unavailable: 'No diff available.',
     },
   },
   // Typed against the delivery state machine, not written by hand: the dashboard renders
@@ -110,6 +135,30 @@ export const en = {
     queued: 'Queued',
     cancelled: 'Cancelled',
   },
+  // Typed against the run records, in the same way projectState is typed against the state machine.
+  // These headings used to interpolate the raw value, so a Chinese interface still read
+  // "Dry-run planned" and "Local Apply queued" with the state left in English. PreviewDeploymentResult
+  // is listed too: it is a third consumer of this family, and naming it here is what keeps a future
+  // rename from leaving the preview heading to resolve to nothing but the key.
+  runStatus: {
+    planned: 'Planned',
+    queued: 'Queued',
+    running: 'Running',
+    completed: 'Completed',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+  } satisfies Record<RuntimeRun['status'] | ApplyRun['status'] | PreviewDeploymentResult['status'], string>,
+  acceptanceStatus: {
+    blocked: 'Blocked',
+    ready: 'Ready for acceptance',
+    approved: 'Accepted',
+  } satisfies Record<AcceptanceRecord['status'], string>,
+  qualityStatus: {
+    passed: 'Passed',
+    failed: 'Failed',
+    // Not the same as "failed": the gate never ran, so there is no result to look at.
+    missing: 'Not run yet',
+  } satisfies Record<AcceptanceRecord['qualityStatus'], string>,
   blueprint: {
     title: 'Blueprint',
     createTitle: 'Create Blueprint',
@@ -144,13 +193,21 @@ export const en = {
     productTypeMobile: 'Mobile app',
     productTypeApiTool: 'API tool',
     runtime: 'Local agent runtime',
-    runtimeNote: 'The selected runtime implements feature tasks in the isolated workspace. Only detected agents can be chosen; beginners use the verified default.',
+    runtimeNote: 'The selected runtime implements feature tasks in the isolated workspace. Only an Agent whose execution Adapter has been verified can be chosen; beginners use the verified default.',
     runtimeCatalogLoading: 'Detecting available runtimes...',
-    runtimeNoneDetected: 'No local agents detected. Install one (e.g. Codex, OpenCode, Claude) to enable custom selection.',
+    // The examples are the Agents whose Adapter is verified. Naming Claude Code here used to invite an
+    // install that still could not be selected.
+    runtimeNoneDetected: 'No local agents detected. Install one with a verified execution Adapter (Codex, OpenCode, CodeBuddy, Hermes) to enable custom selection.',
     runtimeHowToInstall: 'How to install',
     runtimeRecommended: 'Recommended',
-    runtimeVerified: 'Verified',
-    runtimeCandidate: 'Candidate',
+    // Three states, typed against the Adapter status the daemon ships with the catalog. The badge used
+    // to fold "no Adapter exists" and "an Adapter that has never executed a task" into Candidate, which
+    // told the user less than the registry knew.
+    runtimeAdapter: {
+      verified: 'Verified',
+      candidate: 'Candidate',
+      unsupported: 'No Adapter',
+    } satisfies Record<AgentCapabilityProbe['adapterStatus'], string>,
     runtimeNotDetected: 'Not detected',
     agentCodexDesc: 'OpenAI Codex CLI. Fast, reliable, default choice for most tasks. Supports non-interactive mode for automation.',
     agentCodexInstall: 'npm install -g @openai/codex',
@@ -162,6 +219,9 @@ export const en = {
     agentCodebuddyInstall: 'npm install -g @bytedance/codebuddy-cli',
     agentHermesDesc: 'Nous Research Hermes CLI. Open-source model with strong instruction following. Good for local/offline use.',
     agentHermesInstall: 'pip install hermes-agent',
+    // No install command is offered: this repository documents OpenClaw's launch command but not how
+    // it is installed, and guessing here would tell the user to run something unverifiable.
+    agentOpenclawDesc: 'OpenClaw CLI. Runs a local embedded agent turn through its agent subcommand. The Adapter is still a candidate, so it cannot be picked as the executor until execution has been verified.',
     agentAiderDesc: 'Aider AI pair programmer. Git-native, works with many models. Good for incremental changes.',
     agentAiderInstall: 'pip install aider-chat',
     agentPiDesc: 'Read-only code analysis agent. Does not modify files. Good for code review and understanding.',
@@ -192,7 +252,9 @@ export const en = {
     title: 'Delivery decisions',
     plan: 'Delivery plan',
     baselineResources: 'Baseline resources',
-    readyForApproval: 'Ready for approval',
+    // readyForApproval used to be defined here. Nothing rendered it, and it duplicated the wording
+    // baseline.status.ready already owns; test/approval-labels.test.ts now refuses to pin a key that no
+    // component shows.
     ownershipRequired: 'Ownership required',
     approved: 'Approved',
     approvalNote: 'This records intent only. It does not create remote resources or reveal secrets.',
@@ -263,6 +325,9 @@ export const en = {
   credentials: {
     title: 'Credentials',
     note: 'Tokens are stored only in {path} on your machine. They are never uploaded to any server.',
+    backendStatus: 'Secret backend: {type}',
+    backendUnavailable: 'Secret backend {type} unavailable — {reason}',
+    noteInfisical: 'Tokens are stored in the Infisical secret backend configured for this machine. They are not written to a local credentials file.',
     guideMode: 'Guide Mode',
     skipGuide: 'Skip guide',
     step: 'Step {current} of {total}',
@@ -274,7 +339,13 @@ export const en = {
     verifying: 'Verifying...',
     verifyCredentials: 'Verify credentials',
     supabaseConfiguration: 'Supabase Configuration',
-    supabaseStep1: 'Go to {link} and create a new project',
+    // t() returns a plain string, so this step's sentence has to be cut around the link it names.
+    // Both locales put the link in the same slot; a locale that does not must restructure the row
+    // rather than reorder these fragments. The link used to be rendered twice: once as the {link}
+    // argument and once as the anchor after it.
+    supabaseStep1Before: 'Go to ',
+    supabaseStep1After: ' and create a new project',
+    supabaseDashboard: 'Supabase Dashboard',
     supabaseStep2: 'Wait for the project to finish provisioning',
     supabaseStep3: 'Copy the Project URL and the anon/public key',
     supabaseStep4: 'Go to Settings > API in your project dashboard',
@@ -333,13 +404,34 @@ export const en = {
     detecting: 'Detecting local Agents...',
     notFound: 'No Agents found.',
     runningProbe: 'Running read-only capability probe...',
+    // The row names the executor; this control only looks. Splitting them meant giving the looking its
+    // own button, so the label has to say what it does not do.
+    probeCapabilities: 'Run a read-only capability probe',
     detected: 'Detected',
     notDetected: 'Not found',
-    nonInteractiveYes: 'non-interactive: yes',
-    nonInteractiveUnknown: 'non-interactive: unknown',
-    workspaceWriteYes: 'workspace-write: yes',
-    workspaceWriteNo: 'workspace-write: no',
-    adapter: 'adapter: {status}',
+    // The probe reads a help page and never runs the Agent, so these say what it read rather than
+    // what it concluded. `false` is two different facts - looked for the switches our Adapter passes
+    // and did not find them, versus nothing to look for or the page never answered - and the old
+    // single `unknown` reported "nobody looked" for the first and "nobody can tell" for the second.
+    // Which reading applies is derived in src/lib/capability-verdict.ts. There is no workspace-write
+    // chip beside these any more: the probe had copied it out of the catalog's own declaration, which
+    // the same row already prints one line above.
+    nonInteractiveVerdict: {
+      listed: 'non-interactive: listed in help',
+      absent: 'non-interactive: not listed in help',
+      inconclusive: 'non-interactive: help cannot tell',
+    } satisfies Record<NonInteractiveVerdict, string>,
+    // The chip used to print the raw enum into this sentence, so a Chinese interface read
+    // "adapter: unsupported". Same domain as blueprint.runtimeAdapter, phrased for this slot.
+    adapterStatus: {
+      verified: 'adapter: verified',
+      candidate: 'adapter: candidate',
+      unsupported: 'adapter: none',
+    } satisfies Record<AgentCapabilityProbe['adapterStatus'], string>,
+    // Shown where the Agent is visible but cannot be picked. Saying why keeps "detected" from reading
+    // like a promise: the CLI being installed and the execution contract having been exercised are two
+    // different facts.
+    notExecutable: 'No verified execution Adapter, so this Agent cannot run a task here.',
     addCustomSummary: 'Add a custom Agent',
     namePlaceholder: 'e.g. My Custom Agent',
     commandPlaceholder: 'e.g. my-agent',
@@ -433,6 +525,15 @@ export const en = {
     missingDependencies: 'Missing dependencies',
     cancelled: 'Cancelled',
   },
+  // Only this component's own chrome is here. The classification title, explanation and remediation
+  // steps arrive from @agent-dev/agent-runtime as English prose, which is the same open decision as
+  // the Blueprint text.
+  failureDisplay: {
+    autoRetryable: 'Auto-retryable',
+    showRemediation: 'Show remediation steps ({count})',
+    hideRemediation: 'Hide remediation steps ({count})',
+    rawError: 'Raw error',
+  },
   errors: {
     daemonUnavailable: 'The local daemon is unavailable.',
     loadProjects: 'Unable to load projects.',
@@ -517,9 +618,11 @@ export const en = {
     runApplySimulator: 'Run the local Apply Simulator? It writes only inside .agent-dev and makes no external changes.',
     runNpmInstall: 'Run npm install in the isolated Agent-Dev workspace? This may access the npm registry and writes only that workspace.',
     deletePreviewProjects: 'Delete the preview projects from Vercel and Cloudflare?',
-    prepareRuntimeDryRun: 'Prepare a guarded Runtime dry-run? No Codex process will start and no files will be changed.',
-    startCodex: 'Start Codex in the approved workspace? It may modify only that workspace and will not deploy or access production resources.',
-    retryCodex: 'Retry Codex in the same approved workspace? The previous failed attempt will be preserved.',
+    // Nothing runs during a dry run, so this gate names no executor: the previous wording promised a
+    // Codex process would not start, which answered a question the user had not asked.
+    prepareRuntimeDryRun: 'Prepare a guarded Runtime dry-run? Nothing is executed and no files are changed.',
+    startAgent: 'Start {agent} in the approved workspace? It may modify only that workspace and will not deploy or access production resources.',
+    retryAgent: 'Retry {agent} in the same approved workspace? The previous failed attempt will be preserved.',
     approveTask: 'Approve this task and its acceptance criteria for Agent execution as {approvedBy}?',
     approveDeliveryEvidence: 'Approve this delivery evidence as {approvedBy}? This does not deploy production resources.',
     runFakeProviderSimulation: 'Run the Fake Provider simulation? It changes only in-memory simulation state and creates no cloud resources.',
@@ -623,6 +726,9 @@ export const en = {
   },
   featureTask: {
     eyebrow: 'Feature delivery',
+    // Every block on the Iteration tab is gated on a state the project has not reached yet, which
+    // left the tab rendering as blank space with no reason and no next step.
+    waitingForApply: 'Feature work needs the workspace Local Apply creates. Run Local Apply from the Delivery tab, then return here to define a feature task.',
     defineNext: 'Define the next feature',
     taskIs: 'Task is {status}. Acceptance criteria are the Agent boundary.',
     createTaskDescription: 'Create a focused task package before asking an Agent to change code.',
@@ -642,23 +748,69 @@ export const en = {
     whoApproves: 'Who approves this task?',
     approvedBy: 'Approved by {approvedBy} · {date}',
   },
+  // Every string in this block is owned by the interface: the editor changes a draft feature task's
+  // steps before any Agent runs them, so none of it came from the backend and none of it was
+  // unreachable. It had simply never been moved out of JSX.
+  pipeline: {
+    eyebrow: 'Pipeline',
+    stepCountOne: '{count} step · {status}',
+    stepCountMany: '{count} steps · {status}',
+    edit: 'Edit Pipeline',
+    stepNumber: 'Step {number}',
+    removeStep: 'Remove step',
+    name: 'Name',
+    namePlaceholder: 'Step name',
+    profile: 'Profile',
+    profileSelect: 'Select profile...',
+    prompt: 'Prompt',
+    promptPlaceholder: 'Instructions for this step...',
+    addStep: '+ Add step',
+    saving: 'Saving...',
+    save: 'Save Pipeline',
+    executing: 'Executing...',
+    execute: 'Execute Pipeline',
+    resume: 'Resume Pipeline',
+    status: {
+      idle: 'Idle',
+      running: 'Running',
+      completed: 'Completed',
+      failed: 'Failed',
+      paused: 'Paused',
+    },
+  },
   runtime: {
     eyebrow: 'Agent runtime',
     runtimeNotPrepared: 'Runtime not prepared',
-    status: '{mode} {status}',
-    completed: 'Codex finished. Review the diff and run the Quality Gate before acceptance.',
-    failed: 'Codex failed on attempt {attempts}. Review the report or retry.',
-    running: 'Codex is working in the approved workspace.',
-    planned: 'No Codex process has started. Review the local plan before explicitly starting execution.',
+    status: '{mode} · {status}',
+    // Whether this run only plans, or may write to the approved workspace.
+    runMode: {
+      dryRun: 'Dry run',
+      execute: 'Execution',
+    },
+    // Every string below that names an executor takes it as {agent}, resolved from RuntimeRun.agentId.
+    // They used to say Codex outright, which was a false statement about the run the moment somebody
+    // picked OpenCode, CodeBuddy or Hermes from a catalog that now has four verified Agents.
+    completed: '{agent} finished. Review the diff and run the Quality Gate before acceptance.',
+    failed: '{agent} failed on attempt {attempts}. Review the report or retry.',
+    running: '{agent} is working in the approved workspace.',
+    planned: 'No {agent} process has started. Review the local plan before explicitly starting execution.',
     prepareDescription: 'Prepare a guarded Runtime plan from the approved task.',
+    // The daemon refuses to run a task with an Agent it cannot resolve instead of quietly picking
+    // Codex. Naming the refused Agent - and the fact that nothing was substituted - is the only way
+    // the panel can tell this apart from a project that simply has no approved run.
+    refusedAgent: '{agent} cannot run this task, and no other Agent was substituted. Pick a verified Agent before preparing.',
+    // A second refusal sentence, because the daemon refuses two different things: an execution contract
+    // it has never verified, and a CLI that is not on this machine. The second is fixable by installing
+    // it, so it must not be worded like an Agent that cannot do the work.
+    agentNotDetected: '{agent} is not installed on this machine, and no other Agent was substituted. Install its CLI, or pick a different verified Agent before preparing.',
     prepare: 'Prepare Runtime',
     preparing: 'Preparing...',
     cancelling: 'Cancelling...',
     cancelDryRun: 'Cancel dry-run',
-    runningCodex: 'Running Codex...',
-    runCodex: 'Run Codex',
-    retryingCodex: 'Retrying Codex...',
-    retryCodex: 'Retry Codex',
+    runningAgent: 'Running {agent}...',
+    runAgent: 'Run {agent}',
+    retryingAgent: 'Retrying {agent}...',
+    retryAgent: 'Retry {agent}',
     gitBranch: 'Branch',
     gitHead: 'HEAD',
     gitWorkingTree: 'Working tree',
@@ -667,8 +819,8 @@ export const en = {
     gitNoChanges: 'no changes',
     attemptRecorded: 'attempt recorded',
     attemptsRecorded: 'attempts recorded',
-    executionFailed: 'Codex execution failed with exit code {exitCode}.',
-    retryFailed: 'Codex retry failed with exit code {exitCode}.',
+    executionFailed: '{agent} execution failed with exit code {exitCode}.',
+    retryFailed: '{agent} retry failed with exit code {exitCode}.',
   },
   acceptance: {
     eyebrow: 'Human acceptance',

@@ -202,13 +202,19 @@ export type AgentDescriptor = {
   version: string | null;
   detail: string;
   capabilities: string[];
+  // Whether the execution contract for this Agent has been exercised. Separate from `detected`,
+  // which only says the CLI is installed: an installed Agent with a candidate Adapter cannot run a
+  // feature task, so Studio must not present the two as the same guarantee.
+  adapterStatus?: 'verified' | 'candidate' | 'unsupported';
 };
 
 export type AgentCapabilityProbe = {
   agentId: string;
+  // Evidence about a help page, not a verdict about the Agent: what the three readings are is derived
+  // in src/lib/capability-verdict.ts. There is no workspace-write field here on purpose - the probe
+  // never observed one, and the row above already shows what the catalog declares.
   nonInteractive: boolean;
   nonInteractiveFlags: string[];
-  workspaceWrite: boolean;
   helpAvailable: boolean;
   adapterStatus: 'verified' | 'candidate' | 'unsupported';
 };
@@ -236,6 +242,15 @@ export type CredentialMeta = {
   version: 1;
   updatedAt: string;
   keys: string[];
+};
+
+// Read-only secret backend status from GET /api/credentials/backend; never carries plaintext.
+export type CredentialBackendInfo = {
+  type: 'local-file' | 'infisical';
+  available: boolean;
+  reason?: string;
+  projectId?: string;
+  environment?: string;
 };
 
 export type ProjectResources = {

@@ -80,17 +80,42 @@ Structured output: Unknown
 
 未识别的能力显示 `Unknown`，不能被自动推断为支持。
 
-### 3.1 "探测不出来" 不等于 "不存在"（2026-08-26 补充）
-
-探测有三种结果，必须分开表达，不能塌成两种：
+### 3.1 发现只有两种结论（2026-08-26 补充，2026-09-01 改写）
 
 | 结果 | 含义 | 是否缓存 |
 | --- | --- | --- |
-| PATH 查找返回非零 | 命令确实不在 PATH 上 | 缓存（结论确定） |
-| PATH 查找自身没跑起来（超时 / EAGAIN / ENOENT） | 可用性未知 | **不缓存**，展示为"未完成，请重试" |
-| 在 PATH 上但 `--version` 失败 | Agent 存在，版本未知 | 缓存为 detected，版本 `null` |
+| `resolveExecutablePath()` 在 PATH × PATHEXT 上找不到 | 命令确实不在 PATH 上 | 缓存（结论确定） |
+| 找到了但 `--version` 失败 / 超时 | Agent 存在，版本未知 | 缓存为 detected，版本 `null` |
 
-第二行曾被当成第一行处理：一次负载下的 `which` 超时就把装好的 Agent 在 Studio 里标成不可用、daemon 拒绝启动它并返回 409，且结论被缓存到进程结束（缺陷 29）。现在未完成的查找会在更长预算上重试一次，仍未完成则报告未知且不落缓存。
+本节以前还分三种结果，因为 PATH 查找是**外部命令 `which`**：它自己可能超时 / EAGAIN / ENOENT，而那种“没跑起来”曾会被当成“命令不存在”，一次失败的查找就可能把已装好的 Agent 在 Studio 里标成不可用、让 daemon 拒绝启动它并返回 409，且结论缓存到进程结束（缺陷 29）；当时的修法是两个预算各重试一次、未知结论不落缓存。
+
+2026-09-01 把这类不确定整个去掉了：发现改为进程内用 `existsSync` 遍历 PATH 与 PATHEXT，无子进程、无超时，所以不存在“查找本身失败”这种状态。选型理由：Windows 根本没有 `which` 命令，那套重试在一个目标平台上永远走不通（本机此前能用，纯因 hermes 带了一个 MSYS 版 `which`）。Windows 下 PATHEXT 条目必须优先于无后缀名：npm 会同时留下 `claude`（POSIX sh 脚本）与 `claude.cmd`，把前者交给 shell 会挂到超时；探测传的是固定字面量参数，所以 win32 下 `--version` / `--help` 带 `shell: true`（与 `doctor.ts` 同样理由），不因此引入注入面。
+
+### 3.2 “已检测”不等于“能执行”（2026-09-01 补充，2026-09-02 收紧）
+
+`detected` 只回答“这个 CLI 本机装了没”，而能不能跑 Feature Task 取决于 `AGENT_ADAPTERS` 里的状态（`verified` / `candidate` / `unsupported`）：`verified` 是通过非交互执行契约实测过的；`candidate` 命令形态已知但没实测过；`unsupported` 根本没有 Adapter。两个事实不能混为同一个标签，所以 `/api/runtime/catalog`（GET 与 POST）除 `AgentDescriptor` 字段外额外带一个 `adapterStatus`，Studio 的徽章直接按它渲染 `Verified` / `Candidate`，不让浏览器从 `detected` 推断。该字段是 daemon 从 Adapter 注册表取的，与本机装了哪些 agent 无关。
+
+2026-09-02 起，非 `verified` 的 Agent 在任何一层都拿不到计划：Studio 不让它被选中；`resolveRuntimeExecutor()` 只承认 `verified`，是“这个任务由谁执行”的唯一解析点（去 `local-` 命名空间、把 Agent Profile 解析到 base agent、再查注册表）；daemon 的两条 Runtime 路由与 storage 的两个写入点共用它，拒绝时返回 409 + `code: agent_not_executable` + `agentId`，绝不换一个 Agent 顶上。
+
+同一天补上的是客户端那一半：Studio 也不代替用户挑执行者。加载 `/api/runtime/catalog` 只清除已经失效的选择（不在目录里且不是 Profile 才算失效），不写入任何新选择；Runtime 面板头部允许印出的名字只来自 `runtimeExecutorId()` 的一条链——已准备的运行记录、用户的显式选择、已批准 Blueprint 的 provider（去掉命名空间）。此前它会默认选中目录里第一个可运行的 Agent，于是一份指名 Claude Code 的项目在页面上写着 Codex，而 Prepare 真的发出了一次 Codex 运行。
+
+同日还拆开了目录行上的两个意图：过去点一行会同时跑只读能力探测**和**把该 Agent 写成执行者，于是「看了一眼」与「派了活」是同一个动作。现在行本身只负责选定执行者（`canRunTasks` 不过就 `disabled`，理由仍写在行内），探测移到行右侧的独立按钮——任何已装上的 CLI 都可以探测，探测完不改变任何选择。`agent-selectability.test.ts` 钉住两点：`probeAgent` 函数体内不得出现 `setSelectedAgentId`，且全文件只有一个控件在 click 时调用探测。
+
+此前 candidate 可以生成 dry-run 计划、只在执行阶段被 `buildAgentExecutionPlan` 拒——那次拒绝发生在用户已经看到计划之后，而计划里写着的是一条永远跑不起来的命令。更旧的行为更糟：解析不出来就回退 Codex，于是一份指名 Claude Code 的 Blueprint 会得到一份 Codex 的运行记录。409 同时被“还没有已批准任务”使用，所以两种事实必须靠 `code` 区分；Studio 侧因为浏览器不能 import 本包（顶层 `node:child_process`）镜像了同一个字面量，两边测试各自钉死该字符串。
+
+### 3.3 探测读的是帮助输出，不是能力（2026-09-02 补充）
+
+`probeAgentCapabilities()` 只做一件事：读进一页 CLI 的 help 输出，检查**我们自己的 Adapter 会传的那几个参数**在不在里面。它从不启动一次真实运行，因此：
+
+- `nonInteractive: true` 的意思是“帮助输出把它要找的参数列为一项”，不是“这个 Agent 能非交互运行”。后一句由 `AGENT_ADAPTERS` 的 `verified` 记录，那是真跑过一次、退出码为 0 才写下的。
+- `nonInteractive: false` 底下是两种事实，Studio 必须分开渲染（`apps/studio/src/lib/capability-verdict.ts`）：帮助输出答了而参数不在（`absent`）；帮助输出没答，或本来就没有参数可找（`inconclusive`）。此前两者都印成 `unknown`，等于对着“查过且没找到”说“没人查过”。OpenCode 2.0 属于后者——它的非交互路径是 driver 脚本里的 `opencode api POST /api/session`：本机实测它的 `--help` 连 `api` 这个词都不出现，所以旧表拿 `api` 当期望永远命中不了；而即使某一版帮助页列出了这个子命令，一个子命令名也说不清“这一趟运行不需要人应答”，那张期望表只会凭空白给出一份判定。
+- 参数只有独立成一个 token 才算列出：`--json-lines` 不能替 `--json` 作证，`--permission-mode` 里含的 `-p` 也不是 Claude Code 的 `-p`。原子串匹配两处都会给出确认。
+- help 只有在命令真的跑起来且退出码为 0 时才算答案。win32 下探测带 `shell: true`，一个不存在的命令也会由 cmd.exe 回一段“不是内部或外部命令”的文本；把它当帮助页读，就会对一个压根没装上的 Agent 得出“帮助输出说它不支持”这个反过来的结论。
+- 问的是哪一层 help 由参数表决定：`codex --help` 根本不列 `--json`，`codex exec --help` 才列。此前只读顶层，于是把一个已实测过执行契约的 Agent 报成缺能力——假阴性出在问题问错了地方，而不是出在那个 Agent 上。
+
+参数表在 `src/non-interactive-switches.ts`，每一条都必须是 `AGENT_ADAPTERS` 真正传的参数。两个表分处两个文件、曾经漂移过：aider 查的是 `--yes`（Adapter 传的是 `--yes-always`，靠子串侥幸命中），openclaw 查的是它并没有的 `exec` 子命令。`test/capability-probe.test.ts` 逐条比对二者，并用注入的假 help 输出覆盖上面每一条判据，不再依赖跑测试这台机器装了哪些 CLI。
+
+探测行原来还有一枚 `workspace-write` chip 已删除：那个字段是名为 probe 的函数从 `BUILT_IN_CAPABILITIES` 的静态声明里抄来的，而同一行上一排 chip 展示的就是那份声明。探测不该为自己没测的东西作证；声明留在声明的位置。本机实测（`codex`/`claude`/`codebuddy`/`hermes` 四个）改造后全部为 `listed`，`opencode` 为 `inconclusive`，未安装的 `aider` 与超时的 `openclaw` 也是 `inconclusive`——改造前 `codex` 报的是 `unknown`。
 
 ## 4. 专业模式
 
@@ -173,7 +198,7 @@ runtime:
 
 ## 8. 当前实现边界
 
-当前代码已提供本地 Agent Catalog API 和 Studio 面板：内置 Agent 来自 Key-Value 文件，本机未安装的内置 Agent 不显示；用户可以通过弹窗添加 custom Agent，未安装的 custom Agent 置灰并持久化到 `.agent-dev/agents.conf`。Capability Probe 现在返回明确的 Adapter 状态：`verified`（可执行）、`candidate`（可生成 dry-run，但未实测执行）或 `unsupported`（无 Adapter）。当前仅 Codex Adapter 已完成隔离 workspace 的真实执行验证；其他 Agent 不能自动执行。`isAgentExecutable()` 只会为 `verified` Adapter 返回 `true`。
+当前代码已提供本地 Agent Catalog API 和 Studio 面板：内置 Agent 来自 Key-Value 文件，本机未安装的内置 Agent 不显示；用户可以通过弹窗添加 custom Agent，未安装的 custom Agent 置灰并持久化到 `.agent-dev/agents.conf`。Capability Probe 现在返回明确的 Adapter 状态：`verified`（可执行）、`candidate`（命令形态已知，但未通过非交互执行验证，因此不能承接任务）或 `unsupported`（无 Adapter）。已完成隔离 workspace 真实执行验证的 Adapter 是 Codex、OpenCode、CodeBuddy 与 Hermes；`isAgentExecutable()` 只会为 `verified` Adapter 返回 `true`，而执行者解析（`resolveRuntimeExecutor()`）与它同一判据，见第 3.2 节。
 
 ## 9. Agent Profile（基于已有 Agent 创建变体）
 

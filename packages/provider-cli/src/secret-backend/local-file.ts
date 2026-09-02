@@ -47,7 +47,7 @@ export class LocalFileBackend implements SecretBackend {
 
     if (existing) {
       const newVersion: SecretVersion = {
-        version: existing.version + 1,
+        version: (existing.version ?? 0) + 1,
         value,
         createdAt: now,
         status: 'active',
@@ -123,7 +123,7 @@ export class LocalFileBackend implements SecretBackend {
     if (approver) versionEntry.approver = approver;
 
     // If approving a non-current version, make it active
-    if (version !== secret.version) {
+    if (version !== (secret.version ?? 0)) {
       secret.value = versionEntry.value;
       secret.version = version;
       secret.status = 'active';
