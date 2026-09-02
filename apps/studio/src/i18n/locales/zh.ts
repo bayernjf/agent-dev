@@ -715,6 +715,31 @@ export const zh = {
       approved: '已批准',
       awaiting: '等待批准',
     },
+    summary: {
+        ready: '所有所有权目标已选定。资源创建仍需一次明确批准，尚未开始。',
+        blocked: '在批准基线前，仍需 {count} 个所有权目标。',
+      },
+      resource: {
+        github: {
+          title: 'GitHub 仓库',
+          missingReason: '选择将拥有该仓库的 GitHub 所有者或组织。',
+        },
+        supabase: {
+          title: 'Supabase 项目',
+          missingReason: '选择 Supabase 组织，稍后确认区域和套餐。',
+        },
+        vercel: {
+          title: 'Vercel API 项目',
+          missingReason: '选择将拥有 API 项目的 Vercel 团队。',
+        },
+        cloudflare: {
+          title: 'Cloudflare Pages 项目',
+          missingReason: '选择将拥有 Pages 项目的 Cloudflare 账户。',
+        },
+        reason: {
+          hasOwner: '批准后，Agent-Dev 可在 {owner} 中创建 {title}。',
+        },
+      },
   },
   qualityGate: {
     eyebrow: '本地 Quality Gate',
