@@ -1,5 +1,5 @@
 import type { DeliveryState } from '@agent-dev/workflow';
-import type { AcceptanceRecord, ApplyRun, PreviewDeploymentResult, RuntimeRun } from '../../types';
+import type { AcceptanceRecord, AgentCapabilityProbe, ApplyRun, PreviewDeploymentResult, RuntimeRun } from '../../types';
 
 export const en = {
   common: {
@@ -192,13 +192,21 @@ export const en = {
     productTypeMobile: 'Mobile app',
     productTypeApiTool: 'API tool',
     runtime: 'Local agent runtime',
-    runtimeNote: 'The selected runtime implements feature tasks in the isolated workspace. Only detected agents can be chosen; beginners use the verified default.',
+    runtimeNote: 'The selected runtime implements feature tasks in the isolated workspace. Only an Agent whose execution Adapter has been verified can be chosen; beginners use the verified default.',
     runtimeCatalogLoading: 'Detecting available runtimes...',
-    runtimeNoneDetected: 'No local agents detected. Install one (e.g. Codex, OpenCode, Claude) to enable custom selection.',
+    // The examples are the Agents whose Adapter is verified. Naming Claude Code here used to invite an
+    // install that still could not be selected.
+    runtimeNoneDetected: 'No local agents detected. Install one with a verified execution Adapter (Codex, OpenCode, CodeBuddy, Hermes) to enable custom selection.',
     runtimeHowToInstall: 'How to install',
     runtimeRecommended: 'Recommended',
-    runtimeVerified: 'Verified',
-    runtimeCandidate: 'Candidate',
+    // Three states, typed against the Adapter status the daemon ships with the catalog. The badge used
+    // to fold "no Adapter exists" and "an Adapter that has never executed a task" into Candidate, which
+    // told the user less than the registry knew.
+    runtimeAdapter: {
+      verified: 'Verified',
+      candidate: 'Candidate',
+      unsupported: 'No Adapter',
+    } satisfies Record<AgentCapabilityProbe['adapterStatus'], string>,
     runtimeNotDetected: 'Not detected',
     agentCodexDesc: 'OpenAI Codex CLI. Fast, reliable, default choice for most tasks. Supports non-interactive mode for automation.',
     agentCodexInstall: 'npm install -g @openai/codex',
@@ -212,7 +220,7 @@ export const en = {
     agentHermesInstall: 'pip install hermes-agent',
     // No install command is offered: this repository documents OpenClaw's launch command but not how
     // it is installed, and guessing here would tell the user to run something unverifiable.
-    agentOpenclawDesc: 'OpenClaw CLI. Runs a local embedded agent turn through its agent subcommand. The Adapter is still a candidate, so only a dry-run plan is available until execution is verified.',
+    agentOpenclawDesc: 'OpenClaw CLI. Runs a local embedded agent turn through its agent subcommand. The Adapter is still a candidate, so it cannot be picked as the executor until execution has been verified.',
     agentAiderDesc: 'Aider AI pair programmer. Git-native, works with many models. Good for incremental changes.',
     agentAiderInstall: 'pip install aider-chat',
     agentPiDesc: 'Read-only code analysis agent. Does not modify files. Good for code review and understanding.',
@@ -401,7 +409,17 @@ export const en = {
     nonInteractiveUnknown: 'non-interactive: unknown',
     workspaceWriteYes: 'workspace-write: yes',
     workspaceWriteNo: 'workspace-write: no',
-    adapter: 'adapter: {status}',
+    // The chip used to print the raw enum into this sentence, so a Chinese interface read
+    // "adapter: unsupported". Same domain as blueprint.runtimeAdapter, phrased for this slot.
+    adapterStatus: {
+      verified: 'adapter: verified',
+      candidate: 'adapter: candidate',
+      unsupported: 'adapter: none',
+    } satisfies Record<AgentCapabilityProbe['adapterStatus'], string>,
+    // Shown where the Agent is visible but cannot be picked. Saying why keeps "detected" from reading
+    // like a promise: the CLI being installed and the execution contract having been exercised are two
+    // different facts.
+    notExecutable: 'No verified execution Adapter, so this Agent cannot run a task here.',
     addCustomSummary: 'Add a custom Agent',
     namePlaceholder: 'e.g. My Custom Agent',
     commandPlaceholder: 'e.g. my-agent',
