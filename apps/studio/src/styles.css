@@ -489,8 +489,19 @@ select option {
 .agent-badge.verified { background: color-mix(in srgb, var(--status-ok) 12%, var(--surface)); color: var(--status-ok); }
 /* Deliberately not green: a candidate Adapter has an Adapter but no exercised execution contract. */
 .agent-badge.candidate { background: color-mix(in srgb, var(--status-pending) 18%, var(--surface)); color: var(--status-pending); }
+/* Weaker than candidate on purpose: there is no Adapter at all, so there is nothing waiting to be verified. */
+.agent-badge.unsupported { background: var(--surface-muted); color: var(--text-3); }
 .agent-badge.profile { background: color-mix(in srgb, var(--brand) 12%, var(--surface)); color: var(--brand); }
 .agent-badge.not-detected { background: var(--surface-muted); color: var(--text-3); }
+/* Why a visible Agent cannot be picked. Inline in the row, because the refusal has to be read next to
+   the name it applies to. */
+.agent-reason {
+  display: block;
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
 
 .diff-section { margin-bottom: 24px; padding: 16px; background: var(--surface-muted); border-radius: 8px; }
 .diff-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 12px; }
