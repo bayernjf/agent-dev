@@ -63,6 +63,7 @@
 | 29 | **探测超不过时限就谎报 Agent 未安装**（`f2e4278`） | `which` 退出码非 0 是"确实不在 PATH 上"的证据，`which` **跑不起来**不是——但两者走同一分支，于是 300ms 超时（或进程表满时的 EAGAIN）会报 `Command not found on local PATH.` **并缓存**，让 Studio 把装好的 Agent 标成 missing、daemon 用 409 拒绝启动它，且在进程剩余生命周期里一直如此。这与函数自己下一分支的注释直接矛盾（"版本探测失败不得隐藏已安装的 Agent"）。本会话全量测试**两次自发复现**这个 flake，才定位到它。修复：不确定的探测改用更长预算重试且**永不缓存**，让下一次调用有机会给出结论。回归测试把 PATH 清空使 `which` 自身不可解析——与超时同一失败形态，但没有时序依赖（已验证该测试在修复前必红）。 |
 | 30 | **唯一事实源已经立了，两处界面文案还没接上**（`ebe7ec4`） | 缺陷 24 把"这个类型用哪几家云"收进 `PRODUCT_TYPE_DESCRIPTORS[type].providers`，但仍有两处把 web-app 那套说给**所有**类型听：`getBlueprintDecisions` 的两张决策卡（`Application baseline: React/Vite, Hono and npm workspaces` + `Cloud account connection: Supabase, Cloudflare Pages and Vercel Functions`），以及 Studio 表单里渲染在**产品类型选择框正下方**的那句 `blueprint.baselineNote`。于是一个 MCP server 的决策台向用户索要它这次根本不碰的云账户，而**同一个 Blueprint 自己生成的** `PRODUCT_STANDARD.md` 写着 `Data and auth: Not provisioned for this product type`。教训：**SSOT 只在被读到的地方生效**，收敛清单的判据必须写成"每个把基线说给用户听的位置都读它"，不是"当前四个调用点读它"。修复：两张卡与注记都改读同一张表；`mode` 一律保持 `manual`（没有云资源 ≠ 没有闸门，放掉这道门会让一份基线在零授权下被批准）。回归测试不断言字符串，而是断言卡片值等于该类型生成物 `PRODUCT_STANDARD.md` 里自己写的 `Frontend:` / `Backend:` 行，并逐个类型钉住"该看到哪句注记"的期望表。**未修**：`desktop.frontend` 不随 `desktopShell` 变化（electron/tauri 显示同一串）。 |
 | 31 | **两条用例的判决由八个 CLI 探测决定**（`64c2a72`） | 一条挂着"未归因"标签的间歇失败，根因不是运气而是不等式：`discoverAgentRuntimes()` 顺序探测 8 个内置 Agent，每个版本探针预算 `VERSION_PROBE_TIMEOUT_MS = 5 s` → 最坏 40 s，而 vitest 单用例默认预算也是 5 s；`fileParallelism: false` 只缓解不解决。测前实测 8 次全量跑 6 绿 2 红，两条红都是 `Test timed out in 5000ms`（实测耗时 5239 ms / 6091 ms）。修复：给 daemon 加 `discoverRuntimes` 注入接缝（沿用已有 `isAgentDetected` 的形状），MCP 测试注入单 Agent fixture；catalog 测试把 PATH 指向只放一个可执行文件的临时目录——判决不再取决于装了几 CLI。测后连续 10 次全量绿，两文件分别 879 ms / 398 ms。**已知残留**：`apps/daemon/test/app.test.ts` 故意保留真实发现（它断言的就是路由与真实 catalog 的契约），同样时序风险仍在；fixture 看不见 `POST /api/runtime/catalog` 追加的自定义 Agent，那条断言只能用真实发现。 |
+| 32 | **版本探测没答，版本字段却替它作答**（`806d490`） | 做 §3.5 那份八个 Agent 的对账时撞出来的：`detect()` 把 `--version` 输出的**第一行无条件**当版本号，于是一台装了 openclaw 与 pi 的机器上，Studio 的 Agent 列表把 `openclaw: Node.js >=22.22.3 <23, …  (current: v20.20.2).` 和 `file:///…/chunk-OMWWHBTG.js:1257` 当成版本号码出来（实测两者都是退出码 1、stdout 空、内容全在 stderr：openclaw 167 字节、pi 57,285 字节）。同一行的 `detail` 明明写着 `version probe failed`——**一条记录里两个字段互相打脸**，而用户读到的是版本号那一段。这是规则 8 的同一形态换个字段：不止"检测不出来 ≠ 不存在"，任何**由探测填的字段**在探测没答时都必须留空。修复：`probeAnswered = !result.error && result.status === 0` 同时决定 `version` 与 `detail`，PATH 上存在这件事仍由 `detected` 单独表达（§3.1 的两分不变）。种植反证：撤掉 guard，新用例红在 `expected 'Example: Node.js >=22 is required (cu…' to be null`；改回后本机重跑八个，pi 与 openclaw 的 `version` 为 null、其余六个不变。 |
 
 ## 2. 由缺陷沉淀的架构规则
 
@@ -75,7 +76,7 @@
 5. **每个闸门/步骤必须能证明自己**：外部写操作先 Dry Run；未取得真实 Evidence 的步骤不能标记完成；自动修复最多两次。
 6. **幂等性优先**：Provider 建项目、部署、发布都带幂等键；重试不能发出上一次残留的位（发布每次尝试都 reset）。
 7. **按产品类型分叉的事实只允许有一个来源**（缺陷 24/26/30）。"这个类型用哪几家云"写在 `PRODUCT_TYPE_DESCRIPTORS[type].providers`，审批清单、人工授权项、daemon 的 provider specs、Studio 表单、blueprint 里记的部署目标、决策台的两张卡、表单里那句基线注记全部读它。判据：加第七种产品类型时只需填一行，而不是记住这一串调用点；映射用 `Record<ProductType, …>` 保证漏填即编译失败。
-8. **"探测不出来"与"不存在"必须分开表达**（缺陷 29）。探测完成并给出否定结论才可缓存为否定；探测本身没跑完只能报"未知"且不得缓存。同理，能力探测失败不得隐藏已发现的对象。
+8. **"探测不出来"与"不存在"必须分开表达，且这条适用于探测填的每一个字段**（缺陷 29/32，`806d490`）。探测完成并给出否定结论才可缓存为否定；探测本身没跑完只能报"未知"且不得缓存。同理，能力探测失败不得隐藏已发现的对象，而**一次失败的版本探测也不得留下版本字符串**——字段叫什么不重要，规则是"没答出来就不能替它作答"。同一行记录里 `version` 有值而 `detail` 写着探测失败，就是自相矛盾的输出。
 9. **持久化 schema 加必填字段等于一次数据迁移**（缺陷 25）。加字段前先回答"已经写下的行长什么样"；给出与旧实现语义一致的 `.default()` 属于读迁移，与放宽输入校验是两件事——输入校验仍可严格。放宽枚举安全（旧值仍合法），收紧或新增必填不安全。
 10. **界面上"不可能出现"的分支不要用断言绕过类型检查**（缺陷 20/27）。`as SomeKey` 会把缺失藏到运行时，写在它后面的兜底往往是死代码。把来源类型收紧到真实枚举，让缺失在编译期暴露。
 11. **一个用例的时间预算不能被它不关心的本机探测吃掉**（缺陷 31，`64c2a72`）。任何探测本机命令行的函数都要有注入接缝（`discoverRuntimes` / `isAgentDetected`）或能让调用方改写 `PATH`：内置目录有 8 个命令、逐个同步探测、每个探针预算 5 s，最坏 40 s 而 vitest 单用例默认预算 5 s——这条不等式没解决之前，"间歇失败"就永远归因不清。两种合规写法：注入 fixture 目录，或把 `PATH` 指向只放一个可执行文件的临时目录。**故意保留的例外**：`apps/daemon/test/app.test.ts` 断言的就是路由与真实 catalog 的契约，只能用真发现，也因此仍带同样的时序风险。本条**没有自动化护栏**（写不出一个能发现"将来某条测试没注入"的测试），它是代码评审时的问题：新增用例若触到发现/探测路径，先回答它花的每一秒是不是它断言的东西。
@@ -111,9 +112,10 @@ OpenCode 2.0 去掉了 v1 的 `-p --print`，非交互执行走 `api` 子命令 
 
 ### 5.3 CLI 版本与 PATH
 
-- 本机 PATH 上有多个 codex。**codex 0.147.0 与 `~/.codex/config.toml` 的 `ark-code-latest` 模型不兼容**（刷 `ERROR codex_core::util: ReasoningSummaryDelta without active item` 直到超时）。建议卸载或降级 npm global 的 codex 0.147.0。
-- **Daemon 的 PATH 需同时含**：node22（运行时）、homebrew（codex 0.142.3）、fnm node20 全局 bin（`vercel`/`wrangler`），否则出现 codex 超时或 `Vercel is not authenticated`。
+- 本机 PATH 上有多个 codex。**codex 0.147.0 与 `~/.codex/config.toml` 的 `ark-code-latest` 模型不兼容**（刷 `ERROR codex_core::util: ReasoningSummaryDelta without active item` 直到超时）。建议卸载或降级 npm global 的 codex 0.147.0。（2026-09-02 重测：这条不兼容**没有重跑验证**，需要真发一次模型调用；版本号观测已更新——homebrew 那份现在是 `codex-cli 0.151.0`，此前记的 0.142.3 已过期；而默认 PATH 解析到的仍是 fnm node20 全局 bin 里的 `0.147.0`，正是本条点名要避开的那版。）
+- **Daemon 的 PATH 需同时含**：node22（运行时）、homebrew（codex，2026-09-02 实测解析到 `0.151.0`；此前记的是 0.142.3——**这版的兼容性本轮没有测过**，本条真正要的只是"homebrew 排在 fnm node20 全局 bin 之前"这个顺序）、fnm node20 全局 bin（`vercel`/`wrangler`），否则出现 codex 超时或 `Vercel is not authenticated`。
 - shell 默认 Node 20 会让 `wrangler` 直接拒绝运行（要求 ≥22）。`.node-version` 为 `22`。
+- **同一道 Node 版本闸门还挡住了两个内置 Agent（2026-09-02 实测）**：这台 shell 的 node 是 `v20.20.2`，`openclaw --version` 以 `Node.js >=22.22.3 <23, >=24.15.0 <25, or >=25.9.0 is required` 退出 1，`pi --version` 退出 1 并倒出 57 KB 打包栈。两者的启动器都是 `#!/usr/bin/env node`，所以**它们的能力探测与执行在这台机器上永远答不出结果**，而 daemon 的 PATH 配方为了 `vercel`/`wrangler` 恰好要带上 node20 全局 bin——换 node 之前，`openclaw` 的 candidate 状态推不动。这不是产品缺陷，别把它记成"Agent 不支持"（见 [Agent Runtime Catalog](agent-runtime-catalog.md) §3.5）。
 - 所有 GitHub CLI 调用注入 Agent-Dev 保存的 `GITHUB_TOKEN`；凭证保存/删除后废弃 Provider CLI 可用性缓存。
 
 ## 6. 遗留真实资源（未清理）
