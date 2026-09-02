@@ -1897,6 +1897,10 @@ export function App() {
                 <div>
                   <p className="eyebrow">{t('projects.detailEyebrow', { revision: selected.blueprint.metadata.revision })}</p>
                   <h1>{selected.name}</h1>
+                  {/* The delivery state only existed in the list. Once inside a project there was no
+                      label saying where the run stands, so the four tabs gave no hint about which one
+                      had anything to do. */}
+                  <span className="state project-state">{t(`projectState.${selected.state}` as KeyPath)}</span>
                 </div>
               </div>
             ) : view.kind === 'credentials' ? (

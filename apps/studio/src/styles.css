@@ -310,6 +310,13 @@ h2 { font-size: 16px; margin-bottom: 5px; color: var(--text-1); }
   font-weight: 700;
 }
 
+/* The project header is a plain block, so an inline span would stretch the badge background across
+   the whole row instead of hugging the label. */
+.project-state {
+  display: inline-block;
+  margin-top: 6px;
+}
+
 .empty-state {
   margin: 0;
   padding: 38px 12px;
