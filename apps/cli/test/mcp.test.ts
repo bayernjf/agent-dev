@@ -49,13 +49,25 @@ async function startBridge(): Promise<Client> {
   return client;
 }
 
-// Connector preflight/account discovery spawn real CLIs by default, which is too slow and
-// environment-dependent for a unit test. Stub the two connector routes so the read tools' wiring
-// is still exercised end to end without probing the machine.
+// Connector preflight/account discovery spawn real CLIs by default, and so does the runtime catalog:
+// discovery walks all eight built-in commands in sequence with a 5 s version-probe budget each, which
+// is more than the 5 s a test is given, so this helper timed out on 2 of 8 full runs while only ever
+// meaning to check that the bridge reaches the route. Stub all three and the wiring is still exercised
+// end to end — MCP client -> bridge -> HTTP -> daemon route -> store — without probing the machine.
 async function startBridgeWithStubbedConnectors(): Promise<Client> {
   const directory = await mkdtemp(join(tmpdir(), 'agent-dev-mcp-'));
   const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
   const { app } = createDaemonApp(store, undefined, {
+    discoverRuntimes: () => [{
+      id: 'codex',
+      name: 'Codex',
+      source: 'built-in',
+      launchCommand: 'codex',
+      detected: true,
+      version: 'fixture',
+      detail: 'Detected on local PATH.',
+      capabilities: ['workspace-write', 'version-detection', 'non-interactive'],
+    }],
     runPreflight: async () => ({
       checkedAt: new Date().toISOString(),
       localOnly: true as const,

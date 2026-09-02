@@ -11,7 +11,7 @@ import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
 import { CONFIRMATIONS, runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore, type ReleaseStep } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { AGENT_NOT_DETECTED_CODE, AGENT_NOT_EXECUTABLE_CODE, buildAgentExecutionPlan, describeRuntimeExecutorRejection, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, resolveRuntimeExecutor, runDoctor, type CustomAgentInput, type AgentProfile, type RuntimeExecutor, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
+import { AGENT_NOT_DETECTED_CODE, AGENT_NOT_EXECUTABLE_CODE, buildAgentExecutionPlan, describeRuntimeExecutorRejection, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, resolveRuntimeExecutor, runDoctor, type CustomAgentInput, type AgentDescriptor, type AgentProfile, type RuntimeExecutor, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
 import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialBackendInfo, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
 import type { ReleaseSource } from '@agent-dev/deployment-composer';
 import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin, releaseIdempotencyKey, releaseStepPlan } from '@agent-dev/deployment-composer';
@@ -171,6 +171,14 @@ export type DaemonDependencies = {
    * refusal that depends on the machine has to be testable without uninstalling an Agent.
    */
   isAgentDetected?: (agentId: string) => boolean;
+  /**
+   * The whole catalog fact behind that question. Injectable for the same reason, and because it is
+   * expensive: discovery walks all eight built-in commands in sequence and each version probe is
+   * allowed 5 s, so a test that only means to check route wiring can spend its entire budget on
+   * CLIs it never asked about. An injected catalog is a fixture, so it cannot see a custom Agent
+   * `POST /api/runtime/catalog` just appended - asserting that entry needs real discovery.
+   */
+  discoverRuntimes?: () => AgentDescriptor[];
 };
 
 const githubPullRequestWebhookSchema = z.object({
@@ -245,8 +253,9 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   const customAgents: CustomAgentInput[] = dataDirectory ? loadCustomAgents(dataDirectory) : [];
   // The catalog only carries what was found on PATH, so asking it is how the route learns the
   // machine-local fact. `detect()` caches per command, so repeat requests do not re-spawn.
+  const discoverRuntimes = dependencies.discoverRuntimes ?? (() => discoverAgentRuntimes(customAgents));
   const isAgentDetected = dependencies.isAgentDetected
-    ?? ((agentId: string) => discoverAgentRuntimes(customAgents).some(agent => agent.id === agentId));
+    ?? ((agentId: string) => discoverRuntimes().some(agent => agent.id === agentId));
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
   // Registered before all routes so nothing slips past the check.
@@ -658,7 +667,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.get('/api/runtime/probe/:agentId', context => {
     const agentId = context.req.param('agentId');
-    const catalog = discoverAgentRuntimes(customAgents);
+    const catalog = discoverRuntimes();
     const agent = catalog.find(a => a.id === agentId);
     if (!agent) return context.json({ error: 'Agent not found in catalog.' }, 404);
     return context.json({ probe: probeAgentCapabilities(agent.id, agent.launchCommand), adapterStatus: getAgentAdapterStatus(agent.id) });
@@ -668,7 +677,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   // the name. Only the Adapter registry knows whether the execution contract has been exercised, so
   // the answer travels with the catalog instead of being guessed by the browser.
   app.get('/api/runtime/catalog', context => context.json({
-    agents: discoverAgentRuntimes(customAgents).map(agent => ({ ...agent, adapterStatus: getAgentAdapterStatus(agent.id) })),
+    agents: discoverRuntimes().map(agent => ({ ...agent, adapterStatus: getAgentAdapterStatus(agent.id) })),
   }));
 
   app.post('/api/runtime/catalog', async context => {
@@ -677,7 +686,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (customAgents.some(agent => agent.name.toLowerCase() === parsed.data.name.toLowerCase())) return context.json({ error: 'An Agent with this name already exists.' }, 409);
     customAgents.push(parsed.data);
     if (dataDirectory) saveCustomAgents(dataDirectory, customAgents);
-    const agent = discoverAgentRuntimes(customAgents).at(-1);
+    const agent = discoverRuntimes().at(-1);
     return context.json({ agent: agent ? { ...agent, adapterStatus: getAgentAdapterStatus(agent.id) } : agent }, 201);
   });
 
