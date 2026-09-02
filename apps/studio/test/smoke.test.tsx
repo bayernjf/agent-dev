@@ -47,8 +47,10 @@ describe('Studio smoke render', () => {
 
   it('renders the table column labels of the dashboard project list', () => {
     const html = renderStudioApp();
-    // The four dashboard table columns are part of the initial mount.
+    // The four dashboard table columns are part of the initial mount. "Mode" used to sit here while
+    // the cells underneath it held product types.
     expect(html).toContain('Project');
+    expect(html).toContain('Product type');
     expect(html).toContain('Delivery state');
   });
 
