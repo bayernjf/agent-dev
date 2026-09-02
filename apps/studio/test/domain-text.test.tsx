@@ -74,3 +74,32 @@ describe('dry-run locale key coverage', () => {
     }
   });
 });
+
+// Every decision key the backend emits must resolve in both locales, so a Chinese user never sees
+// English in the decision cards once this batch is merged.
+describe('decision locale key coverage', () => {
+  const keys = [
+    'decision.stack.title', 'decision.stack.reason',
+    'decision.sourceControl.title', 'decision.sourceControl.value', 'decision.sourceControl.reason',
+    'decision.providers.title', 'decision.providers.reason.none', 'decision.providers.reason.hasProviders',
+    'decision.production.title', 'decision.production.value', 'decision.production.reason',
+    'decision.privacy.title', 'decision.privacy.value.sensitive', 'decision.privacy.value.standard',
+    'decision.privacy.reason.sensitive', 'decision.privacy.reason.standard',
+    'decision.preview.title', 'decision.preview.value.per-pull-request', 'decision.preview.value.stable-dev-api',
+    'decision.preview.reason.perPullRequest', 'decision.preview.reason.stableDevApi',
+    'decision.analytics.title', 'decision.analytics.value.none', 'decision.analytics.value.hasProviders',
+    'decision.analytics.reason.none', 'decision.analytics.reason.hasProviders',
+    'decision.runtime.title', 'decision.runtime.reason.beginner', 'decision.runtime.reason.professional',
+    'decision.custom.title', 'decision.custom.reason',
+  ] as const;
+
+  for (const key of keys) {
+    it(`resolves ${key} in both locales`, () => {
+      for (const [dict, name] of dictionaries) {
+        const value = resolveKey(dict, key);
+        expect(value, `${name} missing ${key}`).toBeDefined();
+        expect(value!.length).toBeGreaterThan(0);
+      }
+    });
+  }
+});
