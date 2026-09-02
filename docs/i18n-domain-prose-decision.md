@@ -1,6 +1,6 @@
 # 领域文案 i18n 边界决策依据
 
-> 状态：**待用户拍板**（handoff §9「领域文案的 i18n 边界」）
+> 状态：**方案②已落地四批（dryRun / decisions / baselinePlan / manualActions），全量 449 测试绿。artifact titles（87 id，title 随 productType 变化）留待后续加 titleKey。**
 > 产出时间：2026-09-02
 > 测量脚本：`.scratch/i18n-blast-radius.ts`、`.scratch/i18n-decision-matrix.ts`、`.scratch/artifact-ids.ts`（本地草稿，已 gitignore，不入库）
 > 关联：[Studio i18n 设计](studio-i18n-design.md)、[handoff](../handoff.md) §9、2026-09-01/02 Studio 走查待办 1
@@ -92,11 +92,12 @@ Studio 侧加一个 `domainT(field, key, params)`：优先 `t(key, params)`，lo
 
 ## 6. 建议的落地分批（每批独立可提交、可回退）
 
-1. **第 1 批｜dryRun（4 模板，最小闭环）**：blueprint 给 dry-run summary 与 3 条 automaticPreparation 加 key/params；Studio locale 建 key + `domainT` helper + 回退；artifact titles 用现有 id 上 locale（78 个 en/zh，机械工作）。跑通「key 命中出中文、删掉 key 回退英文」两条测试。
-2. **第 2 批｜decisions（37）**：固定 26 个先上；11 个 per-type 复用 `PRODUCT_TYPE_DESCRIPTORS` 派生 key。
-3. **第 3 批｜baselinePlan（15）**：provider 资源按 `provider.<vendor>.*` 建 key。
-4. **第 4 批｜manualActions（37）**：shared 19 + provider 18。
-5. 每批都配「locale 表每个 key 在 en/zh 都能解析」的测试（沿用 `agent-copy.test.ts` 已立的纪律），并保留英文 prose 契约测试（保护 MCP 桥）。
+1. **第 1 批｜dryRun（4 模板，最小闭环）✅ 已落地（4019905）**：blueprint 给 dry-run summary 与 3 条 automaticPreparation 加 key/params；Studio locale 建 key + `useDomainText` hook + 回退；artifact titles 用现有 id 上 locale（78 个 en/zh，机械工作）。跑通「key 命中出中文、删掉 key 回退英文」两条测试。
+2. **第 2 批｜decisions（37）✅ 已落地（ff5f664）**：固定 26 个先上；11 个 per-type 复用 `PRODUCT_TYPE_DESCRIPTORS` 派生 key。BlueprintDecision 加 titleKey/valueKey/valueParams/reasonKey。
+3. **第 3 批｜baselinePlan（15）✅ 已落地（caa3b07）**：provider 资源按 `provider.<vendor>.*` 建 key。BaselinePlan 加 summaryKey/summaryParams；BaselinePlanResource 加 titleKey/reasonKey/reasonParams。
+4. **第 4 批｜manualActions（37）✅ 已落地（6e1ee52）**：shared 19 + provider 18。ManualAction 加 titleKey/titleParams/reasonKey/stepsKeys/verificationKey。
+5. **artifact titles（87 id）⏳ 待后续**：同一 artifact id 在不同 productType 下 title 不同（如 `template-root-package` 在 web-app 下是 'Web app workspace package'，在 landing-page 下是 'Landing page package'），不能用固定 `artifact.${id}` 作 key。需后端给 GeneratedArtifact 加 titleKey（按类型维度建 key）后处理。
+6. 每批都配「locale 表每个 key 在 en/zh 都能解析」的测试（沿用 `agent-copy.test.ts` 已立的纪律），并保留英文 prose 契约测试（保护 MCP 桥）。
 
 ## 7. 风险与未决
 
@@ -107,6 +108,6 @@ Studio 侧加一个 `domainT(field, key, params)`：优先 `t(key, params)`，lo
 
 ## 8. 需要你拍板的点
 
-1. 是否采用**方案 ②**（推荐）而非 ①/③；
-2. 是否同意 per-type 文案按 **provider 维度**建 key（不按类型笛卡尔积）；
-3. 是否按 §6 的四批顺序落地，第 1 批先做最小的 dryRun + 78 个 artifact title。
+1. ✅ 采用**方案 ②**（推荐）而非 ①/③——用户默许推进；
+2. ✅ per-type 文案按 **provider 维度**建 key（不按类型笛卡尔积）；
+3. ✅ 按 §6 的四批顺序落地，第 1 批先做最小的 dryRun。artifact titles 因 title 随类型变化，单独留待后续加 titleKey。
