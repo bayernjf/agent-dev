@@ -1,4 +1,5 @@
 import type { DeliveryState } from '@agent-dev/workflow';
+import type { AcceptanceRecord, ApplyRun, PreviewDeploymentResult, RuntimeRun } from '../../types';
 
 export const en = {
   common: {
@@ -50,6 +51,8 @@ export const en = {
     switchToDark: 'Switch to dark theme',
   },
   nav: {
+    // The landmark a screen reader announces for the sidebar; the items inside it were already keys.
+    studioNavigation: 'Studio navigation',
     projects: 'Projects',
     decisions: 'Decisions',
     connections: 'Connections',
@@ -89,6 +92,18 @@ export const en = {
       iteration: 'Iteration',
       release: 'Release',
     },
+    // The revision comparison panel renders counts, so the labels carry {count} rather than letting
+    // JSX glue a number onto an English word.
+    diff: {
+      eyebrow: 'Blueprint Diff',
+      title: 'Changes since previous revision',
+      loading: 'Loading diff...',
+      added: 'Added ({count})',
+      removed: 'Removed ({count})',
+      modified: 'Modified ({count})',
+      noChanges: 'No changes since previous revision.',
+      unavailable: 'No diff available.',
+    },
   },
   // Typed against the delivery state machine, not written by hand: the dashboard renders
   // `projectState.${project.state}`, and the eight states missing from here showed the user the raw
@@ -119,6 +134,30 @@ export const en = {
     queued: 'Queued',
     cancelled: 'Cancelled',
   },
+  // Typed against the run records, in the same way projectState is typed against the state machine.
+  // These headings used to interpolate the raw value, so a Chinese interface still read
+  // "Dry-run planned" and "Local Apply queued" with the state left in English. PreviewDeploymentResult
+  // is listed too: it is a third consumer of this family, and naming it here is what keeps a future
+  // rename from leaving the preview heading to resolve to nothing but the key.
+  runStatus: {
+    planned: 'Planned',
+    queued: 'Queued',
+    running: 'Running',
+    completed: 'Completed',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+  } satisfies Record<RuntimeRun['status'] | ApplyRun['status'] | PreviewDeploymentResult['status'], string>,
+  acceptanceStatus: {
+    blocked: 'Blocked',
+    ready: 'Ready for acceptance',
+    approved: 'Accepted',
+  } satisfies Record<AcceptanceRecord['status'], string>,
+  qualityStatus: {
+    passed: 'Passed',
+    failed: 'Failed',
+    // Not the same as "failed": the gate never ran, so there is no result to look at.
+    missing: 'Not run yet',
+  } satisfies Record<AcceptanceRecord['qualityStatus'], string>,
   blueprint: {
     title: 'Blueprint',
     createTitle: 'Create Blueprint',
@@ -289,7 +328,13 @@ export const en = {
     verifying: 'Verifying...',
     verifyCredentials: 'Verify credentials',
     supabaseConfiguration: 'Supabase Configuration',
-    supabaseStep1: 'Go to {link} and create a new project',
+    // t() returns a plain string, so this step's sentence has to be cut around the link it names.
+    // Both locales put the link in the same slot; a locale that does not must restructure the row
+    // rather than reorder these fragments. The link used to be rendered twice: once as the {link}
+    // argument and once as the anchor after it.
+    supabaseStep1Before: 'Go to ',
+    supabaseStep1After: ' and create a new project',
+    supabaseDashboard: 'Supabase Dashboard',
     supabaseStep2: 'Wait for the project to finish provisioning',
     supabaseStep3: 'Copy the Project URL and the anon/public key',
     supabaseStep4: 'Go to Settings > API in your project dashboard',
@@ -447,6 +492,15 @@ export const en = {
     notApplied: 'Not applied',
     missingDependencies: 'Missing dependencies',
     cancelled: 'Cancelled',
+  },
+  // Only this component's own chrome is here. The classification title, explanation and remediation
+  // steps arrive from @agent-dev/agent-runtime as English prose, which is the same open decision as
+  // the Blueprint text.
+  failureDisplay: {
+    autoRetryable: 'Auto-retryable',
+    showRemediation: 'Show remediation steps ({count})',
+    hideRemediation: 'Hide remediation steps ({count})',
+    rawError: 'Raw error',
   },
   errors: {
     daemonUnavailable: 'The local daemon is unavailable.',
@@ -693,7 +747,12 @@ export const en = {
   runtime: {
     eyebrow: 'Agent runtime',
     runtimeNotPrepared: 'Runtime not prepared',
-    status: '{mode} {status}',
+    status: '{mode} · {status}',
+    // Whether this run only plans, or may write to the approved workspace.
+    runMode: {
+      dryRun: 'Dry run',
+      execute: 'Execution',
+    },
     completed: 'Codex finished. Review the diff and run the Quality Gate before acceptance.',
     failed: 'Codex failed on attempt {attempts}. Review the report or retry.',
     running: 'Codex is working in the approved workspace.',

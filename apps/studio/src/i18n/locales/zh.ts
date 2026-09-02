@@ -50,6 +50,8 @@ export const zh = {
     switchToDark: '切换到深色主题',
   },
   nav: {
+    // 读屏软件播报侧边栏区域时用的 landmark；里面的每一项本来就是 key。
+    studioNavigation: 'Studio 导航',
     projects: '项目',
     decisions: '决策',
     connections: '连接',
@@ -89,6 +91,17 @@ export const zh = {
       iteration: '迭代',
       release: '发布',
     },
+    // 差异面板要展示数量，所以标签自带 {count}，不让 JSX 把数字粘在词上。
+    diff: {
+      eyebrow: 'Blueprint 差异',
+      title: '相对上一个 Revision 的变更',
+      loading: '正在加载差异...',
+      added: '新增（{count}）',
+      removed: '删除（{count}）',
+      modified: '修改（{count}）',
+      noChanges: '相对上一个 Revision 没有变更。',
+      unavailable: '暂无可用的差异。',
+    },
   },
   projectState: {
     DRAFT: '草稿',
@@ -115,6 +128,26 @@ export const zh = {
     skipped: '已跳过',
     queued: '排队中',
     cancelled: '已取消',
+  },
+  // 跟 en.ts 里的同名分组一对一对应；那里由 Record<...> 卡住枚举成员，新增状态时不会只补一半。
+  runStatus: {
+    planned: '已出计划',
+    queued: '排队中',
+    running: '执行中',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+  },
+  acceptanceStatus: {
+    blocked: '被阻塞',
+    ready: '待验收',
+    approved: '已验收',
+  },
+  qualityStatus: {
+    passed: '已通过',
+    failed: '失败',
+    // 和“失败”不同：根本没跑过，没有结果可看。
+    missing: '尚未运行',
   },
   blueprint: {
     title: 'Blueprint',
@@ -284,7 +317,12 @@ export const zh = {
     verifying: '验证中...',
     verifyCredentials: '验证凭证',
     supabaseConfiguration: 'Supabase 配置',
-    supabaseStep1: '访问 {link} 并创建新项目',
+    // t() 只返回字符串，所以这句必须围绕它提到的链接开刀。两种语言都把链接放在同一位置；
+    // 不这样排的语言要重构整行，而不是调换这两个片段。此处原本把链接渲染了两遍：
+    // 一遍是 {link} 参数，一遍是后面的 <a>。
+    supabaseStep1Before: '访问 ',
+    supabaseStep1After: ' 并创建新项目',
+    supabaseDashboard: 'Supabase Dashboard',
     supabaseStep2: '等待项目完成初始化',
     supabaseStep3: '复制 Project URL 和 anon/public key',
     supabaseStep4: '在项目仪表板中进入 Settings > API',
@@ -442,6 +480,14 @@ export const zh = {
     notApplied: '未应用',
     missingDependencies: '缺少依赖',
     cancelled: '已取消',
+  },
+  // 这里只放该组件自己的界面文案。分类标题、解释和修复步骤来自 @agent-dev/agent-runtime，
+  // 是英文散文，和 Blueprint 文本属于同一个未决边界。
+  failureDisplay: {
+    autoRetryable: '可自动重试',
+    showRemediation: '展开修复步骤（{count}）',
+    hideRemediation: '收起修复步骤（{count}）',
+    rawError: '原始错误',
   },
   errors: {
     daemonUnavailable: '本地 Daemon 不可用。',
@@ -685,7 +731,12 @@ export const zh = {
   runtime: {
     eyebrow: 'Agent Runtime',
     runtimeNotPrepared: 'Runtime 未准备',
-    status: '{mode} {status}',
+    status: '{mode} · {status}',
+    // 这次运行是只出计划，还是允许写入已批准的工作区。
+    runMode: {
+      dryRun: 'Dry-run',
+      execute: '正式执行',
+    },
     completed: 'Codex 已完成。请检查 diff 并在验收前运行 Quality Gate。',
     failed: 'Codex 在第 {attempts} 次尝试时失败。请查看报告或重试。',
     running: 'Codex 正在已批准的工作区中工作。',
