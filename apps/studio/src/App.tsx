@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Activity, ArrowLeft, ArrowRight, CheckCircle2, CircleDot, FolderKanban, Gauge, KeyRound, Moon, PlugZap, RefreshCw, ShieldCheck, Sparkles, Sun,
 } from 'lucide-react';
 import { useI18n, type KeyPath } from './i18n/i18n';
+import { useDomainText } from './lib/domain-text';
 import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
 import { baselineProvidersFor, getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
@@ -25,10 +26,11 @@ import { adapterStatusOf, canProfileRunTasks, canRunSelectedAgent, canRunTasks }
 import { nonInteractiveVerdict } from './lib/capability-verdict';
 import { classifyRuntimeExecutorFailure, runtimeExecutorId, withoutProviderNamespace } from './lib/runtime-executor';
 import { PRODUCT_TYPE_LABEL_KEYS } from './lib/product-type';
-
+import { baselineNoteFor } from './lib/baseline-note';
 
 export function App() {
   const { t, locale, setLocale } = useI18n();
+  const domainT = useDomainText();
   const { theme, toggleTheme } = useTheme();
 
   const [view, setView] = useState<View>({ kind: 'dashboard' });
@@ -1527,6 +1529,8 @@ export function App() {
     ] as const).filter(([provider]) => providers.includes(provider)).map(([, field]) => field);
   }, [answers.productType]);
 
+  const baselineNote = useMemo(() => baselineNoteFor(answers.productType), [answers.productType]);
+
   const toggleAnalytics = (provider: 'ga4' | 'clarity') => {
     setAnswers(current => ({
       ...current,
@@ -2095,19 +2099,19 @@ export function App() {
             {selected && <section className="decision-section" id="decisions">
               <div className="section-heading"><div><p className="eyebrow">{t('decisions.eyebrowRevision', { revision: selected.blueprint.metadata.revision })}</p><h2>{t('decisions.title')}</h2></div><span className="mode-tag">{selected.blueprint.metadata.mode === 'beginner' ? t('blueprint.beginner') : t('blueprint.professional')}</span></div>
               <div className="decision-list">{decisions.map(decision => <article className="decision" key={decision.id}>
-                <div><h3>{decision.title}</h3><p>{decision.value}</p><small>{decision.reason}</small></div><span className={`decision-mode ${decision.mode}`}>{decision.mode === 'auto' ? t('decisions.mode.auto') : decision.mode === 'ask' ? t('decisions.mode.ask') : t('decisions.mode.manual')}</span>
+                <div><h3>{domainT(decision.title, decision.titleKey)}</h3><p>{domainT(decision.value, decision.valueKey, decision.valueParams)}</p><small>{domainT(decision.reason, decision.reasonKey)}</small></div><span className={`decision-mode ${decision.mode}`}>{decision.mode === 'auto' ? t('decisions.mode.auto') : decision.mode === 'ask' ? t('decisions.mode.ask') : t('decisions.mode.manual')}</span>
               </article>)}</div>
             </section>}
 
             {selected && dryRun && <section className="plan-section" id="standards">
-              <div className="section-heading"><div><p className="eyebrow">{t('plan.eyebrow', { revision: dryRun.blueprintRevision })}</p><h2>{t('plan.title')}</h2><p>{dryRun.summary}</p></div><span className="dry-run-tag">{t('plan.noExternalWrites')}</span></div>
+              <div className="section-heading"><div><p className="eyebrow">{t('plan.eyebrow', { revision: dryRun.blueprintRevision })}</p><h2>{t('plan.title')}</h2><p>{domainT(dryRun.summary, dryRun.summaryKey, dryRun.summaryParams)}</p></div><span className="dry-run-tag">{t('plan.noExternalWrites')}</span></div>
               <div className="plan-grid">
-                <article className="plan-card"><h3>{t('plan.preparedAutomatically')}</h3><ol>{dryRun.automaticPreparation.map(step => <li key={step}>{step}</li>)}</ol></article>
-                <article className="plan-card"><h3>{t('plan.requiredFromYou')}</h3><ol>{dryRun.manualActions.map(action => <li key={action.id}><strong>{action.title}</strong><span>{action.reason}</span><small>{t('plan.verify', { verification: action.verification })}</small></li>)}</ol></article>
+                <article className="plan-card"><h3>{t('plan.preparedAutomatically')}</h3><ol>{dryRun.automaticPreparation.map((step, i) => <li key={step}>{domainT(step, dryRun.automaticPreparationKeys?.[i])}</li>)}</ol></article>
+                <article className="plan-card"><h3>{t('plan.requiredFromYou')}</h3><ol>{dryRun.manualActions.map(action => <li key={action.id}><strong>{domainT(action.title, action.titleKey, action.titleParams)}</strong><span>{domainT(action.reason, action.reasonKey)}</span><small>{t('plan.verify', { verification: domainT(action.verification, action.verificationKey) })}</small></li>)}</ol></article>
               </div>
               <div className="artifact-heading"><div><h3>{t('plan.generatedPackage')}</h3><p>{t('common.previewOnly')}</p></div><button className="icon-button" type="button" onClick={() => void loadDryRun(selected.id)} aria-label={t('plan.refreshPlan')} title={t('plan.refreshPlan')}><RefreshCw size={17} /></button></div>
-              <div className="artifact-list">{dryRun.artifacts.map(artifact => <button className={`artifact-button ${selectedArtifact?.id === artifact.id ? 'selected' : ''}`} type="button" key={artifact.id} onClick={() => setSelectedArtifactId(artifact.id)}><strong>{artifact.title}</strong><span>{artifact.path}</span></button>)}</div>
-              {selectedArtifact && <article className="artifact-preview"><div><h3>{selectedArtifact.title}</h3><p>{selectedArtifact.path}</p></div><pre>{selectedArtifact.content}</pre></article>}
+              <div className="artifact-list">{dryRun.artifacts.map(artifact => <button className={`artifact-button ${selectedArtifact?.id === artifact.id ? 'selected' : ''}`} type="button" key={artifact.id} onClick={() => setSelectedArtifactId(artifact.id)}><strong>{domainT(artifact.title, artifact.titleKey)}</strong><span>{artifact.path}</span></button>)}</div>
+              {selectedArtifact && <article className="artifact-preview"><div><h3>{domainT(selectedArtifact.title, selectedArtifact.titleKey)}</h3><p>{selectedArtifact.path}</p></div><pre>{selectedArtifact.content}</pre></article>}
             </section>}
             </>}
 
@@ -2118,9 +2122,9 @@ export function App() {
             {(prEvidence || previewEvidence) && <section className="evidence-section evidence-records"><div className="section-heading"><div><p className="eyebrow">{t('evidence.recordedEvidence')}</p><h2>{t('evidence.deliveryEvidenceHistory')}</h2><p>{t('evidence.historyDescription')}</p></div><CheckCircle2 size={18} aria-hidden="true" /></div>{prEvidence && <article className="evidence-record"><strong>{t('evidence.pullRequest')}</strong><a href={prEvidence.url} target="_blank" rel="noreferrer">{prEvidence.url}</a><small>{prEvidence.checks.join(' · ')} · {formatDate(prEvidence.recordedAt, locale)}</small></article>}{previewEvidence && <article className="evidence-record"><strong>{t('evidence.dualPreview')}</strong><span>{t('evidence.api')}: {previewEvidence.apiUrl}</span><span>{t('evidence.web')}: {previewEvidence.webUrl}</span><small>{previewEvidence.smokeTest} · {formatDate(previewEvidence.recordedAt, locale)}</small></article>}</section>}
 
             {selected && baselinePlan && <section className="baseline-section">
-              <div className="section-heading"><div><p className="eyebrow">{t('baseline.eyebrow', { revision: baselinePlan.blueprintRevision })}</p><h2>{t('decisions.baselineResources')}</h2><p>{baselinePlan.summary}</p></div><span className={`baseline-tag ${baselineApproval ? 'approved' : baselinePlan.readyForApproval ? 'ready' : 'blocked'}`}>{baselineApproval ? t('baseline.status.approved') : baselinePlan.readyForApproval ? t('baseline.status.ready') : t('baseline.status.blocked')}</span></div>
+              <div className="section-heading"><div><p className="eyebrow">{t('baseline.eyebrow', { revision: baselinePlan.blueprintRevision })}</p><h2>{t('decisions.baselineResources')}</h2><p>{domainT(baselinePlan.summary, baselinePlan.summaryKey, baselinePlan.summaryParams)}</p></div><span className={`baseline-tag ${baselineApproval ? 'approved' : baselinePlan.readyForApproval ? 'ready' : 'blocked'}`}>{baselineApproval ? t('baseline.status.approved') : baselinePlan.readyForApproval ? t('baseline.status.ready') : t('baseline.status.blocked')}</span></div>
               <div className="baseline-list">{baselinePlan.resources.map(resource => <article className="baseline-resource" key={resource.id}>
-                <div><h3>{resource.title}</h3><p>{resource.owner ?? t('baseline.notSelected')}</p><small>{resource.reason}</small></div><span className={`resource-status ${resource.status}`}>{resource.status === 'blocked' ? t('baseline.resourceStatus.blocked') : baselineApproval ? t('baseline.resourceStatus.approved') : t('baseline.resourceStatus.awaiting')}</span>
+                <div><h3>{domainT(resource.title, resource.titleKey)}</h3><p>{resource.owner ?? t('baseline.notSelected')}</p><small>{domainT(resource.reason, resource.reasonKey, resource.reasonParams)}</small></div><span className={`resource-status ${resource.status}`}>{resource.status === 'blocked' ? t('baseline.resourceStatus.blocked') : baselineApproval ? t('baseline.resourceStatus.approved') : t('baseline.resourceStatus.awaiting')}</span>
               </article>)}</div>
               {baselineApproval ? <div className="approval-record"><CheckCircle2 size={17} aria-hidden="true" /><div><strong>{t('baseline.approvalRecorded')}</strong><small>{t('baseline.approvalRecordedDetail', { revision: baselineApproval.blueprintRevision, approvedBy: baselineApproval.approvedBy, date: formatDate(baselineApproval.approvedAt, locale) })}</small></div></div> : baselinePlan.readyForApproval ? <div className="approval-action"><p>{t('decisions.approvalNote')}</p>{approverField('baseline-approver', t('baseline.whoApproves'))}<button className="primary-button" type="button" onClick={() => void approveBaseline()} disabled={approvingBaseline}>{approvingBaseline ? t('baseline.recordingApproval') : t('baseline.approvePlan')}<ShieldCheck size={16} aria-hidden="true" /></button></div> : null}
               {baselineApproval && !applyRun && <div className="approval-action"><p>{t('baseline.runSimulator')}</p><button className="primary-button" type="button" onClick={() => void applyBaseline()} disabled={applyingBaseline}>{applyingBaseline ? t('baseline.applyingLocally') : t('baseline.runLocalApply')}<ArrowRight size={16} aria-hidden="true" /></button></div>}
@@ -2269,7 +2273,7 @@ export function App() {
                 <textarea id="custom-instructions" value={answers.customInstructions} onChange={event => setAnswer('customInstructions', event.target.value)} placeholder={t('blueprint.customInstructionsPlaceholder')} maxLength={1000} />
               </>}
 
-              <p className="form-note">{t('blueprint.baselineNote')}</p>
+              <p className="form-note">{t(baselineNote.key, baselineNote.params)}</p>
               <button className="primary-button" type="submit" disabled={saving}>{saving ? t('common.loading') : selected ? t('blueprint.saveRevision') : t('blueprint.generate')}<ArrowRight size={16} aria-hidden="true" /></button>
             </form>
             <section className="connector-panel" id="connections">

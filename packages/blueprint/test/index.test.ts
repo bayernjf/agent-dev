@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, getBlueprintDecisions, getManualActions, productBlueprintSchema } from '../src/index.js';
+import { baselineProvidersFor, createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, generateArtifacts, getBlueprintDecisions, getManualActions, productBlueprintSchema } from '../src/index.js';
 
 describe('ProductBlueprint', () => {
   it('creates the fixed v0.1 Web app Golden Path', () => {
@@ -113,6 +113,46 @@ describe('ProductBlueprint', () => {
     expect(ids('landing-page')).toEqual(['authorize-github', 'authorize-cloudflare']);
   });
 
+  // The decision cards are the first thing a user reads about what will be built, and both of them
+  // used to describe the web-app golden path for every type: an MCP server was offered a Supabase
+  // organization and a Vercel team while its own generated PRODUCT_STANDARD.md said data and auth
+  // were "Not provisioned for this product type". The strings are not asserted here on purpose —
+  // what has to hold is that the card and the document that type generates say the same thing.
+  it('describes each product type with the baseline its own generated standard documents', () => {
+    const combos = [
+      { productType: 'web-app' },
+      { productType: 'landing-page' },
+      { productType: 'browser-extension' },
+      { productType: 'desktop', desktopShell: 'tauri' },
+      { productType: 'desktop', desktopShell: 'electron' },
+      { productType: 'mobile' },
+      { productType: 'api-tool' },
+    ] as const;
+
+    for (const combo of combos) {
+      const blueprint = createBlueprint('Decision Desk', combo, 1);
+      const card = (id: string) => getBlueprintDecisions(blueprint).find(decision => decision.id === id)!;
+      const standard = createDryRunPlan(blueprint).artifacts
+        .find(artifact => artifact.path === 'generated/PRODUCT_STANDARD.md')!.content;
+      const documented = (field: string) => standard.match(new RegExp(`^- ${field}: (.+)$`, 'm'))![1];
+
+      expect(card('stack').value, `${combo.productType}: stack card disagrees with PRODUCT_STANDARD.md`)
+        .toBe(`${documented('Frontend')} | ${documented('Backend')}`);
+
+      const providers = baselineProvidersFor(combo.productType);
+      const named = card('providers').value;
+      for (const [provider, label] of [['supabase', 'Supabase'], ['vercel', 'Vercel'], ['cloudflare', 'Cloudflare']] as const) {
+        expect(
+          named.includes(label),
+          `${combo.productType}: cloud card ${providers.includes(provider) ? 'omits' : 'names'} ${label}`,
+        ).toBe(providers.includes(provider));
+      }
+      // No cloud provider still leaves a human step: authorizing GitHub. Dropping the gate for
+      // repository-only types would let a baseline be approved without any authorization at all.
+      expect(card('providers').mode, `${combo.productType}: authorization gate dropped`).toBe('manual');
+    }
+  });
+
   it('preserves professional answers and surfaces their approval boundaries', () => {
     const blueprint = createBlueprint('Sensitive Desk', {
       mode: 'professional',
@@ -155,6 +195,119 @@ describe('ProductBlueprint', () => {
       // step commits one and publishPullRequest refuses to push a branch without it.
       expect.objectContaining({ path: '.github/workflows/quality.yml', content: expect.stringContaining('cache: npm') }),
     ]));
+  });
+
+  it('emits stable i18n keys alongside the dry-run English prose', () => {
+    const blueprint = createBlueprint('Receipt Desk', { analyticsProviders: ['ga4'] }, 3);
+    const plan = createDryRunPlan(blueprint);
+
+    // The English prose remains the contract (MCP bridge feeds it to external coding agents).
+    expect(plan.summary).toContain('generated artifacts');
+    expect(plan.automaticPreparation).toHaveLength(3);
+
+    // Parallel stable keys + params let Studio resolve locale translations, falling back to prose.
+    expect(plan.summaryKey).toBe('dryRun.summary');
+    expect(plan.summaryParams.artifactCount).toBe(plan.artifacts.length);
+    expect(plan.summaryParams.actionCount).toBe(plan.manualActions.length);
+    expect(plan.automaticPreparationKeys).toEqual([
+      'dryRun.automaticPreparation.validateSchema',
+      'dryRun.automaticPreparation.generateArtifacts',
+      'dryRun.automaticPreparation.classifyBoundaries',
+    ]);
+    expect(plan.automaticPreparationKeys).toHaveLength(plan.automaticPreparation.length);
+  });
+
+  it('emits stable i18n keys for every decision title and reason', () => {
+    const blueprint = createBlueprint('Receipt Desk', { analyticsProviders: ['ga4'], mode: 'professional' }, 3);
+    const decisions = getBlueprintDecisions(blueprint);
+
+    // Every decision must carry a titleKey and reasonKey; values may be dynamic (per-type stack,
+    // runtime provider, custom instructions) and are allowed to omit a key.
+    for (const decision of decisions) {
+      expect(decision.titleKey, `decision ${decision.id} missing titleKey`).toBeDefined();
+      expect(decision.titleKey!.startsWith('decision.')).toBe(true);
+      expect(decision.reasonKey, `decision ${decision.id} missing reasonKey`).toBeDefined();
+      expect(decision.reasonKey!.startsWith('decision.')).toBe(true);
+    }
+
+    // Known fixed decisions carry valueKeys too.
+    const byId = Object.fromEntries(decisions.map(d => [d.id, d]));
+    expect(byId['source-control'].valueKey).toBe('decision.sourceControl.value');
+    expect(byId['production'].valueKey).toBe('decision.production.value');
+    expect(byId['privacy'].valueKey).toMatch(/^decision\.privacy\.value\./);
+    expect(byId['preview'].valueKey).toMatch(/^decision\.preview\.value\./);
+    expect(byId['analytics'].valueKey).toMatch(/^decision\.analytics\.value\./);
+  });
+
+  it('emits stable i18n keys for the baseline plan summary and every resource', () => {
+    const blueprint = createBlueprint('Receipt Desk', {}, 3);
+    const plan = createBaselinePlan(blueprint);
+
+    expect(plan.summaryKey).toBeDefined();
+    expect(plan.summaryKey!.startsWith('baseline.summary.')).toBe(true);
+
+    for (const resource of plan.resources) {
+      expect(resource.titleKey, `resource ${resource.id} missing titleKey`).toBeDefined();
+      expect(resource.titleKey!.startsWith('baseline.resource.')).toBe(true);
+      expect(resource.reasonKey, `resource ${resource.id} missing reasonKey`).toBeDefined();
+    }
+
+    // A product type with no cloud providers only has the GitHub resource.
+    const mcpBlueprint = createBlueprint('Receipt Desk', { productType: 'api-tool' }, 3);
+    const mcpPlan = createBaselinePlan(mcpBlueprint);
+    expect(mcpPlan.resources).toHaveLength(1);
+    expect(mcpPlan.resources[0].id).toBe('github-repository');
+  });
+
+  it('emits stable i18n keys for every manual action', () => {
+    const blueprint = createBlueprint('Receipt Desk', { analyticsProviders: ['ga4', 'clarity'], dataSensitivity: 'sensitive', customInstructions: 'Use pnpm' }, 3);
+    const actions = getManualActions(blueprint);
+
+    expect(actions.length).toBeGreaterThan(0);
+    for (const action of actions) {
+      expect(action.titleKey, `action ${action.id} missing titleKey`).toBeDefined();
+      expect(action.titleKey!.startsWith('manualAction.')).toBe(true);
+      expect(action.reasonKey, `action ${action.id} missing reasonKey`).toBeDefined();
+      expect(action.verificationKey, `action ${action.id} missing verificationKey`).toBeDefined();
+      expect(action.stepsKeys, `action ${action.id} missing stepsKeys`).toBeDefined();
+      expect(action.stepsKeys!.length).toBe(action.steps.length);
+    }
+
+    // Analytics actions carry a parameterized title.
+    const ga4 = actions.find(a => a.id === 'configure-ga4');
+    expect(ga4?.titleKey).toBe('manualAction.analytics.title');
+    expect(ga4?.titleParams?.provider).toBe('Google Analytics 4');
+  });
+
+  it('emits a titleKey for every generated artifact', () => {
+    const webApp = createBlueprint('Receipt Desk', { productType: 'web-app' }, 3);
+    const landing = createBlueprint('Receipt Desk', { productType: 'landing-page' }, 3);
+
+    for (const artifact of generateArtifacts(webApp)) {
+      expect(artifact.titleKey, `artifact ${artifact.id} missing titleKey`).toBeDefined();
+      expect(artifact.titleKey!.startsWith('artifact.')).toBe(true);
+    }
+
+    // The two type-specific titles encode the type in the key; all others use a flat id key.
+    const variableIds = new Set(['template-root-package', 'template-readme']);
+    for (const artifact of generateArtifacts(webApp)) {
+      if (variableIds.has(artifact.id)) {
+        expect(artifact.titleKey).toBe(`artifact.${artifact.id}.web-app`);
+      } else {
+        expect(artifact.titleKey).toBe(`artifact.${artifact.id}`);
+      }
+    }
+    for (const artifact of generateArtifacts(landing)) {
+      if (variableIds.has(artifact.id)) {
+        expect(artifact.titleKey).toBe(`artifact.${artifact.id}.landing-page`);
+      }
+    }
+
+    // The same variable id must produce different titles (and different keys) across types.
+    const webPkg = generateArtifacts(webApp).find(a => a.id === 'template-root-package')!;
+    const landPkg = generateArtifacts(landing).find(a => a.id === 'template-root-package')!;
+    expect(webPkg.title).not.toBe(landPkg.title);
+    expect(webPkg.titleKey).not.toBe(landPkg.titleKey);
   });
 
   it('backs every declared quality check with a script that actually runs, for every generated product type', () => {
