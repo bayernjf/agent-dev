@@ -11,7 +11,7 @@ import { verifyWorkspaceArtifacts } from '@agent-dev/blueprint/workspace';
 import { CONFIRMATIONS, runAccountDiscovery, runConnectorPreflight, type AccountDiscoveryReport, type ConnectorPreflightReport } from '@agent-dev/policy';
 import { AgentDevStore, type ReleaseStep } from '@agent-dev/storage';
 import { FakeProviderRegistry } from '@agent-dev/provider-core';
-import { buildAgentExecutionPlan, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, runDoctor, type CustomAgentInput, type AgentProfile, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
+import { AGENT_NOT_EXECUTABLE_CODE, buildAgentExecutionPlan, describeRuntimeExecutorRejection, discoverAgentRuntimes, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, probeAgentCapabilities, resolveRuntimeExecutor, runDoctor, type CustomAgentInput, type AgentProfile, type RuntimeExecutor, agentProfileCreateSchema, agentProfileUpdateSchema } from '@agent-dev/agent-runtime';
 import { GitHubAdapter, RealProviderRegistry, defaultRunner, generateEnvFile, getCredentialBackendInfo, getCredentialMeta, loadCredentials, loadProjectResources, saveCredentials, verifyCredentials } from '@agent-dev/provider-cli';
 import type { ReleaseSource } from '@agent-dev/deployment-composer';
 import { DeploymentComposer, ReleaseComposer, cleanupPreviewProjects, previewProjectNames, productionWebOrigin, releaseIdempotencyKey, releaseStepPlan } from '@agent-dev/deployment-composer';
@@ -20,6 +20,13 @@ import { DaemonEventBus } from './events.js';
 import { createTokenAuthMiddleware } from './auth.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
 import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
+
+// A Runtime executor that cannot be resolved is refused, never substituted. The refusal carries the
+// shared code because GET runtime/plan already answers 409 for "nothing approved yet": one status,
+// two different facts, and Studio has to say which one it means in the interface language.
+function runtimeExecutorRejection(executor: RuntimeExecutor) {
+  return { error: describeRuntimeExecutorRejection(executor), code: AGENT_NOT_EXECUTABLE_CODE, agentId: executor.agentId };
+}
 
 // `z.string().url()` accepts any scheme, including `ext::` (executes arbitrary commands when
 // handed to git), `file://` (reads local repositories) and `javascript:` (stored XSS when rendered
@@ -706,16 +713,16 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     const task = await store.getFeatureTask(project.id, project.blueprint.metadata.revision);
     if (!task || task.status !== 'approved') return context.json({ error: 'Approve a Feature Task before preparing a Runtime plan.' }, 409);
     const run = await store.getRuntimeRun(project.id, project.blueprint.metadata.revision);
-    // Prefer the Blueprint-selected runtime when no explicit run exists yet. Falls back to codex only
-    // when the Blueprint did not specify a runtime (legacy Blueprints).
-    const blueprintAgent = project.blueprint.spec.runtime?.provider;
-    const rawAgentId = run?.agentId ?? blueprintAgent ?? 'codex';
-    // Resolve Profile if the agentId refers to one.
-    const profile = await store.profiles.getProfile(rawAgentId);
-    const agentId = profile ? profile.baseAgentId : rawAgentId;
-    const plan = isAgentExecutable(agentId)
-      ? buildAgentExecutionPlan(task, task.workspacePath, agentId, { profile: profile ?? undefined })
-      : buildAgentExecutionPlan(task, task.workspacePath, 'codex');
+    // Prefer the recorded executor, then the Blueprint-selected runtime; 'codex' is only the default
+    // for a Blueprint that never named one. Whatever the layers agree on has to be executable - this
+    // route used to answer an unresolvable executor by building a Codex plan, which showed a plan for
+    // an Agent nobody had selected.
+    const resolved = await resolveRuntimeExecutor(
+      run?.agentId ?? project.blueprint.spec.runtime?.provider ?? 'codex',
+      id => store.profiles.getProfile(id),
+    );
+    if (!resolved.ok) return context.json(runtimeExecutorRejection(resolved), 409);
+    const plan = buildAgentExecutionPlan(task, task.workspacePath, resolved.agentId, { profile: resolved.profile });
     return context.json({ probe: probeCodexRuntime(), plan, run });
   });
 
@@ -742,9 +749,13 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       }
     }
     try {
-      // A request may override the runtime; otherwise use the Blueprint-selected provider.
-      const blueprintAgent = project.blueprint.spec.runtime?.provider;
-      const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision, body.agentId ?? blueprintAgent ?? 'codex');
+      // A request may override the runtime; otherwise the Blueprint-selected provider is used. Both
+      // are resolved with the one rule, so a Blueprint that names an Agent the Adapter registry does
+      // not trust cannot quietly produce a run record for Codex.
+      const requested = body.agentId ?? project.blueprint.spec.runtime?.provider ?? 'codex';
+      const resolved = await resolveRuntimeExecutor(requested, id => store.profiles.getProfile(id));
+      if (!resolved.ok) return context.json(runtimeExecutorRejection(resolved), 409);
+      const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision, requested);
       return context.json({ run, probe: probeCodexRuntime() }, 201);
     } catch (error) {
       return context.json({ error: error instanceof Error ? error.message : 'Unable to prepare the Runtime run.' }, 409);
