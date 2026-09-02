@@ -6,6 +6,7 @@ import type { ProductBlueprint } from './index.js';
 export type GeneratedArtifact = {
   id: string;
   title: string;
+  titleKey?: string;
   path: string;
   content: string;
 };
@@ -13,16 +14,28 @@ export type GeneratedArtifact = {
 export type ManualAction = {
   id: string;
   title: string;
+  titleKey?: string;
+  titleParams?: Record<string, string | number>;
   reason: string;
+  reasonKey?: string;
   steps: string[];
+  stepsKeys?: string[];
   verification: string;
+  verificationKey?: string;
 };
 
 export type DryRunPlan = {
   blueprintRevision: number;
   noExternalChanges: true;
   summary: string;
+  // Stable i18n key + params for the summary. Studio resolves the key against its locale table and
+  // falls back to `summary` (English prose) when the key is missing. The MCP bridge keeps reading
+  // `summary` so external coding agents always receive English instructions.
+  summaryKey: string;
+  summaryParams: { artifactCount: number; actionCount: number };
   automaticPreparation: string[];
+  // One key per entry in automaticPreparation, same order.
+  automaticPreparationKeys: string[];
   manualActions: ManualAction[];
   artifacts: GeneratedArtifact[];
 };
@@ -30,9 +43,12 @@ export type DryRunPlan = {
 export type BaselinePlanResource = {
   id: 'github-repository' | 'supabase-project' | 'vercel-api' | 'cloudflare-pages';
   title: string;
+  titleKey?: string;
   owner: string | null;
   status: 'blocked' | 'requires-approval';
   reason: string;
+  reasonKey?: string;
+  reasonParams?: Record<string, string | number>;
 };
 
 export type BaselinePlan = {
@@ -40,6 +56,8 @@ export type BaselinePlan = {
   noExternalChanges: true;
   readyForApproval: boolean;
   summary: string;
+  summaryKey?: string;
+  summaryParams?: Record<string, string | number>;
   resources: BaselinePlanResource[];
 };
 
@@ -301,54 +319,83 @@ function environmentContract(blueprint: ProductBlueprint) {
 
 export function getManualActions(blueprint: ProductBlueprint): ManualAction[] {
   const providers = baselineProvidersFor(blueprint.spec.product.type);
-  const actions: ManualAction[] = ([
-    ['github', {
+  const providerActions: Record<string, ManualAction> = {
+    github: {
       id: 'authorize-github',
       title: 'Authorize GitHub access',
+      titleKey: 'manualAction.github.title',
       reason: 'Repository ownership and protected-branch permissions belong to you.',
+      reasonKey: 'manualAction.github.reason',
       steps: ['Confirm the intended GitHub account or organization.', 'Grant only repository, pull request and checks permissions.', 'Return to Agent-Dev for a read-only capability check.'],
+      stepsKeys: ['manualAction.github.steps.0', 'manualAction.github.steps.1', 'manualAction.github.steps.2'],
       verification: 'Agent-Dev can read the selected account and list its permitted repositories.',
-    }],
-    ['supabase', {
+      verificationKey: 'manualAction.github.verification',
+    },
+    supabase: {
       id: 'authorize-supabase',
       title: 'Authorize Supabase and choose an organization',
+      titleKey: 'manualAction.supabase.title',
       reason: 'Database region, plan and project ownership can affect cost and compliance.',
+      reasonKey: 'manualAction.supabase.reason',
       steps: ['Sign in to Supabase.', 'Choose the organization and region.', 'Review the project plan before any project is created.'],
+      stepsKeys: ['manualAction.supabase.steps.0', 'manualAction.supabase.steps.1', 'manualAction.supabase.steps.2'],
       verification: 'Agent-Dev can discover the chosen organization without reading database data.',
-    }],
-    ['cloudflare', {
+      verificationKey: 'manualAction.supabase.verification',
+    },
+    cloudflare: {
       id: 'authorize-cloudflare',
       title: 'Authorize Cloudflare Pages',
+      titleKey: 'manualAction.cloudflare.title',
       reason: 'Pages deployment remains in your Cloudflare account.',
+      reasonKey: 'manualAction.cloudflare.reason',
       steps: ['Sign in to Cloudflare.', 'Choose the account that owns the Pages project.', 'Approve Pages-only access; do not grant DNS access unless a custom domain is planned.'],
+      stepsKeys: ['manualAction.cloudflare.steps.0', 'manualAction.cloudflare.steps.1', 'manualAction.cloudflare.steps.2'],
       verification: 'Agent-Dev can list Pages capabilities for the selected account.',
-    }],
-    ['vercel', {
+      verificationKey: 'manualAction.cloudflare.verification',
+    },
+    vercel: {
       id: 'authorize-vercel',
       title: 'Authorize Vercel Functions',
+      titleKey: 'manualAction.vercel.title',
       reason: 'API deployment and server-side environment variables remain in your Vercel team.',
+      reasonKey: 'manualAction.vercel.reason',
       steps: ['Sign in to Vercel.', 'Choose the team for the API project.', 'Review the required server-side environment variable targets.'],
+      stepsKeys: ['manualAction.vercel.steps.0', 'manualAction.vercel.steps.1', 'manualAction.vercel.steps.2'],
       verification: 'Agent-Dev can discover the selected team and its deployment capabilities.',
-    }],
-  ] as const).filter(([provider]) => providers.includes(provider)).map(([, action]) => ({ ...action, steps: [...action.steps] }));
+      verificationKey: 'manualAction.vercel.verification',
+    },
+  };
+  const actions: ManualAction[] = (['github', 'supabase', 'cloudflare', 'vercel'] as const)
+    .filter(p => providers.includes(p))
+    .map(p => ({ ...providerActions[p], steps: [...providerActions[p].steps], stepsKeys: [...(providerActions[p].stepsKeys ?? [])] }));
 
   if (blueprint.spec.product.dataSensitivity === 'sensitive') {
     actions.unshift({
       id: 'privacy-review',
       title: 'Approve the sensitive-data boundary',
+      titleKey: 'manualAction.privacyReview.title',
       reason: 'Sensitive product data requires an explicit privacy, retention and access review.',
+      reasonKey: 'manualAction.privacyReview.reason',
       steps: ['Define what sensitive data is collected.', 'Confirm who can access it and how long it is retained.', 'Approve the privacy notice and incident contact.'],
+      stepsKeys: ['manualAction.privacyReview.steps.0', 'manualAction.privacyReview.steps.1', 'manualAction.privacyReview.steps.2'],
       verification: 'The approved policy is recorded before provisioning begins.',
+      verificationKey: 'manualAction.privacyReview.verification',
     });
   }
 
   for (const provider of blueprint.spec.analytics.providers) {
+    const label = provider === 'ga4' ? 'Google Analytics 4' : 'Microsoft Clarity';
     actions.push({
       id: `configure-${provider}`,
-      title: `Configure ${provider === 'ga4' ? 'Google Analytics 4' : 'Microsoft Clarity'}`,
+      title: `Configure ${label}`,
+      titleKey: 'manualAction.analytics.title',
+      titleParams: { provider: label },
       reason: 'Analytics changes the privacy boundary and requires an account-owned identifier.',
+      reasonKey: 'manualAction.analytics.reason',
       steps: ['Confirm tracking is permitted for this product.', 'Create or select the analytics property.', 'Provide only the public measurement or project ID.'],
+      stepsKeys: ['manualAction.analytics.steps.0', 'manualAction.analytics.steps.1', 'manualAction.analytics.steps.2'],
       verification: 'The public identifier is present in the environment contract and the client script is observable after consent.',
+      verificationKey: 'manualAction.analytics.verification',
     });
   }
 
@@ -356,9 +403,13 @@ export function getManualActions(blueprint: ProductBlueprint): ManualAction[] {
     actions.push({
       id: 'custom-instruction',
       title: 'Resolve the custom implementation note',
+      titleKey: 'manualAction.custom.title',
       reason: 'The note is preserved but is not backed by an automation module yet.',
+      reasonKey: 'manualAction.custom.reason',
       steps: ['Review the requested note.', 'Decide whether it requires a supported module or a project-specific ADR.', 'Approve its acceptance criteria before implementation.'],
+      stepsKeys: ['manualAction.custom.steps.0', 'manualAction.custom.steps.1', 'manualAction.custom.steps.2'],
       verification: 'A linked implementation task or ADR records the resolution.',
+      verificationKey: 'manualAction.custom.verification',
     });
   }
   return actions;
@@ -723,34 +774,59 @@ function buildApiTool(blueprint: ProductBlueprint): GeneratedArtifact[] {
 }
 
 export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifact[] {
-  switch (blueprint.spec.product.type) {
+  const type = blueprint.spec.product.type;
+  let artifacts: GeneratedArtifact[];
+  switch (type) {
     case 'web-app':
-      return [...buildGovernanceArtifacts(blueprint), ...buildWebSaaS(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildWebSaaS(blueprint)];
+      break;
     case 'landing-page':
-      return [...buildGovernanceArtifacts(blueprint), ...buildLandingPage(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildLandingPage(blueprint)];
+      break;
     case 'browser-extension':
-      return [...buildGovernanceArtifacts(blueprint), ...buildBrowserExtension(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildBrowserExtension(blueprint)];
+      break;
     case 'desktop':
-      return [...buildGovernanceArtifacts(blueprint), ...buildDesktop(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildDesktop(blueprint)];
+      break;
     case 'mobile':
-      return [...buildGovernanceArtifacts(blueprint), ...buildMobile(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildMobile(blueprint)];
+      break;
     case 'api-tool':
-      return [...buildGovernanceArtifacts(blueprint), ...buildApiTool(blueprint)];
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildApiTool(blueprint)];
+      break;
   }
+  // Two artifact ids carry a type-specific title (template-root-package, template-readme); every other
+  // id has the same title across all product types. The key encodes the type only when needed.
+  const variableTitleIds = new Set(['template-root-package', 'template-readme']);
+  for (const artifact of artifacts) {
+    artifact.titleKey = variableTitleIds.has(artifact.id)
+      ? `artifact.${artifact.id}.${type}`
+      : `artifact.${artifact.id}`;
+  }
+  return artifacts;
 }
 
 export function createDryRunPlan(blueprint: ProductBlueprint): DryRunPlan {
   const artifacts = generateArtifacts(blueprint);
+  const manualActions = getManualActions(blueprint);
   return {
     blueprintRevision: blueprint.metadata.revision,
     noExternalChanges: true,
-    summary: `This dry run prepares ${artifacts.length} generated artifacts and ${getManualActions(blueprint).length} manual actions. No cloud resource, credential or repository is changed.`,
+    summary: `This dry run prepares ${artifacts.length} generated artifacts and ${manualActions.length} manual actions. No cloud resource, credential or repository is changed.`,
+    summaryKey: 'dryRun.summary',
+    summaryParams: { artifactCount: artifacts.length, actionCount: manualActions.length },
     automaticPreparation: [
       'Validate the ProductBlueprint schema and selected module combination.',
       'Generate the product standard, agent constraints, delivery workflow, environment contract and handoff preview.',
       'Classify approval boundaries and manual actions before any provider plan is created.',
     ],
-    manualActions: getManualActions(blueprint),
+    automaticPreparationKeys: [
+      'dryRun.automaticPreparation.validateSchema',
+      'dryRun.automaticPreparation.generateArtifacts',
+      'dryRun.automaticPreparation.classifyBoundaries',
+    ],
+    manualActions,
     artifacts,
   };
 }
@@ -762,19 +838,22 @@ export function createBaselinePlan(blueprint: ProductBlueprint): BaselinePlan {
   // past it would have had three cloud projects created that the product never touches.
   const providers = baselineProvidersFor(blueprint.spec.product.type);
   const selections = ([
-    ['github', 'github-repository', 'GitHub repository', blueprint.spec.sourceControl.owner, 'Choose the GitHub owner or organization that will own the repository.'],
-    ['supabase', 'supabase-project', 'Supabase project', blueprint.spec.data.organization, 'Choose the Supabase organization and later confirm region and plan.'],
-    ['vercel', 'vercel-api', 'Vercel API project', blueprint.spec.deployment.api.team, 'Choose the Vercel team that will own the API project.'],
-    ['cloudflare', 'cloudflare-pages', 'Cloudflare Pages project', blueprint.spec.deployment.web.account, 'Choose the Cloudflare account that will own the Pages project.'],
-  ] as const).filter(([provider]) => providers.includes(provider));
-  const resources: BaselinePlanResource[] = selections.map(([, id, title, owner, missingReason]) => ({
+    { provider: 'github' as const, id: 'github-repository' as const, title: 'GitHub repository', titleKey: 'baseline.resource.github.title', owner: blueprint.spec.sourceControl.owner, missingReason: 'Choose the GitHub owner or organization that will own the repository.', missingReasonKey: 'baseline.resource.github.missingReason' },
+    { provider: 'supabase' as const, id: 'supabase-project' as const, title: 'Supabase project', titleKey: 'baseline.resource.supabase.title', owner: blueprint.spec.data.organization, missingReason: 'Choose the Supabase organization and later confirm region and plan.', missingReasonKey: 'baseline.resource.supabase.missingReason' },
+    { provider: 'vercel' as const, id: 'vercel-api' as const, title: 'Vercel API project', titleKey: 'baseline.resource.vercel.title', owner: blueprint.spec.deployment.api.team, missingReason: 'Choose the Vercel team that will own the API project.', missingReasonKey: 'baseline.resource.vercel.missingReason' },
+    { provider: 'cloudflare' as const, id: 'cloudflare-pages' as const, title: 'Cloudflare Pages project', titleKey: 'baseline.resource.cloudflare.title', owner: blueprint.spec.deployment.web.account, missingReason: 'Choose the Cloudflare account that will own the Pages project.', missingReasonKey: 'baseline.resource.cloudflare.missingReason' },
+  ]).filter(s => providers.includes(s.provider));
+  const resources: BaselinePlanResource[] = selections.map(({ id, title, titleKey, owner, missingReason, missingReasonKey }) => ({
     id,
     title,
+    titleKey,
     owner: owner || null,
     status: owner ? 'requires-approval' : 'blocked',
     reason: owner
       ? `After approval, Agent-Dev may create the ${title.toLowerCase()} in ${owner}.`
       : missingReason,
+    reasonKey: owner ? 'baseline.resource.reason.hasOwner' : missingReasonKey,
+    reasonParams: owner ? { title: title.toLowerCase(), owner } : undefined,
   }));
   const blocked = resources.filter(resource => resource.status === 'blocked');
   return {
@@ -784,6 +863,8 @@ export function createBaselinePlan(blueprint: ProductBlueprint): BaselinePlan {
     summary: blocked.length === 0
       ? 'All ownership targets are selected. Resource creation still requires one explicit approval and has not started.'
       : `${blocked.length} ownership target${blocked.length === 1 ? ' is' : 's are'} still required before a baseline can be approved.`,
+    summaryKey: blocked.length === 0 ? 'baseline.summary.ready' : 'baseline.summary.blocked',
+    summaryParams: blocked.length === 0 ? undefined : { count: blocked.length },
     resources,
   };
 }

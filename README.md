@@ -46,20 +46,21 @@ Agent Runtime  -> 用户电脑中的 Codex
 ### 当前实施
 
 - [Phase 0 技术 Spike 状态](docs/spikes/README.md)：本机实测证据、阻塞项和进入工程阶段的 Gate。
-- [真实链路经验沉淀](docs/real-world-lessons.md)：三个真实项目暴露的缺陷、架构规则、模型选型与环境前提。
+- [真实链路经验沉淀](docs/real-world-lessons.md)：四个真实项目与 Studio 界面走查暴露的 31 个缺陷、11 条架构规则、模型选型与环境前提。
 - [v0.2 实施计划](docs/implementation-plan-v0.2.md)：v0.2 的目标、工程拆解与完成定义。
 - [Agent Profile 自定义方案](docs/custom-agent-profiles.md)：Runtime 的 Profile 化配置、校验与合并规则，已实施。
 - [凭证管理](docs/credential-management.md)：本地凭证文件、连接元数据、`.env` 生成器与 Studio 引导面板。
 - [对外 MCP 桥接](docs/mcp-bridge.md)：`agent-dev mcp` 的 20 工具清单、闸门边界与客户端配置。
 - [Studio 双主题设计方案](docs/studio-theme-design.md)：Studio 深/浅双主题 token 化视觉方案，已实施（`90696d4`）。
-- [Studio i18n 设计方案](docs/studio-i18n-design.md)：Studio 中/英双语方案，默认英文、术语保留英文，已实施（`90696d4`）。
+- [Studio i18n 设计方案](docs/studio-i18n-design.md)：Studio 中/英双语方案，默认英文、术语保留英文，已实施（`90696d4`）；§6.1/§6.2 是枚举驱动 key 与插值 params 的两条强制规则（含种植实测的判据）。
+- [领域文案 i18n 边界决策依据](docs/i18n-domain-prose-decision.md)：后端 `packages/blueprint` 下发英文 prose 的 i18n 影响范围实测、三方案对比与推荐，待拍板。
 - [外部 Pilot 招募](docs/pilot-recruiting.md)：v0.2 外部 Pilot 参与条件、流程、激励与隐私边界，申请/反馈走仓库 Issue 模板。
 - [安全与质量审计 2026-08-31](docs/audit-2026-08-31.md)：全仓审计发现与整改方案（P0–P4），整改进度以此为准。
 - [项目交接](handoff.md)：当前分支、硬约束、已完成工作和下一步。
 
 ## 当前状态
 
-当前仓库处于 `v0.2` Pilot 阶段（版本 `0.2.0`）：四个真实项目已通过 BluePrint → Preview → Production 全周期交付上线，2026-08-31 完成全仓安全与质量审计并落地 P0–P4 全部整改（回环绑定 + token 鉴权、状态机事务化、清理一致性、Windows 兼容、测试补齐，当时 220 例），2026-09-01 P1-2 凭证后端化落地，同日 Studio 冷启动鉴权、Windows Agent 发现路径、以及 Runtime 列表把未验证的执行能力当成已验证展示这三个缺陷修复补测后全仓 259 例测试全绿；2026-09-02 完成 Studio 界面走查待办中不需要架构决策的全部条目（中英文案、产品类型列名、两个审批状态的区分、执行者契约、只读探测不再顺带任命执行者、能力探测只说它读到了什么，以及 Runtime 路由的第二种拒绝——本机没装该 CLI——拿到自己的 code，不再把后端英文句印上屏，两个响应也不再附带一份与执行者无关的 Codex 探测结果），现全仓 346 例测试全绿。不是可用于生产的稳定版本。
+当前仓库处于 `v0.2` Pilot 阶段（版本 `0.2.0`）：四个真实项目已通过 BluePrint → Preview → Production 全周期交付上线，2026-08-31 完成全仓安全与质量审计并落地 P0–P4 全部整改（回环绑定 + token 鉴权、状态机事务化、清理一致性、Windows 兼容、测试补齐，当时 220 例），2026-09-01 P1-2 凭证后端化落地，同日 Studio 冷启动鉴权、Windows Agent 发现路径、以及 Runtime 列表把未验证的执行能力当成已验证展示这三个缺陷修复补测后全仓 259 例测试全绿；2026-09-02 完成 Studio 界面走查待办中不需要架构决策的全部条目（中英文案、产品类型列名、两个审批状态的区分、执行者契约、只读探测不再顺带任命执行者、能力探测只说它读到了什么，以及 Runtime 路由的第二种拒绝——本机没装该 CLI——拿到自己的 code，不再把后端英文句印上屏，两个响应也不再附带一份与执行者无关的 Codex 探测结果），同日再关掉两条：那条此前记为「未归因」的间歇失败实测是 2 条用例超时——目录发现要顺序探测 8 个内置 Agent、每个版本探测预算 5 s，比 vitest 单用例默认的 5 s 还长，改法是问接线的用例注入目录、问过滤的用例把 PATH 指到夹具目录；以及决策卡与 Blueprint 表单那句基线注记不看 `productType`（一个 MCP server 被索要 Supabase 组织与 Vercel team，而它自己生成的 `PRODUCT_STANDARD.md` 写着该类型不供给这些），两者现在都读同一张 per-type 表，现全仓 351 例测试全绿。不是可用于生产的稳定版本。
 
 本地可运行能力：
 
