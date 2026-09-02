@@ -339,6 +339,78 @@ export const zh = {
       reason: '自定义说明会保留，但在存在支持模块前不会自动化。',
     },
   },
+  manualAction: {
+    github: {
+      title: '授权 GitHub 访问',
+      reason: '仓库所有权和受保护分支权限归你所有。',
+      steps: {
+        '0': '确认目标 GitHub 账户或组织。',
+        '1': '仅授予仓库、PR 和检查权限。',
+        '2': '返回 Agent-Dev 进行只读能力检查。',
+      },
+      verification: 'Agent-Dev 可读取所选账户并列出其允许的仓库。',
+    },
+    supabase: {
+      title: '授权 Supabase 并选择组织',
+      reason: '数据库区域、套餐和项目所有权会影响成本与合规。',
+      steps: {
+        '0': '登录 Supabase。',
+        '1': '选择组织和区域。',
+        '2': '在创建项目前审查项目套餐。',
+      },
+      verification: 'Agent-Dev 可发现所选组织，不读取数据库数据。',
+    },
+    cloudflare: {
+      title: '授权 Cloudflare Pages',
+      reason: 'Pages 部署保留在你的 Cloudflare 账户中。',
+      steps: {
+        '0': '登录 Cloudflare。',
+        '1': '选择拥有 Pages 项目的账户。',
+        '2': '批准仅 Pages 访问；除非计划自定义域名，否则不授予 DNS 访问。',
+      },
+      verification: 'Agent-Dev 可列出所选账户的 Pages 能力。',
+    },
+    vercel: {
+      title: '授权 Vercel Functions',
+      reason: 'API 部署和服务端环境变量保留在你的 Vercel 团队中。',
+      steps: {
+        '0': '登录 Vercel。',
+        '1': '选择 API 项目的团队。',
+        '2': '审查所需的服务端环境变量目标。',
+      },
+      verification: 'Agent-Dev 可发现所选团队及其部署能力。',
+    },
+    privacyReview: {
+      title: '批准敏感数据边界',
+      reason: '敏感产品数据需要明确的隐私、保留和访问审查。',
+      steps: {
+        '0': '定义收集哪些敏感数据。',
+        '1': '确认谁可以访问以及保留多久。',
+        '2': '批准隐私声明和事件联系人。',
+      },
+      verification: '批准的策略在开始配置前已记录。',
+    },
+    analytics: {
+      title: '配置 {provider}',
+      reason: '分析统计改变隐私边界，需要账户所有的标识符。',
+      steps: {
+        '0': '确认本产品允许追踪。',
+        '1': '创建或选择分析统计属性。',
+        '2': '仅提供公开的测量或项目 ID。',
+      },
+      verification: '公开标识符存在于环境契约中，客户端脚本在同意后可观察。',
+    },
+    custom: {
+      title: '解决自定义实现说明',
+      reason: '说明已保留，但尚未有自动化模块支持。',
+      steps: {
+        '0': '审查请求的说明。',
+        '1': '决定它需要支持模块还是项目特定的 ADR。',
+        '2': '在实现前批准其验收标准。',
+      },
+      verification: '关联的实现任务或 ADR 记录了解决方案。',
+    },
+  },
   evidence: {
     title: '证据包',
     finalDeliveryReport: '最终交付报告',
