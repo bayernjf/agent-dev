@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Activity, ArrowLeft, ArrowRight, CheckCircle2, CircleDot, FolderKanban, Gauge, KeyRound, Moon, PlugZap, RefreshCw, ShieldCheck, Sparkles, Sun,
 } from 'lucide-react';
 import { useI18n, type KeyPath } from './i18n/i18n';
+import { useDomainText } from './lib/domain-text';
 import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
 import { baselineProvidersFor, getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
@@ -29,6 +30,7 @@ import { baselineNoteFor } from './lib/baseline-note';
 
 export function App() {
   const { t, locale, setLocale } = useI18n();
+  const domainT = useDomainText();
   const { theme, toggleTheme } = useTheme();
 
   const [view, setView] = useState<View>({ kind: 'dashboard' });
@@ -2102,9 +2104,9 @@ export function App() {
             </section>}
 
             {selected && dryRun && <section className="plan-section" id="standards">
-              <div className="section-heading"><div><p className="eyebrow">{t('plan.eyebrow', { revision: dryRun.blueprintRevision })}</p><h2>{t('plan.title')}</h2><p>{dryRun.summary}</p></div><span className="dry-run-tag">{t('plan.noExternalWrites')}</span></div>
+              <div className="section-heading"><div><p className="eyebrow">{t('plan.eyebrow', { revision: dryRun.blueprintRevision })}</p><h2>{t('plan.title')}</h2><p>{domainT(dryRun.summary, dryRun.summaryKey, dryRun.summaryParams)}</p></div><span className="dry-run-tag">{t('plan.noExternalWrites')}</span></div>
               <div className="plan-grid">
-                <article className="plan-card"><h3>{t('plan.preparedAutomatically')}</h3><ol>{dryRun.automaticPreparation.map(step => <li key={step}>{step}</li>)}</ol></article>
+                <article className="plan-card"><h3>{t('plan.preparedAutomatically')}</h3><ol>{dryRun.automaticPreparation.map((step, i) => <li key={step}>{domainT(step, dryRun.automaticPreparationKeys?.[i])}</li>)}</ol></article>
                 <article className="plan-card"><h3>{t('plan.requiredFromYou')}</h3><ol>{dryRun.manualActions.map(action => <li key={action.id}><strong>{action.title}</strong><span>{action.reason}</span><small>{t('plan.verify', { verification: action.verification })}</small></li>)}</ol></article>
               </div>
               <div className="artifact-heading"><div><h3>{t('plan.generatedPackage')}</h3><p>{t('common.previewOnly')}</p></div><button className="icon-button" type="button" onClick={() => void loadDryRun(selected.id)} aria-label={t('plan.refreshPlan')} title={t('plan.refreshPlan')}><RefreshCw size={17} /></button></div>
