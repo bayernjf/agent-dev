@@ -24,6 +24,7 @@ test-results/
 .vercel/
 .wrangler/
 .supabase/
+.scratch/
 spikes/**/tmp/
 spikes/**/output/
 
