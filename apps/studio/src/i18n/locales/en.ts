@@ -783,6 +783,10 @@ export const en = {
     running: '{agent} is working in the approved workspace.',
     planned: 'No {agent} process has started. Review the local plan before explicitly starting execution.',
     prepareDescription: 'Prepare a guarded Runtime plan from the approved task.',
+    // The daemon refuses to run a task with an Agent it cannot resolve instead of quietly picking
+    // Codex. Naming the refused Agent - and the fact that nothing was substituted - is the only way
+    // the panel can tell this apart from a project that simply has no approved run.
+    refusedAgent: '{agent} cannot run this task, and no other Agent was substituted. Pick a verified Agent before preparing.',
     prepare: 'Prepare Runtime',
     preparing: 'Preparing...',
     cancelling: 'Cancelling...',

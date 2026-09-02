@@ -27,6 +27,8 @@ const EXECUTOR_COPY: KeyPath[] = [
   'runtime.completed', 'runtime.failed', 'runtime.running', 'runtime.planned',
   'runtime.runAgent', 'runtime.runningAgent', 'runtime.retryAgent', 'runtime.retryingAgent',
   'runtime.executionFailed', 'runtime.retryFailed',
+  // The daemon refuses to swap the executor, so the refusal has to name the Agent it refused.
+  'runtime.refusedAgent',
   'confirmations.startAgent', 'confirmations.retryAgent',
 ];
 
