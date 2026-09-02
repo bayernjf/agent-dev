@@ -1,10 +1,9 @@
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { en } from '../src/i18n/locales/en';
 import { zh } from '../src/i18n/locales/zh';
 import type { KeyPath } from '../src/i18n/i18n';
 import { dictionaries, resolveKey } from './key-resolution';
+import { renderedSourceBlob } from './source-evidence';
 
 // Two labels that English keeps apart can still collapse into one word when translated, and at an
 // approval gate the difference is the whole message: "your turn" is the opposite of "waiting on
@@ -32,24 +31,11 @@ const APPROVAL_GATES: { meaning: string; labels: GateLabel[] }[] = [
   },
 ];
 
-const SRC = new URL('../src', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-
-function sourceBlob(dir: string): string {
-  const parts: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      // Defining a key is not the same as rendering it.
-      if (full.includes(join('i18n', 'locales'))) continue;
-      parts.push(sourceBlob(full));
-    } else if (/\.(ts|tsx)$/.test(entry.name)) {
-      parts.push(readFileSync(full, 'utf8'));
-    }
-  }
-  return parts.join('\n');
-}
-
-const RENDERED = sourceBlob(SRC);
+// `renderedBy` is a claim about code that runs, so the blob it is looked up in has to be one: the
+// shared reader strips whole-line comments, and a call site that survives only inside a comment
+// renders nothing. This file used to read the tree verbatim, which meant commenting the last call
+// site out left the assertion below passing while the label left the screen.
+const RENDERED = renderedSourceBlob();
 const ALL_LABELS = APPROVAL_GATES.flatMap(gate => gate.labels);
 
 describe('approval gate labels', () => {
