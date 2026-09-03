@@ -6,6 +6,8 @@
 
 ## 最近进度
 
+- **全仓中文 commit message 清理为英语并 force push dev/main（2026-09-03）**：审计历史时发现三个中文 commit——`1fd65a1`（普通 commit，subject + 19 行 body 全中文）、`660e9e8`（Merge #76，body 中文）、`1997a8c`（Merge #77，body 中文），均在 dev/main 分支上（feature 分支无中文 commit）。用 `git filter-branch --msg-filter` 重写 dev/main 共 441 个 commit，将三个 commit 的完整 message（含 body）翻译为英语，然后 `git push --force-with-lease origin dev main`，最后清理 `refs/original/` 备份。**注意**：feature/20260802 分支未重写（无中文 commit，无需改），因此 feature 上的 commit 与 dev/main 上的对应 commit message 相同但 hash 不同——这是历史重写的正常结果，不是重复 commit。最终验证：本地与远程所有分支均无中文 commit。
+
 - **领域文案 i18n 边界方案②五批全部落地（2026-09-02，4019905/ff5f664/caa3b07/6e1ee52/b22ec08；§9 决策项关闭）**：决策依据文档（`docs/i18n-domain-prose-decision.md`）实测 288 份答案组合后确认——非 artifact 共 93 个模板 + artifact titles 80 key，同一 prose 有两个消费方（Studio 要中文、MCP 桥要英文原文给外部 coding agent），据此淘汰方案①③，采用方案②：blueprint 保留英文 prose 作契约，并行发稳定 key+params，Studio 用 key 查 locale、miss 回退英文，MCP 桥零改动。
   - **第 1 批 dryRun（4 模板）**：`DryRunPlan` 加 `summaryKey/summaryParams/automaticPreparationKeys`；Studio 新建 `useDomainText()` hook（`lib/domain-text.ts`），key 命中出中文、两 locale 都 miss 回退后端英文 prose、无 key 返回原文（增量迁移安全）；locale 加 `dryRun.*` 段。
   - **第 2 批 decisions（37）**：`BlueprintDecision` 加 `titleKey/valueKey/valueParams/reasonKey`；枚举值（dataSensitivity/previewStrategy）和 analytics 列表参数化；per-type stack/provider 值暂留英文（从 `PRODUCT_TYPE_DESCRIPTORS` 派生，后续加 per-type key）。
