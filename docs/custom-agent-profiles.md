@@ -1,7 +1,7 @@
 # Custom Agent Profiles
 
-> 状态：设计方案，待落地
-> 日期：2026-08-27
+> 状态：已落地（Profile CRUD + Runtime 配置合并 + Studio 管理界面 + 轻量串行流水线均已实现）
+> 日期：2026-08-27（设计），2026-09 实现落地
 > 前置文档：[agent-runtime-catalog.md](./agent-runtime-catalog.md)
 
 ## 1. 目标
