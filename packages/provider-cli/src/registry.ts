@@ -8,6 +8,7 @@ import { defaultRunner } from './cli.js';
 import { generateEnvFile } from './env-generator.js';
 import { loadCredentials, providerCredentialEnv } from './credentials.js';
 import { loadProjectResources, writeProjectResources } from './project-resources.js';
+import { productionProjectNames } from './names.js';
 
 export type ProviderContext = {
   workspacePath: string;
@@ -42,12 +43,12 @@ const ADAPTER_FACTORIES: Record<string, AdapterConfig> = {
     manualReason: 'GitHub CLI is not authenticated. Run `gh auth login` first.',
   },
   vercel: {
-    factory: (spec, ctx, runner) => new VercelAdapter(spec.owner, ctx.projectName, ctx.workspacePath, runner),
+    factory: (spec, ctx, runner) => new VercelAdapter(spec.owner, productionProjectNames(ctx.projectName).vercelProject, ctx.workspacePath, runner),
     checkCommand: ['vercel', ['whoami']],
     manualReason: 'Vercel CLI is not authenticated. Run `vercel login` first.',
   },
   cloudflare: {
-    factory: (spec, ctx, runner) => new CloudflareAdapter(spec.owner, ctx.projectName, ctx.workspacePath, runner),
+    factory: (spec, ctx, runner) => new CloudflareAdapter(spec.owner, productionProjectNames(ctx.projectName).cloudflareProject, ctx.workspacePath, runner),
     checkCommand: ['npx', ['wrangler', 'whoami']],
     manualReason: 'Cloudflare wrangler is not authenticated. Set CLOUDFLARE_API_TOKEN or run `wrangler login`.',
     checkResult: result => result.success && !result.stdout.includes('not authenticated') && !result.stderr.includes('not authenticated'),
