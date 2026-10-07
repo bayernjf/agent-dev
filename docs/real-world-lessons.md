@@ -116,14 +116,13 @@ OpenCode 2.0 去掉了 v1 的 `-p --print`，非交互执行走 `api` 子命令 
 - **Daemon 的 PATH 需同时含**：node22（运行时）、homebrew（codex，2026-09-02 实测解析到 `0.151.0`；此前记的是 0.142.3——**这版的兼容性本轮没有测过**，本条真正要的只是"homebrew 排在 fnm node20 全局 bin 之前"这个顺序）、fnm node20 全局 bin（`vercel`/`wrangler`），否则出现 codex 超时或 `Vercel is not authenticated`。
 - shell 默认 Node 20 会让 `wrangler` 直接拒绝运行（要求 ≥22）。`.node-version` 为 `22`。
 - **同一道 Node 版本闸门还挡住了两个内置 Agent（2026-09-02 实测）**：这台 shell 的 node 是 `v20.20.2`，`openclaw --version` 以 `Node.js >=22.22.3 <23, >=24.15.0 <25, or >=25.9.0 is required` 退出 1，`pi --version` 退出 1 并倒出 57 KB 打包栈。两者的启动器都是 `#!/usr/bin/env node`，所以**它们的能力探测与执行在这台机器上永远答不出结果**，而 daemon 的 PATH 配方为了 `vercel`/`wrangler` 恰好要带上 node20 全局 bin——换 node 之前，`openclaw` 的 candidate 状态推不动。这不是产品缺陷，别把它记成"Agent 不支持"（见 [Agent Runtime Catalog](agent-runtime-catalog.md) §3.5）。
+- **Vercel CLI 56 删项目路径两处不兼容（2026-10-08 清理 Preview 遗留时实测）**：`project rm` 不再认识 `--yes`（`unknown or unexpected option`）；改用 `--non-interactive` 后**仍会**交互式问「Are you sure? (y/N)」——而 Node `execFile` 从不写 stdin，子进程干等到超时。修法：`CommandRunner` 增加 `input` 选项（spawn 写入并关闭 stdin），以 `y\n` 应答（`ffd066c`；`--yes` 移除见 `9abbef7`）。教训：**provider CLI 的破坏性子命令在升级后要重新实测确认路径，flag 帮助里有 ≠ 行为不变**。
 - 所有 GitHub CLI 调用注入 Agent-Dev 保存的 `GITHUB_TOKEN`；凭证保存/删除后废弃 Provider CLI 可用性缓存。
 
-## 6. 遗留真实资源（未清理）
+## 6. 遗留真实资源
 
-以下 Preview 资源仍留在账号里，清理入口 `POST .../preview/cleanup`（确认串 `CLEANUP_PREVIEW`）：
+Preview 遗留资源**已于 2026-10-08 全部清理**（`POST .../preview/cleanup`，删后 `vercel project ls` / `wrangler pages project list` 只读复验清零）：`receipt-test-api-pr-1` / `receipt-test-web-pr-1`、`workspace-verify-fresh-api-pr-1` / `workspace-verify-fresh-web-pr-1`、`workspace-verify-fresh-api-preview` / `workspace-verify-fresh-web-preview`、`link-vault-api-pr-1` / `link-vault-web-pr-1`。
 
-- `receipt-test-api-pr-1`（Vercel）、`receipt-test-web-pr-1`（Cloudflare）
-- `workspace-verify-fresh-api-preview`（Vercel）、`workspace-verify-fresh-web-preview`（Cloudflare）
-- `link-vault-api-pr-1`（Vercel）、`link-vault-web-pr-1`（Cloudflare）
+仍留账号、**待用户拍板是否删除**的是 4 个废弃裸名项目（2026-09-10 核对发现，均非生产交付物；Vercel 侧仅 1 次失败部署，Cloudflare 侧为 hash 域名空壳）：`receipt-test`（Vercel/Cloudflare）、`link-vault`（Vercel/Cloudflare）。2026-10-08 起 Apply 改用生产名建项目（`9b2058b`），不会再产生这类裸名项目。
 
 生产侧项目是交付物，**不应清理**：`receipt-test-api`/`receipt-test-web`、`workspace-verify-fresh-api`/`workspace-verify-fresh-web`、`link-vault-api`/`link-vault-web`。

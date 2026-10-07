@@ -359,6 +359,24 @@ describe('cleanupPreviewProjects', () => {
     expect(result.errors[0].provider).toBe('cloudflare');
   });
 
+  it('answers the Vercel CLI 56 removal prompt via stdin instead of a confirm flag', async () => {
+    const seen: Array<{ command: string; args: string[]; input?: string }> = [];
+    const runner: CommandRunner = async (command, args, options) => {
+      seen.push({ command, args, input: options?.input });
+      return { stdout: 'Deleted', stderr: '', exitCode: 0, success: true };
+    };
+
+    const result = await cleanupPreviewProjects(runner, {
+      vercelProject: 'test-vercel',
+      workspacePath: '/tmp/workspace',
+    });
+
+    expect(result.vercel).toBe(true);
+    const vercelCall = seen.find(call => call.command === 'vercel')!;
+    expect(vercelCall.args).toEqual(['project', 'rm', 'test-vercel', '--no-color']);
+    expect(vercelCall.input).toBe('y\n');
+  });
+
   it('skips deletion when project name is not provided', async () => {
     const runner = createMockRunner({});
     const result = await cleanupPreviewProjects(runner, {

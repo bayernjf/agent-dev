@@ -309,6 +309,42 @@ describe('RealProviderRegistry', () => {
     expect(plans.find(p => p.providerId === 'supabase')!.resources[0].reason).toContain('irreversible');
   });
 
+  it('names apply-stage Vercel/Cloudflare projects with the production suffixes', async () => {
+    const calls: string[] = [];
+    const runner: CommandRunner = async (command, args) => {
+      const key = `${command} ${args.join(' ')}`;
+      calls.push(key);
+      if (key.includes('whoami')) return { stdout: 'ok', stderr: '', exitCode: 0, success: true };
+      // Neither production-named project exists yet, so plan says create and apply must create
+      // exactly those names.
+      if (key.includes('vercel project ls')) return { stdout: 'other', stderr: '', exitCode: 0, success: true };
+      if (key.includes('vercel project inspect')) return { stdout: JSON.stringify({ id: 'prj_1', name: 'test-project-api' }), stderr: '', exitCode: 0, success: true };
+      if (key.includes('wrangler pages project list')) return { stdout: 'other', stderr: '', exitCode: 0, success: true };
+      return { stdout: 'ok', stderr: '', exitCode: 0, success: true };
+    };
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-names-'));
+    const registry = new RealProviderRegistry({
+      resolveContext: async () => ({ workspacePath: directory, projectName: 'test-project' }),
+      runner,
+    });
+    const specs = {
+      vercel: [{ id: 'vercel-api', kind: 'functions-project', owner: 'bayernjf' }],
+      cloudflare: [{ id: 'cloudflare-pages', kind: 'pages-project', owner: 'bayernjf' }],
+    };
+    const plans = await registry.plan('proj-1', specs);
+    expect(plans.map(p => p.resources[0].action)).toEqual(['create', 'create']);
+    try {
+      await registry.apply('proj-1', plans, { id: 'approval-1', status: 'approved', approvedAt: new Date().toISOString() });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+    expect(calls).toContain('vercel project add test-project-api');
+    expect(calls).toContain('npx wrangler pages project create test-project-web --production-branch main');
+    // The bare apply-stage name must never reach the provider CLIs (2026-09-10 reconciliation:
+    // bare-name projects were abandoned junk; production lives at <name>-api / <name>-web).
+    expect(calls.some(c => /(vercel|wrangler).*test-project(?!-)/.test(c))).toBe(false);
+  });
+
   it('degrades to manual when CLI is not authenticated', async () => {
     const runner = mockRunner({
       'gh auth status': { stdout: '', stderr: 'not logged in', exitCode: 1, success: false },
