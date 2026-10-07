@@ -29,7 +29,7 @@ v0.1 验证的是「作者本人能跑通整条流水线」。v0.2 验证的是*
 | Agent Catalog / Discovery / 自定义 Agent 持久化                            | 候选：Studio 选择器与持久化       | 阶段 A API 已落地；`.agent-dev/agents.conf` 持久化、Studio 选择器**已在 v0.1 后期实现**（见 handoff §2「当前本地能力」）。v0.2 仅需补外部用户视角的引导与报错可读性                                                                                            |
 | Agent Profile（基于 verified Agent 的命名变体：systemPrompt/model/温度/工具集/env） | 候选                      | **已完成（2026-08-28）**：daemon `/api/runtime/profiles` CRUD API + `ProfileStore` 持久化（`agent-profiles.json`）+ Studio 创建/编辑/测试/导出/导入 UI + i18n（en/zh）。安全边界：env 只放行代理/区域白名单键，Secret 走凭证系统注入。配套 28 个单测 + 6 个 API 契约测试 |
 | Infisical Adapter                                                    | 候选：Secret Backend       | **完全空白**。仅 `environment-and-connectors.md` 第 114 行声明为后续版本。需新建 Secret Backend Adapter 抽象 + Infisical 实现                                                                                                        |
-| 导入现有仓库                                                               | 候选                      | v0.1 只支持从零建仓。Apply 当前假设 baseline 在新建仓；导入需支持「已有 Git 仓库 + 已有文件」的合并/对齐而非覆盖                                                                                                                                       |
+| 导入现有仓库                                                               | 候选                      | **已完成**：Apply API（2026-08-27，见 §3 P1-1）+ Studio 导入入口（2026-10-08，Apply 前可选填仓库 URL，中英文案）                                                                 |
 | 失败分类与修复建议                                                            | 候选                      | v0.1 暴露 17 个真实缺陷，但报错面向作者。需把失败原因结构化 + 给外部用户可读的修复步骤                                                                                                                                                             |
 | Blueprint 分享 / 升级提示                                                  | 候选                      | 空白                                                                                                                                                                                                            |
 | macOS 安装 / 诊断 / 自动更新                                                 | 候选                      | 当前靠 `npm` 手动跑；外部用户需要一键包 + `doctor` 诊断增强 + 更新机制                                                                                                                                                                |
@@ -77,7 +77,7 @@ v0.1 验证的是「作者本人能跑通整条流水线」。v0.2 验证的是*
 
    * Apply 支持「已有 Git 仓库」：检测远端、对齐 baseline、不覆盖用户文件、冲突走 Manual Gate。
 
-   * 已完成：Apply API 支持 `importRepositoryUrl`，导入后自动确保 dev 分支存在，`.agent-dev-import` 标记，保留用户历史不 wipe-and-reclone，冲突检测（conflicts/wouldAdd/keptExisting 记录到 apply-manifest.json）。
+   * 已完成：Apply API 支持 `importRepositoryUrl`，导入后自动确保 dev 分支存在，`.agent-dev-import` 标记，保留用户历史不 wipe-and-reclone，冲突检测（conflicts/wouldAdd/keptExisting 记录到 apply-manifest.json）。 Studio 侧入口 2026-10-08 补齐：Apply 操作区新增可选仓库 URL 输入，填入即随 `APPLY_BASELINE` 确认一并提交。
 
    * 依赖：P0-3（导入冲突需复用失败分类）。
 
