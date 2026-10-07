@@ -57,10 +57,14 @@ Agent Runtime  -> 用户电脑中的 Codex
 - [外部 Pilot 招募](docs/pilot-recruiting.md)：v0.2 外部 Pilot 参与条件、流程、激励与隐私边界，申请/反馈走仓库 Issue 模板。
 - [安全与质量审计 2026-08-31](docs/audit-2026-08-31.md)：全仓审计发现与整改方案（P0–P4），整改进度以此为准。
 - [项目交接](handoff.md)：当前分支、硬约束、已完成工作和下一步。
+- [迁移约定](MIGRATION_CONVENTION.md)：SQLite migration 编号与校验脚本（`tools/check-migrations.sh`）规则。
+- [commit message 约定](git-commit-message.md)：英语、原子提交的提交规范。
+- [资源清单 × Provider 控制台核对 2026-09-10](docs/resource-reconciliation-2026-09-10.md)：4 个交付项目的云端资源逐项核对结论与遗留清理清单。
+
 
 ## 当前状态
 
-当前仓库处于 `v0.2` Pilot 阶段（版本 `0.2.0`）：四个真实项目已通过 BluePrint → Preview → Production 全周期交付上线，2026-08-31 完成全仓安全与质量审计并落地 P0–P4 全部整改（回环绑定 + token 鉴权、状态机事务化、清理一致性、Windows 兼容、测试补齐，当时 220 例），2026-09-01 P1-2 凭证后端化落地，同日 Studio 冷启动鉴权、Windows Agent 发现路径、以及 Runtime 列表把未验证的执行能力当成已验证展示这三个缺陷修复补测后全仓 259 例测试全绿；2026-09-02 完成 Studio 界面走查待办中不需要架构决策的全部条目（中英文案、产品类型列名、两个审批状态的区分、执行者契约、只读探测不再顺带任命执行者、能力探测只说它读到了什么，以及 Runtime 路由的第二种拒绝——本机没装该 CLI——拿到自己的 code，不再把后端英文句印上屏，两个响应也不再附带一份与执行者无关的 Codex 探测结果），同日再关掉两条：那条此前记为「未归因」的间歇失败实测是 2 条用例超时——目录发现要顺序探测 8 个内置 Agent、每个版本探测预算 5 s，比 vitest 单用例默认的 5 s 还长，改法是问接线的用例注入目录、问过滤的用例把 PATH 指到夹具目录；以及决策卡与 Blueprint 表单那句基线注记不看 `productType`（一个 MCP server 被索要 Supabase 组织与 Vercel team，而它自己生成的 `PRODUCT_STANDARD.md` 写着该类型不供给这些），两者现在都读同一张 per-type 表，现全仓 351 例测试全绿。不是可用于生产的稳定版本。
+当前仓库处于 `v0.2` Pilot 阶段（版本 `0.2.0`）：四个真实项目已通过 BluePrint → Preview → Production 全周期交付上线，2026-08-31 完成全仓安全与质量审计并落地 P0–P4 全部整改（回环绑定 + token 鉴权、状态机事务化、清理一致性、Windows 兼容、测试补齐，当时 220 例），2026-09-01 P1-2 凭证后端化落地，同日 Studio 冷启动鉴权、Windows Agent 发现路径、以及 Runtime 列表把未验证的执行能力当成已验证展示这三个缺陷修复补测后全仓 259 例测试全绿；2026-09-02 完成 Studio 界面走查待办中不需要架构决策的全部条目（中英文案、产品类型列名、两个审批状态的区分、执行者契约、只读探测不再顺带任命执行者、能力探测只说它读到了什么，以及 Runtime 路由的第二种拒绝——本机没装该 CLI——拿到自己的 code，不再把后端英文句印上屏，两个响应也不再附带一份与执行者无关的 Codex 探测结果），同日再关掉两条：那条此前记为「未归因」的间歇失败实测是 2 条用例超时——目录发现要顺序探测 8 个内置 Agent、每个版本探测预算 5 s，比 vitest 单用例默认的 5 s 还长，改法是问接线的用例注入目录、问过滤的用例把 PATH 指到夹具目录；以及决策卡与 Blueprint 表单那句基线注记不看 `productType`（一个 MCP server 被索要 Supabase 组织与 Vercel team，而它自己生成的 `PRODUCT_STANDARD.md` 写着该类型不供给这些），两者现在都读同一张 per-type 表，2026-09-10 起补齐工程规范文档（[AGENTS.md](AGENTS.md)、[CLAUDE.md](CLAUDE.md)、[迁移约定](MIGRATION_CONVENTION.md) 与校验脚本、[commit message 约定](git-commit-message.md)），同日完成资源清单与 Provider 控制台逐项核对（4 个 DELIVERED 项目的交付资源全部存在，见 [核对记录](docs/resource-reconciliation-2026-09-10.md)）。2026-10-07 复验全仓 530 例测试全绿。不是可用于生产的稳定版本。
 
 本地可运行能力：
 
