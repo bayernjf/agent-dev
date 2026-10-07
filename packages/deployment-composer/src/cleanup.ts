@@ -29,7 +29,7 @@ export async function cleanupPreviewProjects(
   }
 
   if (options.vercelProject) {
-    const result = await runner('vercel', ['project', 'rm', options.vercelProject, '--yes', '--no-color'], {
+    const result = await runner('vercel', ['project', 'rm', options.vercelProject, '--non-interactive', '--no-color'], {
       cwd: options.workspacePath,
       timeout: 60_000,
       env: { ...env, CI: 'true' },
