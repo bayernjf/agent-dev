@@ -6,6 +6,8 @@
 
 ## 最近进度
 
+- **v0.2 P1-1 导入现有仓库闭环：Studio 入口补齐（2026-10-08，`fea8195`）**：排查发现该功能后端早在 2026-08-27 已完整落地（Apply API `importRepositoryUrl`、`.agent-dev-import` 标记、不 wipe-and-reclone 保留用户历史、conflicts/wouldAdd/keptExisting 冲突检测进 apply-manifest.json），缺的只是 Studio 入口——界面从不发送该字段，只能直接调 daemon API。本次在 Apply 操作区加可选仓库 URL 输入（中英文案），填入即随 `APPLY_BASELINE` 确认提交；v0.2 计划能力表与 P1-1 条目同步对齐为已完成。全仓 532 例全绿。真实仓库的端到端导入验证仍未做（与 PR 关闭清理链路一样，可并入下一个真实项目交付）。
+
 - **8 个 Preview 遗留资源清理完成 + Vercel CLI 56 两个兼容性修复（2026-10-08）**：9-10 核对确认的 8 个 Preview 遗留（3 个项目的 `-pr-1` 三对 + workspace-verify-fresh 早期 `-preview` 一对）已全部经 `POST .../preview/cleanup` 删除，并用 `vercel project ls` / `wrangler pages project list` 只读复验控制台清零。清理过程暴露并修掉两个 Vercel CLI 56 兼容缺陷：`9abbef7`（`project rm` 不再认识 `--yes`，改 `--non-interactive`）与 `ffd066c`（`--non-interactive` 下 CLI 56 仍会交互式问「Are you sure? (y/N)」，而 execFile 不写 stdin 会干等到超时——给 `CommandRunner` 增加 `input` 选项（spawn 路径写入并关闭 stdin），清理命令以 `y\n` 应答，附单测断言参数与 stdin 内容）。生产项目（`-api`/`-web` 无后缀）按设计未动；4 个废弃裸名项目仍待用户拍板。
 
 - **Apply 阶段裸名项目问题修复（2026-10-08，`9b2058b`）**：9-10 核对发现的「清单 `projectName` 字段语义偏差」正式在代码层关闭——根因是 Apply 阶段 Vercel/Cloudflare adapter 拿到的是裸 slug，会创建谁也用不到的裸名项目（Preview 用 `-api-pr-N`/`-web-pr-N`，生产用 `-api`/`-web`）。修复：命名函数下沉到 `@agent-dev/provider-cli`（`src/names.ts`，deployment-composer 转出口径不变），`RealProviderRegistry` 构造 adapter 时改用 `productionProjectNames()`，Apply 直接建/链生产名项目，清单记录与控制台一致；GitHub 仓库命名不变。新增 stub-runner 单测断言 `vercel project add test-project-api` / `wrangler pages project create test-project-web` 且裸名永不触达 CLI；全仓 531 例全绿。存量 4 个废弃裸名项目的删除仍待用户拍板（见 §8-11 第 3 项）；本次改动对真实云端的效果将在下一个真实项目交付时端到端验证。
