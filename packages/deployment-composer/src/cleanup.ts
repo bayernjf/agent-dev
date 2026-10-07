@@ -29,10 +29,12 @@ export async function cleanupPreviewProjects(
   }
 
   if (options.vercelProject) {
-    const result = await runner('vercel', ['project', 'rm', options.vercelProject, '--non-interactive', '--no-color'], {
+    const result = await runner('vercel', ['project', 'rm', options.vercelProject, '--no-color'], {
       cwd: options.workspacePath,
       timeout: 60_000,
       env: { ...env, CI: 'true' },
+      // CLI 56 has no non-interactive confirm flag for 'project rm'; the prompt must be answered.
+      input: 'y\n',
     });
     if (!result.success) {
       vercelDeleted = false;
