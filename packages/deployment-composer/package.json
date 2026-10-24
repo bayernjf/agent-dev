@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agent-dev/provider-cli": "file:../provider-cli"
+    "@agent-dev/provider-cli": "file:../provider-cli",
+    "@agent-dev/provider-core": "file:../provider-core"
   }
 }

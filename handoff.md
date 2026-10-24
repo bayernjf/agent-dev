@@ -1,10 +1,12 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-10-07
+> 更新时间：2026-10-23（Tier0 组合级发布接入：deployment-composer onboarding 用 FakeProvider 走通 commerce-os/loom；新增发布 runbook；真实部署待外部凭据）
 > 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**、**P1 状态机 §6.2 全部 3 项**、**P2 §6.3 清理全部 6 项**与 **P3 §6.4 Windows 兼容全部 3 项**已于同日完成，**P4 §6.5 测试补齐全部 4 项已于同日完成**（storage pipeline resume/isStepApproved 4 例并修复 resume 未落盘缺陷、MCP 桥 20 工具全覆盖 +2 例、Studio 渲染冒烟 3 例 + vitest include/子路径 alias 收敛），**审计整改全部完成，当时全仓 220 例测试全绿**，方案与验收见 [审计文档](docs/audit-2026-08-31.md)；2026-09-01~02 的 Studio 界面走查与待办清理已连发 21 刀（第二轮 `e75a1ba`→`a072c55` 另清掉只读探测顺带改选择、能力探测语义与中英文标签大小写三项，`2e1440e` 再清掉 Runtime 路由的第二种拒绝与响应里那份 Codex 探测章，之后测试证据读取收敛为单一模块 `test/source-evidence.ts`），同日再关掉两项：`64c2a72` 把那条「未归因的间歇失败」归因为 **2 条**超时用例（根因是发现要顺序探测 8 个内置 Agent、每个版本探测预算 5 s，而 vitest 单用例默认预算也是 5 s），`ebe7ec4` 修掉「决策卡不看 productType」这条内容错误（两张卡与界面上那句基线注记改读 per-type 表），2026-10-07 复验全仓 530 例全绿
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **Tier0 组合级发布接入（2026-10-23，`8597e34`）**：T-M5-02 在 `packages/deployment-composer/src/onboarding.ts` 新增纯后端服务发布接入——`releaseResourceSpecs`（源码 + preview + production 资源）与 `onboardService`（Blueprint→plan→approved apply→verify），用 `FakeProviderRegistry` 走通 commerce-os（deployProvider=vercel）与 loom（deployProvider=cloud，Python 需云主机）；3 测试，全仓 535 例全绿。T-M5-03 新增 `docs/release-runbook.md`（发布前检查/三阶段/证据/中断恢复/回滚）。**真实 Preview/Production 部署待 Vercel/Cloudflare/云凭据（Tier0 M6），未发生不冒充**；GitHub 真实 PR 需先 push（owner 决定）。
 
 - **v0.2 P1-1 导入现有仓库闭环：Studio 入口补齐（2026-10-08，`fea8195`）**：排查发现该功能后端早在 2026-08-27 已完整落地（Apply API `importRepositoryUrl`、`.agent-dev-import` 标记、不 wipe-and-reclone 保留用户历史、conflicts/wouldAdd/keptExisting 冲突检测进 apply-manifest.json），缺的只是 Studio 入口——界面从不发送该字段，只能直接调 daemon API。本次在 Apply 操作区加可选仓库 URL 输入（中英文案），填入即随 `APPLY_BASELINE` 确认提交；v0.2 计划能力表与 P1-1 条目同步对齐为已完成。全仓 532 例全绿。真实仓库的端到端导入验证仍未做（与 PR 关闭清理链路一样，可并入下一个真实项目交付）。
 
