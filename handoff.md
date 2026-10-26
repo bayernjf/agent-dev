@@ -1,10 +1,17 @@
 # Agent-Dev 项目交接
 
-> 更新时间：2026-10-23（Tier0 组合级发布接入：deployment-composer onboarding 用 FakeProvider 走通 commerce-os/loom；新增发布 runbook；真实部署待外部凭据）
+> 更新时间：2026-10-26（Preview 残留 dry-run 复验：Vercel/Cloudflare 两控制台均零符合删除条件；Vercel CLI 本机登录态失效；PR 关闭 webhook 真云端验证仍待下一个真实项目）
 > 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**、**P1 状态机 §6.2 全部 3 项**、**P2 §6.3 清理全部 6 项**与 **P3 §6.4 Windows 兼容全部 3 项**已于同日完成，**P4 §6.5 测试补齐全部 4 项已于同日完成**（storage pipeline resume/isStepApproved 4 例并修复 resume 未落盘缺陷、MCP 桥 20 工具全覆盖 +2 例、Studio 渲染冒烟 3 例 + vitest include/子路径 alias 收敛），**审计整改全部完成，当时全仓 220 例测试全绿**，方案与验收见 [审计文档](docs/audit-2026-08-31.md)；2026-09-01~02 的 Studio 界面走查与待办清理已连发 21 刀（第二轮 `e75a1ba`→`a072c55` 另清掉只读探测顺带改选择、能力探测语义与中英文标签大小写三项，`2e1440e` 再清掉 Runtime 路由的第二种拒绝与响应里那份 Codex 探测章，之后测试证据读取收敛为单一模块 `test/source-evidence.ts`），同日再关掉两项：`64c2a72` 把那条「未归因的间歇失败」归因为 **2 条**超时用例（根因是发现要顺序探测 8 个内置 Agent、每个版本探测预算 5 s，而 vitest 单用例默认预算也是 5 s），`ebe7ec4` 修掉「决策卡不看 productType」这条内容错误（两张卡与界面上那句基线注记改读 per-type 表），2026-10-07 复验全仓 530 例全绿
 > 工作目录：仓库根目录
 
 ## 最近进度
+
+- **Preview 残留资源 dry-run 复验：两控制台均零符合删除条件（2026-10-26）**：按 §8-11.4 与 §8-7 遗留做只读 dry-run，不删除任何资源。
+  - **Cloudflare Pages（wrangler 4.120.0 OAuth 仍有效，`pages (write)` scope）**：`wrangler pages project list` 全量 37 个项目中，与三个交付项目相关的只剩 `link-vault-web` / `workspace-verify-fresh-web` / `receipt-test-web`（生产 `-web` 对，按设计不动）和裸名 `link-vault` / `receipt-test`（废弃裸名，待 owner 拍板，不动）。**没有** `*-web-pr-1` 或 `workspace-verify-fresh-web-preview` 这类临时项目——2026-10-08 记录的 4 对 CF 临时项目已在控制台清零。
+  - **Vercel（本机 CLI 56 无登录态：`vercel whoami` 报 `No existing credentials found`，`~/Library/Application Support/com.vercel.cli/auth.json` 不存在）**：改用 bayjf 仓 `.env.local` 中的 `VERCEL_TOKEN`（仅只读 `vercel project ls --token=…`，未输出密钥值）列出 `bayernjfs-projects` team 下 16 个项目。与三个交付项目相关的只剩 `link-vault-api` / `workspace-verify-fresh-api` / `receipt-test-api`（生产 `-api` 对）和裸名 `link-vault` / `receipt-test`（废弃裸名，待 owner 拍板）。**没有** `*-api-pr-1` 或 `workspace-verify-fresh-api-preview`——2026-10-08 记录的 4 对 Vercel 临时项目同样已清零。
+  - **结论**：2026-10-08 的「8 个 Preview 遗留清理完成」记录与真实控制台一致；§8-7 与 §8-11.4 中「receipt-test-*-pr-1、workspace-verify-fresh-*、link-vault-*-pr-1 仍在账号里」是 2026-09-10 的旧文字，已被 10-08 清理事实超越，本次 dry-run 不再有可删对象，因此**未触发任何 `POST .../preview/cleanup`，未做任何写操作**。
+  - **外部阻塞（仍挂账）**：① Vercel CLI 本机登录态已失效（token 仍能只读，但 owner 下次要跑真实部署/清理前应 `vercel login` 续上；或把 `VERCEL_TOKEN` 注入 daemon 环境）；② 4 个废弃裸名项目（Vercel `link-vault`、`receipt-test`；CF Pages `link-vault`、`receipt-test`）仍待 owner 拍板删除，本轮不擅动；③ PR 关闭 webhook 的真实云端端到端验证仍需一个真实 GitHub `pull_request.closed` 事件打过来——本地 HMAC/事件/payload 路由测试已覆盖（`apps/daemon/test/app.test.ts` 的「cleans a PR preview only after verifying a signed GitHub close event」等 3 例），但从未在真云端跑过一次；下一个真实项目交付时自然触发，本轮不伪造。
+  - **门数字**：`npx vitest run` 36 files / 535 例全绿；`npm run typecheck` 0 错；`npm run build`（含 studio `vite build` 460.88 kB / gzip 132.77 kB）干净。本次仅改 handoff 文档，无代码/测试变更。
 
 - **Tier0 组合级发布接入（2026-10-23，`8597e34`）**：T-M5-02 在 `packages/deployment-composer/src/onboarding.ts` 新增纯后端服务发布接入——`releaseResourceSpecs`（源码 + preview + production 资源）与 `onboardService`（Blueprint→plan→approved apply→verify），用 `FakeProviderRegistry` 走通 commerce-os（deployProvider=vercel）与 loom（deployProvider=cloud，Python 需云主机）；3 测试，全仓 535 例全绿。T-M5-03 新增 `docs/release-runbook.md`（发布前检查/三阶段/证据/中断恢复/回滚）。**真实 Preview/Production 部署待 Vercel/Cloudflare/云凭据（Tier0 M6），未发生不冒充**；GitHub 真实 PR 需先 push（owner 决定）。
 
@@ -433,7 +440,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 5. ✅ ~~用一次必然产生 Git diff 的真实功能任务验证 Runtime 写入和 Quality Gate~~：已于 2026-08-11 完成；Human Acceptance 仍需由用户明确确认；
 6. ✅ ~~将 Acceptance Gate 与正式 Delivery State 的实现/验证阶段关联~~：已于 2026-08-10 完成；本地批准进入 `LOCAL_ACCEPTED`，不代表生产交付；
 7. ✅ ~~使用三个真实项目连续验证从 Blueprint 到 Preview/Production 的完整周期~~：**3/3 已完成**——`Receipt Test`（2026-08-23）、`Workspace Verify Fresh`（2026-08-23）、`Link Vault`（2026-08-24）都走完 Blueprint → Preview → Production 并上线，证据与三轮共修掉的缺陷见「最近进度」。遗留动作：
-   - 三个项目的 Preview 资源仍在账号里（`receipt-test-*-pr-1`、`workspace-verify-fresh-*`、`link-vault-*-pr-1`），清理入口 `POST .../preview/cleanup`（`CLEANUP_PREVIEW`）；生产项目是交付物，不要清理。
+   - ~~三个项目的 Preview 资源仍在账号里（`receipt-test-*-pr-1`、`workspace-verify-fresh-*`、`link-vault-*-pr-1`），清理入口 `POST .../preview/cleanup`（`CLEANUP_PREVIEW`）；生产项目是交付物，不要清理。~~ **已于 2026-10-08 全部经 `POST .../preview/cleanup` 删除，2026-10-26 dry-run 两控制台复验清零。**
    - `release/approve` 只校验「被验收提交是生产分支祖先」，不会自动把 `dev` 提升到 `main`；若 PR 目标是 `dev`，发布前需显式补开 dev→main PR。
    - 生产发布必须由用户本人批准，不能由 Agent 代按；Daemon 必须带代理变量与 `NODE_USE_ENV_PROXY=1` 启动，否则云端验证会假失败。
    - Daemon 的 PATH 需同时含 node22 运行时、homebrew（2026-09-02 实测解析到 codex `0.151.0`，此前记为 0.142.3；要点是 homebrew 排在前面，避免默认解析到 fnm node20 全局 bin 那版有兼容 bug 的 `0.147.0`）和 fnm node20 全局 bin（`vercel`/`wrangler`）。同一台机器的 ambient node 是 `v20.20.2`，它让 `openclaw` 与 `pi` 连 `--version` 都答不出，所以这两个 Agent 的探测与执行在本机推不动（逐 Agent 对账见 [Agent Runtime Catalog](docs/agent-runtime-catalog.md) §3.5）。
@@ -454,7 +461,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
     1. ~~**Studio 界面链路（§8-3 遗留，2026-08-14 起挂账，已于 2026-09-01 走完两阶段）**~~：历次端到端验证都是直接调 Daemon API，而外部用户只会点界面。现已用界面从「新建 Blueprint」走到 Apply 前（见「最近进度」2026-09-01 条目），冷启动鉴权缺陷正是走查时暴露的。走查查出的缺陷已全部修掉：「决策卡内容与产品类型矛盾」已于 2026-09-02 修掉（`ebe7ec4`）；「后端生成文案无 i18n 边界」已于 2026-09-02 五批全部落地（`4019905`~`b22ec08`，见决策依据文档）。
     2. ~~**各 Agent 在实际安装环境的 Adapter 验证**（§8-4 遗留）~~：**已于 2026-09-02 完成**（`ecde9eb`）——八个内置 Agent 全量只读对账，六个能答且 Adapter flag 全部在帮助里有据；openclaw/pi 因 ambient node v20.20.2（启动器要求 ≥22）答不出，属环境而非产品缺陷。逐 Agent 明细见 [Agent Runtime Catalog](docs/agent-runtime-catalog.md) §3.5。
     3. ~~**资源清单外部 ID/URL 与 Provider 控制台一致性逐项核对**~~（§8-3 遗留）：**已于 2026-09-10 完成**（`977139c`）——4 个项目的真实交付资源三家控制台全部存在，详见 [核对记录](docs/resource-reconciliation-2026-09-10.md)；带出两个新待办：清单 `projectName` 字段语义（apply 裸名 vs 生产名）待修正、4 个废弃裸名项目是否删除待用户拍板。
-    4. **Preview 遗留资源清理 + PR 关闭清理链路真实验证**（§8-7 与§7 段遗留；生产项目是交付物，不清理）。
+    4. ~~**Preview 遗留资源清理 + PR 关闭清理链路真实验证**（§8-7 与§7 段遗留；生产项目是交付物，不清理）~~：**2026-10-26 dry-run 复验两控制台均零符合删除条件**（详见「最近进度」首条）——2026-10-08 的清理事实成立，§8-7 旧文字「receipt-test-*-pr-1、workspace-verify-fresh-*、link-vault-*-pr-1 仍在账号里」已被事实超越。仅剩 **PR 关闭 webhook 的真实云端端到端验证**待下一个真实项目交付时自然触发（本地 HMAC/payload/路由测试已覆盖）；Vercel CLI 本机登录态已失效、4 个废弃裸名项目仍待 owner 拍板。
     5. **Windows 上 agent 执行路径不通（探测部分已于 2026-09-01 修复）**：`agent-runtime` 的版本探测与 PATH 发现已修（见「最近进度」同日条目，本机 6/6 agent 可探）；**尚余执行路径**：`runCodexProcess` 仍以无 shell 方式 spawn，npm shim 类 CLI（codex / claude / opencode / openclaw / codebuddy）一律 ENOENT，Windows 用户走 Apply → Feature Task 时 agent 起不来。修法待决策表「Windows agent 启动方式」拍板（`install-macos.sh` 表明 Pilot 目标为 macOS，因此推荐先显式降级而非引入注入面）。**当前开发环境为 macOS（2026-09-02 确认），Windows 相关无法真实验证，先搁置；待出现真实 Windows Pilot 用户再推进方案④（显式报错 + 可操作提示）。**
 
     走查进度：§8-11.1 已完成两个阶段——第一阶段（首屏 / 凭证面板 / Activity / zh 切换，只读）、第二阶段（界面建 Blueprint → 四个项目详情标签页中英各一遍 → Apply 前停手，无远端副作用）；冷启动鉴权缺陷已修复并验证；Windows 探测与发现路径已修。走查发现的具体缺陷与待办见「最近进度」2026-09-01 条目的「走查待办」子列。
