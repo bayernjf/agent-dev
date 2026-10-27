@@ -6,6 +6,11 @@
 
 ## 最近进度
 
+- **废弃裸名项目删除（2026-10-26，owner 拍板「这个也搞」）**：两平台遗留的 4 个废弃裸名项目已全部删除，生产 `-web`/`-api` 未触碰，本条闭环并取代下方 2026-10-26 dry-run 记录中「裸名待 owner 拍板」的挂账状态。
+  - **Cloudflare Pages（wrangler 4.120.0 OAuth）**：`wrangler pages project delete link-vault` / `receipt-test` 均返回 Successfully deleted；与三个交付项目相关的现存项目只剩 `link-vault-web`、`workspace-verify-fresh-web`、`receipt-test-web` 三个生产 `-web`。
+  - **Vercel（team `bayernjfs-projects`，bayjf 仓 `.env.local` 的 `VERCEL_TOKEN`）**：删除前核实两个裸名仅绑定随机 `.vercel.app` 裸域（`link-vault`→`link-vault-two-zeta.vercel.app`、`receipt-test`→`receipt-test.vercel.app`），均无自定义业务域名；`DELETE /v9/projects/{name}` 返回 204。现存只剩 `link-vault-api`、`workspace-verify-fresh-api`、`receipt-test-api` 三个生产 `-api`。
+  - 纯云端资源删除，无代码/测试/部署改动；`workspace-verify-fresh` 本就无裸名。
+
 - **Preview 残留资源 dry-run 复验：两控制台均零符合删除条件（2026-10-26）**：按 §8-11.4 与 §8-7 遗留做只读 dry-run，不删除任何资源。
   - **Cloudflare Pages（wrangler 4.120.0 OAuth 仍有效，`pages (write)` scope）**：`wrangler pages project list` 全量 37 个项目中，与三个交付项目相关的只剩 `link-vault-web` / `workspace-verify-fresh-web` / `receipt-test-web`（生产 `-web` 对，按设计不动）和裸名 `link-vault` / `receipt-test`（废弃裸名，待 owner 拍板，不动）。**没有** `*-web-pr-1` 或 `workspace-verify-fresh-web-preview` 这类临时项目——2026-10-08 记录的 4 对 CF 临时项目已在控制台清零。
   - **Vercel（本机 CLI 56 无登录态：`vercel whoami` 报 `No existing credentials found`，`~/Library/Application Support/com.vercel.cli/auth.json` 不存在）**：改用 bayjf 仓 `.env.local` 中的 `VERCEL_TOKEN`（仅只读 `vercel project ls --token=…`，未输出密钥值）列出 `bayernjfs-projects` team 下 16 个项目。与三个交付项目相关的只剩 `link-vault-api` / `workspace-verify-fresh-api` / `receipt-test-api`（生产 `-api` 对）和裸名 `link-vault` / `receipt-test`（废弃裸名，待 owner 拍板）。**没有** `*-api-pr-1` 或 `workspace-verify-fresh-api-preview`——2026-10-08 记录的 4 对 Vercel 临时项目同样已清零。
