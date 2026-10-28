@@ -858,7 +858,7 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
           quality: qualityScript(blueprint),
         },
         dependencies: {
-          '@astrojs/node': '^9.0.0',
+          '@astrojs/vercel': '^8.0.0',
           '@astrojs/react': '^4.0.0',
           astro: '^5.0.0',
           react: '^19.0.0',
@@ -885,7 +885,7 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
       id: 'template-storefront-astro-config',
       title: 'Astro SSR configuration',
       path: 'astro.config.mjs',
-      content: `import { defineConfig } from 'astro/config';\nimport node from '@astrojs/node';\nimport react from '@astrojs/react';\n\nexport default defineConfig({\n  output: 'server',\n  adapter: node({ mode: 'standalone' }),\n  integrations: [react()],\n});\n`,
+      content: `import { defineConfig } from 'astro/config';\nimport vercel from '@astrojs/vercel';\nimport react from '@astrojs/react';\n\nexport default defineConfig({\n  output: 'server',\n  adapter: vercel(),\n  integrations: [react()],\n});\n`,
     },
     {
       id: 'template-storefront-tsconfig',
@@ -897,7 +897,7 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
       id: 'template-storefront-vercel',
       title: 'Vercel SSR configuration',
       path: 'vercel.json',
-      content: JSON.stringify({ version: 2, buildCommand: 'astro build', outputs: ['dist'] }, null, 2) + '\n',
+      content: JSON.stringify({ version: 2, buildCommand: 'astro build' }, null, 2) + '\n',
     },
     {
       id: 'template-storefront-env-example',
