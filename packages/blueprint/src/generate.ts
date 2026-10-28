@@ -797,10 +797,13 @@ function storefrontProfileBits(profile: StorefrontProfile): {
 } {
   switch (profile) {
     case 'cross-border':
-      // TF-02 will replace this placeholder with a real multi-currency switcher + per-SKU currency.
+      // TF-02：多币种展示真实落地。价格按 SKU 自带 currency 渲染；首页挂币种切换器（展示用，
+      // 汇率为占位）。价格货币化占位 = 真实收款/汇率换算待 Stripe 与汇率源接入，当前只做展示层。
       return {
-        priceNote: '<!-- profile: cross-border — multi-currency display lands in TF-02 -->',
-        heroExtra: '',
+        priceNote:
+          '<div class="currency-switcher" data-currencies="CNY,USD,EUR">币种切换（展示占位，汇率未货币化）</div>\n'
+          + '    <p class="price-placeholder">价格按 SKU 原币种展示；真实汇率换算与多币种收款待支付通道接入（价格货币化占位）。</p>',
+        heroExtra: '<p class="badge">跨境 · 多币种展示</p>',
         marker: 'profile-cross-border',
       };
     case 'subscription':
@@ -823,6 +826,10 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
   const slug = blueprint.metadata.name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-dev-storefront';
   const profile: StorefrontProfile = blueprint.spec.product.storefrontProfile;
   const bits = storefrontProfileBits(profile);
+  // TF-02：cross-border 额外注入多币种展示工具（汇率为占位，真实货币化待支付通道）。
+  const apiExtras = profile === 'cross-border'
+    ? '\n// Multi-currency display (TF-02). Rates are display placeholders until a real FX source and\n// a monetized payment provider are wired — prices are NOT converted for charging here.\nexport const SUPPORTED_CURRENCIES = [\'CNY\', \'USD\', \'EUR\'] as const;\nconst PLACEHOLDER_RATES: Record<string, number> = { CNY: 1, USD: 0.14, EUR: 0.13 };\n\nexport function convertPrice(price: number, from: string, to: string): number {\n  const fromRate = PLACEHOLDER_RATES[from] ?? 1;\n  const toRate = PLACEHOLDER_RATES[to] ?? 1;\n  return (price / fromRate) * toRate;\n}\n'
+    : '';
 
   return [
     {
@@ -892,7 +899,7 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
       id: 'template-storefront-api-lib',
       title: 'Storefront server-side API client',
       path: 'src/lib/api.ts',
-      content: `// Server-side API client (SSR only). The browser never sees COMMERCE_API_BASE_URL.\nconst API_BASE = process.env.COMMERCE_API_BASE_URL ?? 'http://127.0.0.1:8787';\n\nexport interface CatalogSku { id: string; skuCode: string; price: number; currency: string; specs: Record<string, unknown>; }\nexport interface CatalogItem { productId: string; title: string; skus: CatalogSku[]; listedAt: string; }\n\nexport async function fetchCatalog(): Promise<CatalogItem[]> {\n  try {\n    const res = await fetch(\`\${API_BASE}/api/v1/storefront/catalog\`, { signal: AbortSignal.timeout(3000) });\n    if (!res.ok) return [];\n    const data = (await res.json()) as { catalog?: CatalogItem[] };\n    return data.catalog ?? [];\n  } catch { return []; }\n}\n\nexport async function fetchCatalogItem(id: string): Promise<CatalogItem | null> {\n  try {\n    const res = await fetch(\`\${API_BASE}/api/v1/storefront/catalog/\${id}\`, { signal: AbortSignal.timeout(3000) });\n    if (!res.ok) return null;\n    const data = (await res.json()) as { item?: CatalogItem };\n    return data.item ?? null;\n  } catch { return null; }\n}\n\nexport function formatPrice(price: number, currency: string): string {\n  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency, minimumFractionDigits: 2 }).format(price);\n}\n\nexport function lowestPrice(item: CatalogItem): number {\n  return item.skus.reduce((min, s) => Math.min(min, s.price), Number.POSITIVE_INFINITY);\n}\n`,
+      content: `// Server-side API client (SSR only). The browser never sees COMMERCE_API_BASE_URL.\nconst API_BASE = process.env.COMMERCE_API_BASE_URL ?? 'http://127.0.0.1:8787';\n\nexport interface CatalogSku { id: string; skuCode: string; price: number; currency: string; specs: Record<string, unknown>; }\nexport interface CatalogItem { productId: string; title: string; skus: CatalogSku[]; listedAt: string; }\n\nexport async function fetchCatalog(): Promise<CatalogItem[]> {\n  try {\n    const res = await fetch(\`\${API_BASE}/api/v1/storefront/catalog\`, { signal: AbortSignal.timeout(3000) });\n    if (!res.ok) return [];\n    const data = (await res.json()) as { catalog?: CatalogItem[] };\n    return data.catalog ?? [];\n  } catch { return []; }\n}\n\nexport async function fetchCatalogItem(id: string): Promise<CatalogItem | null> {\n  try {\n    const res = await fetch(\`\${API_BASE}/api/v1/storefront/catalog/\${id}\`, { signal: AbortSignal.timeout(3000) });\n    if (!res.ok) return null;\n    const data = (await res.json()) as { item?: CatalogItem };\n    return data.item ?? null;\n  } catch { return null; }\n}\n\nexport function formatPrice(price: number, currency: string): string {\n  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency, minimumFractionDigits: 2 }).format(price);\n}\n\nexport function lowestPrice(item: CatalogItem): number {\n  return item.skus.reduce((min, s) => Math.min(min, s.price), Number.POSITIVE_INFINITY);\n}\n${apiExtras}`,
     },
     {
       id: 'template-storefront-index',
