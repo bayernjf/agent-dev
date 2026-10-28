@@ -6,6 +6,12 @@
 
 ## 最近进度
 
+- **Tier0 M2 · TF-01 品牌零售 storefront 模板骨架（2026-10-28，feature/20260802）**：`@agent-dev/blueprint` 新增第 7 种 product type `storefront`，把 commerce-os 的 storefront 前台（Astro SSR + React 岛）固化为模板骨架。
+  - 结构：`productTypeSchema` 加 `storefront`；新增 `storefrontProfileSchema = retail|cross-border|subscription`（默认 `retail`，带 read-migration default，旧 blueprint 不 brick）；`spec.product.storefrontProfile` 落盘。
+  - 生成器：`PRODUCT_TYPE_DESCRIPTORS['storefront']`（Astro SSR node standalone；后端=外部 commerce-os，不生成 Supabase；providers=`github+vercel`，SSR 站部署 Vercel Functions）；`QUALITY_CHECKS['storefront']=['build','smoke']`；新增 `buildStorefront()` 产出与 commerce-os `front/src` 同构的页面集（`index/catalog/catalog/[id]/orders/[cartId]` + `lib/api.ts` + `CartIsland/OrderIsland`）+ `config/storefront.profile.json` + `config/env.example`（`COMMERCE_API_BASE_URL` SSR-only）。
+  - 行业剖面钩子：`storefrontProfileBits(profile)` 当前 retail 完整；cross-border/subscription 先落 HTML 占位注释（TF-02/03 填充）。
+  - 门数字：`tsc -p packages/blueprint` 0 错；`vitest run packages/blueprint` 34 例全绿（新增 storefront 同构站 + quality-script 两例）。未 push、未建 PR。
+
 - **废弃裸名项目删除（2026-10-26，owner 拍板「这个也搞」）**：两平台遗留的 4 个废弃裸名项目已全部删除，生产 `-web`/`-api` 未触碰，本条闭环并取代下方 2026-10-26 dry-run 记录中「裸名待 owner 拍板」的挂账状态。
   - **Cloudflare Pages（wrangler 4.120.0 OAuth）**：`wrangler pages project delete link-vault` / `receipt-test` 均返回 Successfully deleted；与三个交付项目相关的现存项目只剩 `link-vault-web`、`workspace-verify-fresh-web`、`receipt-test-web` 三个生产 `-web`。
   - **Vercel（team `bayernjfs-projects`，bayjf 仓 `.env.local` 的 `VERCEL_TOKEN`）**：删除前核实两个裸名仅绑定随机 `.vercel.app` 裸域（`link-vault`→`link-vault-two-zeta.vercel.app`、`receipt-test`→`receipt-test.vercel.app`），均无自定义业务域名；`DELETE /v9/projects/{name}` 返回 204。现存只剩 `link-vault-api`、`workspace-verify-fresh-api`、`receipt-test-api` 三个生产 `-api`。
