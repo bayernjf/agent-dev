@@ -6,6 +6,11 @@
 
 ## 最近进度
 
+- **Tier0 M2 · TF-05 GATE-L1 真实上线（2026-10-28，feature/20260802）——本地物化门通过，真实公网部署受阻**：
+  - **已验证（本地，可复跑）**：用 `createBlueprint(storefront, profile=retail/cross-border/subscription)` 物化到 `/tmp/sf-*`，三套剖面均 `node scripts/build.mjs && node scripts/smoke.mjs` 全绿（23 产物/套）。物化还暴露并修掉生成门两个真实缺陷（`9788c27`：子页面目录未建、smoke 标记口径不一致）。
+  - **真实公网部署未发生、不伪造**：缺 ① 本次会话无写生产云资源的授权（Vercel token 仍只读、CLI 登录态失效；Cloudflare token 未在本会话注入）；② storefront SSR 需实时 commerce-os storefront 后端（`COMMERCE_API_BASE_URL`）才能渲染目录，当前无运行中的线上后端；③ agent-dev v0.3 方向（产品族整合 D2）尚未拍板；④ 生成骨架的 `build` 当前是装配门，真实 `astro build`+SSR 部署需先 `npm install` astro/react 再上线。
+  - **所需输入（解封 GATE-L1）**：owner 明确授权用 Vercel/Cloudflare 生产资源开站 + 注入可用凭据；提供一个可访问的 commerce-os storefront API URL；拍板 v0.3 方向；再由管道把物化站 `npm install && astro build` 部署并回取线上 URL 作为验收证据。
+
 - **Tier0 M2 · TF-04 管道吃模板：模板→Blueprint 契约（2026-10-28，feature/20260802）**：storefront 模板接入为 Blueprint 级输入。
   - 新增 `storefrontConfigSchema`（themeColor / tagline / seedProducts，带 read-migration default），落到 `spec.storefrontConfig`；结构（productType=storefront + profile）+ 配置化商品/主题/文案一并作为管道输入。
   - `buildStorefront` 输出 `config/storefront.config.json`（profile/brand/tagline/theme/seedProducts），首页 hero 注入配置化 tagline。
