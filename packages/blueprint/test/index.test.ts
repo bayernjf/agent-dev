@@ -431,6 +431,28 @@ describe('ProductBlueprint', () => {
     expect(retailHome).not.toContain('currency-switcher');
   });
 
+  it('surfaces recurring-order placeholders for the subscription profile', () => {
+    const blueprint = createBlueprint('Bay Box', { productType: 'storefront', storefrontProfile: 'subscription' }, 1);
+    expect(blueprint.spec.product.storefrontProfile).toBe('subscription');
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+
+    const home = artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+    expect(home).toContain('profile:subscription');
+    expect(home).toContain('subscription-plans');
+    expect(home).toContain('recurring-placeholder');
+
+    const apiLib = artifacts.find(a => a.path === 'src/lib/api.ts')!.content;
+    expect(apiLib).toContain('SUBSCRIPTION_PLANS');
+    expect(apiLib).toContain('isRecurringOrder');
+
+    // Subscription semantics must not leak into retail or cross-border profiles.
+    for (const profile of ['retail', 'cross-border'] as const) {
+      const other = createDryRunPlan(createBlueprint('Bay', { productType: 'storefront', storefrontProfile: profile }, 1))
+        .artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+      expect(other, `profile ${profile} must not carry subscription plans`).not.toContain('subscription-plans');
+    }
+  });
+
   it('generates a real browser-extension (MV3) scaffold with a web-store delivery handoff', () => {
     const blueprint = createBlueprint('Tab Guardian', { productType: 'browser-extension' }, 1);
     const artifacts = createDryRunPlan(blueprint).artifacts;
