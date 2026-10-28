@@ -807,10 +807,16 @@ function storefrontProfileBits(profile: StorefrontProfile): {
         marker: 'profile-cross-border',
       };
     case 'subscription':
-      // TF-03 will replace this placeholder with recurring-order plan cards + billing-cycle note.
+      // TF-03：订阅周期订单占位完整落地。展示订阅方案卡（月/季）与结算时的「周期扣费」占位语义；
+      // 真实周期订单/续费扣款待计费与支付通道（对齐 agent-world 订阅 gate），当前只做占位结构。
       return {
-        priceNote: '<!-- profile: subscription — recurring-order placeholder lands in TF-03 -->',
-        heroExtra: '',
+        priceNote:
+          '<div class="subscription-plans">'
+          + '<div class="plan"><h3>月度订阅</h3><p>每月自动续订（周期订单占位，未接通续费扣款）</p></div>'
+          + '<div class="plan"><h3>季度订阅</h3><p>每季度自动续订（周期订单占位，未接通续费扣款）</p></div>'
+          + '</div>\n'
+          + '    <p class="recurring-placeholder">周期订单为占位语义：结算时标记 recurring=true，真实续费/退订与扣款待计费通道接入。</p>',
+        heroExtra: '<p class="badge">订阅 · 周期订单</p>',
         marker: 'profile-subscription',
       };
     case 'retail':
@@ -829,7 +835,9 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
   // TF-02：cross-border 额外注入多币种展示工具（汇率为占位，真实货币化待支付通道）。
   const apiExtras = profile === 'cross-border'
     ? '\n// Multi-currency display (TF-02). Rates are display placeholders until a real FX source and\n// a monetized payment provider are wired — prices are NOT converted for charging here.\nexport const SUPPORTED_CURRENCIES = [\'CNY\', \'USD\', \'EUR\'] as const;\nconst PLACEHOLDER_RATES: Record<string, number> = { CNY: 1, USD: 0.14, EUR: 0.13 };\n\nexport function convertPrice(price: number, from: string, to: string): number {\n  const fromRate = PLACEHOLDER_RATES[from] ?? 1;\n  const toRate = PLACEHOLDER_RATES[to] ?? 1;\n  return (price / fromRate) * toRate;\n}\n'
-    : '';
+    : profile === 'subscription'
+      ? '\n// Subscription plans (TF-03). Recurring order semantics are placeholders: checkout marks\n// recurring=true, but real renewal/cancellation billing waits for the monetized billing gate.\nexport interface SubscriptionPlan { id: string; cycle: \'monthly\' | \'quarterly\'; amountMicros: number; currency: string; }\nexport const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [];\n\nexport function isRecurringOrder(planId: string | null): boolean {\n  // Placeholder: any selected subscription plan id marks the order recurring until billing lands.\n  return Boolean(planId);\n}\n'
+      : '';
 
   return [
     {
