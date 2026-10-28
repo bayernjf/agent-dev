@@ -397,7 +397,7 @@ describe('ProductBlueprint', () => {
       'src/lib/api.ts',
       'src/components/CartIsland.tsx',
       'src/components/OrderIsland.tsx',
-      'config/storefront.profile.json',
+      'config/storefront.config.json',
     ]) {
       expect(paths, `storefront scaffold missing ${page}`).toContain(page);
     }
@@ -450,6 +450,46 @@ describe('ProductBlueprint', () => {
       const other = createDryRunPlan(createBlueprint('Bay', { productType: 'storefront', storefrontProfile: profile }, 1))
         .artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
       expect(other, `profile ${profile} must not carry subscription plans`).not.toContain('subscription-plans');
+    }
+  });
+
+  it('TF-04 contract: a storefront Blueprint (structure + config) generates a site reflecting its content', () => {
+    // The pipeline consumes a storefront template as Blueprint-level input: the structure is
+    // productType=storefront + profile, and products/theme/copy come from storefrontConfig.
+    const blueprint = createBlueprint('Cafe Noir', {
+      productType: 'storefront',
+      storefrontProfile: 'retail',
+      storefrontConfig: {
+        themeColor: '#222222',
+        tagline: '现烘咖啡豆，每周新鲜送达',
+        seedProducts: [
+          { title: '埃塞俄比亚耶加雪菲', price: 6800, currency: 'CNY' },
+          { title: '哥伦比亚慧兰', price: 5800, currency: 'CNY' },
+        ],
+      },
+    }, 1);
+
+    // Contract: the Blueprint itself round-trips through the persisted schema.
+    expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
+    expect(blueprint.spec.storefrontConfig.seedProducts).toHaveLength(2);
+
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    const config = JSON.parse(artifacts.find(a => a.path === 'config/storefront.config.json')!.content) as {
+      profile: string; tagline: string; theme: { color: string }; seedProducts: { title: string; price: number }[];
+    };
+    expect(config.profile).toBe('retail');
+    expect(config.theme.color).toBe('#222222');
+    expect(config.tagline).toBe('现烘咖啡豆，每周新鲜送达');
+    expect(config.seedProducts.map(p => p.title)).toEqual(['埃塞俄比亚耶加雪菲', '哥伦比亚慧兰']);
+
+    // Configured copy surfaces on the generated homepage.
+    const home = artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+    expect(home).toContain('现烘咖啡豆，每周新鲜送达');
+
+    // Every declared quality check still maps to a real script (pipeline can go green).
+    const rootPackage = JSON.parse(artifacts.find(a => a.path === 'package.json')!.content) as { scripts: Record<string, string> };
+    for (const check of blueprint.spec.quality.required) {
+      expect(rootPackage.scripts[check], `missing script for ${check}`).toBeDefined();
     }
   });
 
