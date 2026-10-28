@@ -6,6 +6,11 @@
 
 ## 最近进度
 
+- **Tier0 M2 · TF-03 订阅周期订单模板（2026-10-28，feature/20260802）**：`storefrontProfile=subscription` 落地周期订单占位。
+  - 首页注入订阅方案卡（月度/季度）+ 「周期订单占位」语义（结算标记 `recurring=true`，真实续费/退订/扣款待计费通道）。
+  - `src/lib/api.ts` 追加 `SUBSCRIPTION_PLANS` / `isRecurringOrder` 占位；retail 与 cross-border 不携带订阅语义。
+  - 门数字：`tsc` 0 错；`vitest run packages/blueprint` 36 例全绿（新增订阅占位断言 1 例）。未 push。
+
 - **Tier0 M2 · TF-02 跨境多币种模板（2026-10-28，feature/20260802）**：`storefrontProfile=cross-border` 落地多币种展示。
   - 首页注入币种切换器 `<div class="currency-switcher" data-currencies="CNY,USD,EUR">` + 「价格货币化占位」显式说明（真实汇率换算与多币种收款待支付通道，当前只做展示层，不静默当真换算）。
   - `src/lib/api.ts` 按 profile 追加 `SUPPORTED_CURRENCIES` 与 `convertPrice()`（占位汇率表，仅展示）；retail 剖面不携带该机制。
