@@ -832,6 +832,8 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
   const slug = blueprint.metadata.name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-dev-storefront';
   const profile: StorefrontProfile = blueprint.spec.product.storefrontProfile;
   const bits = storefrontProfileBits(profile);
+  // TF-04：模板→Blueprint 的配置化输入（主题/文案/种子商品）。
+  const sfConfig = blueprint.spec.storefrontConfig;
   // TF-02：cross-border 额外注入多币种展示工具（汇率为占位，真实货币化待支付通道）。
   const apiExtras = profile === 'cross-border'
     ? '\n// Multi-currency display (TF-02). Rates are display placeholders until a real FX source and\n// a monetized payment provider are wired — prices are NOT converted for charging here.\nexport const SUPPORTED_CURRENCIES = [\'CNY\', \'USD\', \'EUR\'] as const;\nconst PLACEHOLDER_RATES: Record<string, number> = { CNY: 1, USD: 0.14, EUR: 0.13 };\n\nexport function convertPrice(price: number, from: string, to: string): number {\n  const fromRate = PLACEHOLDER_RATES[from] ?? 1;\n  const toRate = PLACEHOLDER_RATES[to] ?? 1;\n  return (price / fromRate) * toRate;\n}\n'
@@ -913,7 +915,7 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
       id: 'template-storefront-index',
       title: 'Storefront homepage',
       path: 'src/pages/index.astro',
-      content: `---\nimport { fetchCatalog, lowestPrice, formatPrice } from '../lib/api';\nconst catalog = await fetchCatalog();\nconst featured = catalog.slice(0, 6);\n---\n<html lang="zh" data-storefront-profile="${profile}">\n  <head>\n    <meta charset="utf-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1" />\n    <title>${brand} · 首页</title>\n  </head>\n  <body>\n    <!-- profile:${profile} -->\n    <header><span class="brand">${brand}</span><nav><a href="/">首页</a><a href="/catalog">全部商品</a></nav></header>\n    <section class="hero"><h1>${brand}</h1><p>${intent}</p>${bits.heroExtra}</section>\n    ${bits.priceNote}\n    {featured.length > 0 ? (\n      <div class="grid">\n        {featured.map((item) => (\n          <a class="card" href={\`/catalog/\${item.productId}\`}>\n            <h3>{item.title}</h3>\n            <div class="price">{formatPrice(lowestPrice(item), item.skus[0]?.currency ?? 'CNY')} 起</div>\n          </a>\n        ))}\n      </div>\n    ) : (\n      <div class="empty">暂无在售商品</div>\n    )}\n    <footer>${brand} · Astro SSR · data: commerce-os /api/v1/storefront/catalog</footer>\n  </body>\n</html>\n`,
+      content: `---\nimport { fetchCatalog, lowestPrice, formatPrice } from '../lib/api';\nconst catalog = await fetchCatalog();\nconst featured = catalog.slice(0, 6);\n---\n<html lang="zh" data-storefront-profile="${profile}">\n  <head>\n    <meta charset="utf-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1" />\n    <title>${brand} · 首页</title>\n  </head>\n  <body>\n    <!-- profile:${profile} -->\n    <header><span class="brand">${brand}</span><nav><a href="/">首页</a><a href="/catalog">全部商品</a></nav></header>\n    <section class="hero"><h1>${brand}</h1><p>${markdown(sfConfig.tagline || intent)}</p>${bits.heroExtra}</section>\n    ${bits.priceNote}\n    {featured.length > 0 ? (\n      <div class="grid">\n        {featured.map((item) => (\n          <a class="card" href={\`/catalog/\${item.productId}\`}>\n            <h3>{item.title}</h3>\n            <div class="price">{formatPrice(lowestPrice(item), item.skus[0]?.currency ?? 'CNY')} 起</div>\n          </a>\n        ))}\n      </div>\n    ) : (\n      <div class="empty">暂无在售商品</div>\n    )}\n    <footer>${brand} · Astro SSR · data: commerce-os /api/v1/storefront/catalog</footer>\n  </body>\n</html>\n`,
     },
     {
       id: 'template-storefront-catalog',
@@ -947,9 +949,15 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
     },
     {
       id: 'template-storefront-profile-config',
-      title: 'Storefront profile data',
-      path: 'config/storefront.profile.json',
-      content: JSON.stringify({ profile, brand, intent }, null, 2) + '\n',
+      title: 'Storefront profile and content config',
+      path: 'config/storefront.config.json',
+      content: JSON.stringify({
+        profile,
+        brand,
+        tagline: sfConfig.tagline || intent,
+        theme: { color: sfConfig.themeColor },
+        seedProducts: sfConfig.seedProducts,
+      }, null, 2) + '\n',
     },
     {
       id: 'template-storefront-readme',

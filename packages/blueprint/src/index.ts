@@ -31,6 +31,18 @@ export const productTypeSchema = z.enum([
 // 独立站行业剖面：同一 storefront 骨架的配置化差异，不是三种产品类型。
 // retail=品牌零售（默认）；cross-border=多币种展示 + 价格货币化占位；subscription=周期订单占位。
 export const storefrontProfileSchema = z.enum(['retail', 'cross-border', 'subscription']);
+// TF-04：模板→Blueprint 的配置化输入。结构由 productType=storefront + profile 决定；商品/主题/文案
+// 由 storefrontConfig 注入，管道据此生成同构站。商品为种子占位（真实目录仍来自 commerce-os SSR 投影）。
+export const storefrontSeedProductSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  price: z.number().nonnegative(),
+  currency: z.string().trim().length(3).default('CNY'),
+});
+export const storefrontConfigSchema = z.object({
+  themeColor: z.string().trim().max(40).default('#b45309'),
+  tagline: z.string().trim().max(200).default(''),
+  seedProducts: z.array(storefrontSeedProductSchema).default([]),
+});
 export const blueprintModeSchema = z.enum(['beginner', 'professional']);
 // Tauri is the default desktop shell (small bundles, Rust core). Electron is offered in
 // professional mode for teams that need Node APIs in the main process or already ship Electron.
@@ -52,6 +64,7 @@ export const blueprintAnswersSchema = z.object({
   runtimeProvider: runtimeProviderSchema.default('local-codex'),
   desktopShell: desktopShellSchema.default('tauri'),
   storefrontProfile: storefrontProfileSchema.default('retail'),
+  storefrontConfig: storefrontConfigSchema.default({}),
   customInstructions: z.string().trim().max(1000).default(''),
   githubOwner: z.string().trim().max(120).default(''),
   vercelTeam: z.string().trim().max(120).default(''),
@@ -87,6 +100,9 @@ export const productBlueprintSchema = z.object({
       // field did (see the mode/productIntent note below).
       storefrontProfile: storefrontProfileSchema.default('retail'),
     }),
+    // TF-04：配置化商品/主题/文案。Read-migration default so pre-existing storefront blueprints
+    // (and non-storefront types) keep validating; only the storefront builder reads it.
+    storefrontConfig: storefrontConfigSchema.default({}),
     stack: z.object({
       frontend: z.literal('react-vite'),
       api: z.literal('hono'),
@@ -180,6 +196,7 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
         desktopShell: desktopShellSchema.parse(answers.desktopShell),
         storefrontProfile: storefrontProfileSchema.parse(answers.storefrontProfile),
       },
+      storefrontConfig: storefrontConfigSchema.parse(answers.storefrontConfig),
       stack: { frontend: 'react-vite', api: 'hono', packageManager: 'npm' },
       sourceControl: {
         provider: 'github',
