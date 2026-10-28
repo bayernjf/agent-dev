@@ -6,6 +6,8 @@
 
 ## 最近进度
 
+- **Tier0 M2 · TF-06 模板清单登记（2026-10-28，feature/20260802）**：新增 `docs/storefront-template-checklist.md`，沿用 agent-world `template-checklist.md` 登记惯例。对账：已实现 storefront 站点模板 3 个（retail/cross-border/subscription），本表登记 3 条，一一对应；agent-world `tpl-*` 工作流模板 35 个属另一域，未改动。GATE-L1 真实部署状态如实标注于 TF-05。
+
 - **Tier0 M2 · TF-05 GATE-L1 真实上线（2026-10-28，feature/20260802）——本地物化门通过，真实公网部署受阻**：
   - **已验证（本地，可复跑）**：用 `createBlueprint(storefront, profile=retail/cross-border/subscription)` 物化到 `/tmp/sf-*`，三套剖面均 `node scripts/build.mjs && node scripts/smoke.mjs` 全绿（23 产物/套）。物化还暴露并修掉生成门两个真实缺陷（`9788c27`：子页面目录未建、smoke 标记口径不一致）。
   - **真实公网部署未发生、不伪造**：缺 ① 本次会话无写生产云资源的授权（Vercel token 仍只读、CLI 登录态失效；Cloudflare token 未在本会话注入）；② storefront SSR 需实时 commerce-os storefront 后端（`COMMERCE_API_BASE_URL`）才能渲染目录，当前无运行中的线上后端；③ agent-dev v0.3 方向（产品族整合 D2）尚未拍板；④ 生成骨架的 `build` 当前是装配门，真实 `astro build`+SSR 部署需先 `npm install` astro/react 再上线。
