@@ -6,6 +6,12 @@
 
 ## 最近进度
 
+- **Tier0 M2 · TF-04 管道吃模板：模板→Blueprint 契约（2026-10-28，feature/20260802）**：storefront 模板接入为 Blueprint 级输入。
+  - 新增 `storefrontConfigSchema`（themeColor / tagline / seedProducts，带 read-migration default），落到 `spec.storefrontConfig`；结构（productType=storefront + profile）+ 配置化商品/主题/文案一并作为管道输入。
+  - `buildStorefront` 输出 `config/storefront.config.json`（profile/brand/tagline/theme/seedProducts），首页 hero 注入配置化 tagline。
+  - 契约测试「Cafe Noir」：Blueprint 经 persisted schema 往返、生成站反映 themeColor/tagline/seedProducts、首页含配置文案、每个声明 quality 检查都有真实脚本。
+  - 门数字：`tsc` 0 错；`vitest run packages/blueprint` 37 例全绿（新增契约断言 1 例）。未 push。
+
 - **Tier0 M2 · TF-03 订阅周期订单模板（2026-10-28，feature/20260802）**：`storefrontProfile=subscription` 落地周期订单占位。
   - 首页注入订阅方案卡（月度/季度）+ 「周期订单占位」语义（结算标记 `recurring=true`，真实续费/退订/扣款待计费通道）。
   - `src/lib/api.ts` 追加 `SUBSCRIPTION_PLANS` / `isRecurringOrder` 占位；retail 与 cross-border 不携带订阅语义。
