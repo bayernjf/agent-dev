@@ -409,6 +409,28 @@ describe('ProductBlueprint', () => {
     expect(envExample).toContain('COMMERCE_API_BASE_URL');
   });
 
+  it('renders multi-currency display and a monetization placeholder for the cross-border profile', () => {
+    const blueprint = createBlueprint('Bay Global', { productType: 'storefront', storefrontProfile: 'cross-border' }, 1);
+    expect(blueprint.spec.product.storefrontProfile).toBe('cross-border');
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+
+    const home = artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+    expect(home).toContain('profile:cross-border');
+    expect(home).toContain('currency-switcher');
+    expect(home).toContain('data-currencies="CNY,USD,EUR"');
+    // Price monetization must be an explicit placeholder, not a silently real conversion.
+    expect(home).toContain('价格货币化占位');
+
+    const apiLib = artifacts.find(a => a.path === 'src/lib/api.ts')!.content;
+    expect(apiLib).toContain('SUPPORTED_CURRENCIES');
+    expect(apiLib).toContain('convertPrice');
+
+    // The retail profile must NOT carry the cross-border currency machinery.
+    const retailHome = createDryRunPlan(createBlueprint('Bay Store', { productType: 'storefront' }, 1))
+      .artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+    expect(retailHome).not.toContain('currency-switcher');
+  });
+
   it('generates a real browser-extension (MV3) scaffold with a web-store delivery handoff', () => {
     const blueprint = createBlueprint('Tab Guardian', { productType: 'browser-extension' }, 1);
     const artifacts = createDryRunPlan(blueprint).artifacts;
