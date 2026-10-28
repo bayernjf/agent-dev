@@ -321,6 +321,7 @@ describe('ProductBlueprint', () => {
       { productType: 'desktop', desktopShell: 'electron' },
       { productType: 'mobile' },
       { productType: 'api-tool' },
+      { productType: 'storefront' },
     ] as const;
     for (const combo of combos) {
       const productType = combo.productType;
@@ -374,6 +375,38 @@ describe('ProductBlueprint', () => {
     // Governance docs still describe the static delivery baseline.
     const standard = artifacts.find(a => a.path === 'generated/PRODUCT_STANDARD.md')!.content;
     expect(standard).toContain('Static site on Cloudflare Pages');
+  });
+
+  it('generates the isomorphic storefront skeleton for the brand-retail profile', () => {
+    const blueprint = createBlueprint('Bay Store', { productType: 'storefront' }, 1);
+    expect(blueprint.spec.product.type).toBe('storefront');
+    // Default profile is brand retail; storefront calls an external commerce API, not its own DB.
+    expect(blueprint.spec.product.storefrontProfile).toBe('retail');
+    expect(blueprint.spec.data).toEqual({ provider: 'none', auth: 'none', organization: '' });
+    expect(blueprint.spec.deployment.web).toEqual({ provider: 'none', account: '' });
+    expect(blueprint.spec.deployment.api.provider).toBe('vercel-functions');
+
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    const paths = artifacts.map(a => a.path);
+    // Isomorphic page set mirroring commerce-os front/src.
+    for (const page of [
+      'src/pages/index.astro',
+      'src/pages/catalog.astro',
+      'src/pages/catalog/[id].astro',
+      'src/pages/orders/[cartId].astro',
+      'src/lib/api.ts',
+      'src/components/CartIsland.tsx',
+      'src/components/OrderIsland.tsx',
+      'config/storefront.profile.json',
+    ]) {
+      expect(paths, `storefront scaffold missing ${page}`).toContain(page);
+    }
+    const home = artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+    expect(home).toContain('profile:retail');
+    expect(home).toContain('Bay Store');
+    // SSR-only env var must be present and the browser must not carry commerce credentials.
+    const envExample = artifacts.find(a => a.path === 'config/env.example')!.content;
+    expect(envExample).toContain('COMMERCE_API_BASE_URL');
   });
 
   it('generates a real browser-extension (MV3) scaffold with a web-store delivery handoff', () => {
