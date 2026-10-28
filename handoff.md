@@ -6,6 +6,11 @@
 
 ## 最近进度
 
+- **Tier0 M2 · TF-02 跨境多币种模板（2026-10-28，feature/20260802）**：`storefrontProfile=cross-border` 落地多币种展示。
+  - 首页注入币种切换器 `<div class="currency-switcher" data-currencies="CNY,USD,EUR">` + 「价格货币化占位」显式说明（真实汇率换算与多币种收款待支付通道，当前只做展示层，不静默当真换算）。
+  - `src/lib/api.ts` 按 profile 追加 `SUPPORTED_CURRENCIES` 与 `convertPrice()`（占位汇率表，仅展示）；retail 剖面不携带该机制。
+  - 门数字：`tsc` 0 错；`vitest run packages/blueprint` 35 例全绿（新增跨境展示断言 1 例）。未 push。
+
 - **Tier0 M2 · TF-01 品牌零售 storefront 模板骨架（2026-10-28，feature/20260802）**：`@agent-dev/blueprint` 新增第 7 种 product type `storefront`，把 commerce-os 的 storefront 前台（Astro SSR + React 岛）固化为模板骨架。
   - 结构：`productTypeSchema` 加 `storefront`；新增 `storefrontProfileSchema = retail|cross-border|subscription`（默认 `retail`，带 read-migration default，旧 blueprint 不 brick）；`spec.product.storefrontProfile` 落盘。
   - 生成器：`PRODUCT_TYPE_DESCRIPTORS['storefront']`（Astro SSR node standalone；后端=外部 commerce-os，不生成 Supabase；providers=`github+vercel`，SSR 站部署 Vercel Functions）；`QUALITY_CHECKS['storefront']=['build','smoke']`；新增 `buildStorefront()` 产出与 commerce-os `front/src` 同构的页面集（`index/catalog/catalog/[id]/orders/[cartId]` + `lib/api.ts` + `CartIsland/OrderIsland`）+ `config/storefront.profile.json` + `config/env.example`（`COMMERCE_API_BASE_URL` SSR-only）。
