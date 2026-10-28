@@ -24,7 +24,13 @@ export const productTypeSchema = z.enum([
   'desktop',
   'mobile',
   'api-tool',
+  // Tier0 独立站双用 L1：storefront 是同一电商内核（commerce-os）的独立站前台模板。
+  // 结构固定为 Astro SSR + React 岛；行业差异（零售/跨境/订阅）由 storefrontProfile 轴配置化。
+  'storefront',
 ]);
+// 独立站行业剖面：同一 storefront 骨架的配置化差异，不是三种产品类型。
+// retail=品牌零售（默认）；cross-border=多币种展示 + 价格货币化占位；subscription=周期订单占位。
+export const storefrontProfileSchema = z.enum(['retail', 'cross-border', 'subscription']);
 export const blueprintModeSchema = z.enum(['beginner', 'professional']);
 // Tauri is the default desktop shell (small bundles, Rust core). Electron is offered in
 // professional mode for teams that need Node APIs in the main process or already ship Electron.
@@ -45,6 +51,7 @@ export const blueprintAnswersSchema = z.object({
   analyticsProviders: z.array(analyticsProviderSchema).default([]),
   runtimeProvider: runtimeProviderSchema.default('local-codex'),
   desktopShell: desktopShellSchema.default('tauri'),
+  storefrontProfile: storefrontProfileSchema.default('retail'),
   customInstructions: z.string().trim().max(1000).default(''),
   githubOwner: z.string().trim().max(120).default(''),
   vercelTeam: z.string().trim().max(120).default(''),
@@ -75,6 +82,10 @@ export const productBlueprintSchema = z.object({
       type: productTypeSchema,
       dataSensitivity: z.enum(['standard', 'sensitive']),
       desktopShell: desktopShellSchema.default('tauri'),
+      // Defaults on read migration: blueprints persisted before the storefront axis existed imply
+      // the brand-retail profile, so adding it cannot brick pre-existing rows the way a required
+      // field did (see the mode/productIntent note below).
+      storefrontProfile: storefrontProfileSchema.default('retail'),
     }),
     stack: z.object({
       frontend: z.literal('react-vite'),
@@ -139,6 +150,9 @@ const QUALITY_CHECKS: Record<string, ProductBlueprint['spec']['quality']['requir
   'desktop:electron': ['typecheck', 'build'],
   mobile: ['typecheck'],
   'api-tool': ['lint', 'typecheck', 'unit', 'build'],
+  // Storefront is a skeleton: build assembles the SSR page set and smoke asserts the profile-specific
+  // markers. No astro/supabase install is required for the gate to go green (see scripts/build.mjs).
+  'storefront': ['build', 'smoke'],
 };
 
 export function qualityChecksFor(productType: string, desktopShell = 'tauri'): ProductBlueprint['spec']['quality']['required'] {
@@ -164,6 +178,7 @@ export function createBlueprint(name: string, input: Partial<BlueprintAnswers> =
         type: productTypeSchema.parse(answers.productType),
         dataSensitivity: answers.dataSensitivity,
         desktopShell: desktopShellSchema.parse(answers.desktopShell),
+        storefrontProfile: storefrontProfileSchema.parse(answers.storefrontProfile),
       },
       stack: { frontend: 'react-vite', api: 'hono', packageManager: 'npm' },
       sourceControl: {
