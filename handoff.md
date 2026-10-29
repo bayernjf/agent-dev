@@ -6,6 +6,35 @@
 
 ## 最近进度
 
+- **Tier0 M2 · TF-06 模板清单登记（2026-10-28，feature/20260802）**：新增 `docs/storefront-template-checklist.md`，沿用 agent-world `template-checklist.md` 登记惯例。对账：已实现 storefront 站点模板 3 个（retail/cross-border/subscription），本表登记 3 条，一一对应；agent-world `tpl-*` 工作流模板 35 个属另一域，未改动。GATE-L1 真实部署状态如实标注于 TF-05。
+
+- **Tier0 M2 · TF-05 GATE-L1 真实上线（2026-10-28，feature/20260802）——本地物化门通过，真实公网部署受阻**：
+  - **已验证（本地，可复跑）**：用 `createBlueprint(storefront, profile=retail/cross-border/subscription)` 物化到 `/tmp/sf-*`，三套剖面均 `node scripts/build.mjs && node scripts/smoke.mjs` 全绿（23 产物/套）。物化还暴露并修掉生成门两个真实缺陷（`9788c27`：子页面目录未建、smoke 标记口径不一致）。
+  - **真实公网部署未发生、不伪造**：缺 ① 本次会话无写生产云资源的授权（Vercel token 仍只读、CLI 登录态失效；Cloudflare token 未在本会话注入）；② storefront SSR 需实时 commerce-os storefront 后端（`COMMERCE_API_BASE_URL`）才能渲染目录，当前无运行中的线上后端；③ agent-dev v0.3 方向（产品族整合 D2）已拍板 B 降级 runbook（手动上线）；④ 生成骨架的 `build` 当前是装配门，真实 `astro build`+SSR 部署需先 `npm install` astro/react 再上线。
+  - **所需输入（解封 GATE-L1）**：owner 明确授权用 Vercel/Cloudflare 生产资源开站 + 注入可用凭据；提供一个可访问的 commerce-os storefront API URL；v0.3 方向已拍板 B（降级 runbook）；由手动流程把物化站 `npm install && astro build` 部署并回取线上 URL 作为验收证据。
+
+- **Tier0 M2 · TF-04 管道吃模板：模板→Blueprint 契约（2026-10-28，feature/20260802）**：storefront 模板接入为 Blueprint 级输入。
+  - 新增 `storefrontConfigSchema`（themeColor / tagline / seedProducts，带 read-migration default），落到 `spec.storefrontConfig`；结构（productType=storefront + profile）+ 配置化商品/主题/文案一并作为管道输入。
+  - `buildStorefront` 输出 `config/storefront.config.json`（profile/brand/tagline/theme/seedProducts），首页 hero 注入配置化 tagline。
+  - 契约测试「Cafe Noir」：Blueprint 经 persisted schema 往返、生成站反映 themeColor/tagline/seedProducts、首页含配置文案、每个声明 quality 检查都有真实脚本。
+  - 门数字：`tsc` 0 错；`vitest run packages/blueprint` 37 例全绿（新增契约断言 1 例）。未 push。
+
+- **Tier0 M2 · TF-03 订阅周期订单模板（2026-10-28，feature/20260802）**：`storefrontProfile=subscription` 落地周期订单占位。
+  - 首页注入订阅方案卡（月度/季度）+ 「周期订单占位」语义（结算标记 `recurring=true`，真实续费/退订/扣款待计费通道）。
+  - `src/lib/api.ts` 追加 `SUBSCRIPTION_PLANS` / `isRecurringOrder` 占位；retail 与 cross-border 不携带订阅语义。
+  - 门数字：`tsc` 0 错；`vitest run packages/blueprint` 36 例全绿（新增订阅占位断言 1 例）。未 push。
+
+- **Tier0 M2 · TF-02 跨境多币种模板（2026-10-28，feature/20260802）**：`storefrontProfile=cross-border` 落地多币种展示。
+  - 首页注入币种切换器 `<div class="currency-switcher" data-currencies="CNY,USD,EUR">` + 「价格货币化占位」显式说明（真实汇率换算与多币种收款待支付通道，当前只做展示层，不静默当真换算）。
+  - `src/lib/api.ts` 按 profile 追加 `SUPPORTED_CURRENCIES` 与 `convertPrice()`（占位汇率表，仅展示）；retail 剖面不携带该机制。
+  - 门数字：`tsc` 0 错；`vitest run packages/blueprint` 35 例全绿（新增跨境展示断言 1 例）。未 push。
+
+- **Tier0 M2 · TF-01 品牌零售 storefront 模板骨架（2026-10-28，feature/20260802）**：`@agent-dev/blueprint` 新增第 7 种 product type `storefront`，把 commerce-os 的 storefront 前台（Astro SSR + React 岛）固化为模板骨架。
+  - 结构：`productTypeSchema` 加 `storefront`；新增 `storefrontProfileSchema = retail|cross-border|subscription`（默认 `retail`，带 read-migration default，旧 blueprint 不 brick）；`spec.product.storefrontProfile` 落盘。
+  - 生成器：`PRODUCT_TYPE_DESCRIPTORS['storefront']`（Astro SSR node standalone；后端=外部 commerce-os，不生成 Supabase；providers=`github+vercel`，SSR 站部署 Vercel Functions）；`QUALITY_CHECKS['storefront']=['build','smoke']`；新增 `buildStorefront()` 产出与 commerce-os `front/src` 同构的页面集（`index/catalog/catalog/[id]/orders/[cartId]` + `lib/api.ts` + `CartIsland/OrderIsland`）+ `config/storefront.profile.json` + `config/env.example`（`COMMERCE_API_BASE_URL` SSR-only）。
+  - 行业剖面钩子：`storefrontProfileBits(profile)` 当前 retail 完整；cross-border/subscription 先落 HTML 占位注释（TF-02/03 填充）。
+  - 门数字：`tsc -p packages/blueprint` 0 错；`vitest run packages/blueprint` 34 例全绿（新增 storefront 同构站 + quality-script 两例）。未 push、未建 PR。
+
 - **废弃裸名项目删除（2026-10-26，owner 拍板「这个也搞」）**：两平台遗留的 4 个废弃裸名项目已全部删除，生产 `-web`/`-api` 未触碰，本条闭环并取代下方 2026-10-26 dry-run 记录中「裸名待 owner 拍板」的挂账状态。
   - **Cloudflare Pages（wrangler 4.120.0 OAuth）**：`wrangler pages project delete link-vault` / `receipt-test` 均返回 Successfully deleted；与三个交付项目相关的现存项目只剩 `link-vault-web`、`workspace-verify-fresh-web`、`receipt-test-web` 三个生产 `-web`。
   - **Vercel（team `bayernjfs-projects`，bayjf 仓 `.env.local` 的 `VERCEL_TOKEN`）**：删除前核实两个裸名仅绑定随机 `.vercel.app` 裸域（`link-vault`→`link-vault-two-zeta.vercel.app`、`receipt-test`→`receipt-test.vercel.app`），均无自定义业务域名；`DELETE /v9/projects/{name}` 返回 204。现存只剩 `link-vault-api`、`workspace-verify-fresh-api`、`receipt-test-api` 三个生产 `-api`。
