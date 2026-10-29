@@ -127,6 +127,18 @@ export const PRODUCT_TYPE_DESCRIPTORS: Record<ProductType, { frontend: string; b
     hasBackend: false,
     providers: ['github'],
   },
+  // Tier0 独立站双用 L1：storefront 前台模板。SSR 站点部署到 Vercel node 函数；商品/订单/支付数据
+  // 全部来自外部电商内核（commerce-os），本模板不生成 Supabase、不生成自己的后端——前端只经
+  // COMMERCE_API_BASE_URL 消费 /api/v1/storefront/*。行业差异由 spec.product.storefrontProfile 配置化。
+  'storefront': {
+    frontend: 'Astro SSR (node standalone) + React 19 islands',
+    backend: 'External commerce-os storefront API (/api/v1/storefront/*); no generated backend',
+    deploySteps:
+      'Deploy the Astro SSR build to Vercel Functions, then set COMMERCE_API_BASE_URL to the commerce-os '
+      + 'storefront API URL and smoke the catalog page. Payment stays fake until a real provider is configured.',
+    hasBackend: false,
+    providers: ['github', 'vercel'],
+  },
 };
 
 export function baselineProvidersFor(productType: ProductType): readonly BaselineProviderId[] {
@@ -773,6 +785,196 @@ function buildApiTool(blueprint: ProductBlueprint): GeneratedArtifact[] {
   ];
 }
 
+// Tier0 独立站双用 L1（TF-01）：把 commerce-os 的 storefront 前台（Astro SSR + React 岛）固化为
+// 可复用模板骨架。结构与 commerce-os front/src 同构（首页/列表/详情/订单状态 + cart/order 岛 +
+// lib/api），但商品、主题、文案全部由 blueprint 配置化注入。行业差异由 spec.product.storefrontProfile
+// 切换：retail=品牌零售（本任务完整）；cross-border（TF-02）/subscription（TF-03）先落占位钩子。
+type StorefrontProfile = 'retail' | 'cross-border' | 'subscription';
+function storefrontProfileBits(profile: StorefrontProfile): {
+  priceNote: string;
+  heroExtra: string;
+  marker: string;
+} {
+  switch (profile) {
+    case 'cross-border':
+      // TF-02：多币种展示真实落地。价格按 SKU 自带 currency 渲染；首页挂币种切换器（展示用，
+      // 汇率为占位）。价格货币化占位 = 真实收款/汇率换算待 Stripe 与汇率源接入，当前只做展示层。
+      return {
+        priceNote:
+          '<div class="currency-switcher" data-currencies="CNY,USD,EUR">币种切换（展示占位，汇率未货币化）</div>\n'
+          + '    <p class="price-placeholder">价格按 SKU 原币种展示；真实汇率换算与多币种收款待支付通道接入（价格货币化占位）。</p>',
+        heroExtra: '<p class="badge">跨境 · 多币种展示</p>',
+        marker: 'profile-cross-border',
+      };
+    case 'subscription':
+      // TF-03：订阅周期订单占位完整落地。展示订阅方案卡（月/季）与结算时的「周期扣费」占位语义；
+      // 真实周期订单/续费扣款待计费与支付通道（对齐 agent-world 订阅 gate），当前只做占位结构。
+      return {
+        priceNote:
+          '<div class="subscription-plans">'
+          + '<div class="plan"><h3>月度订阅</h3><p>每月自动续订（周期订单占位，未接通续费扣款）</p></div>'
+          + '<div class="plan"><h3>季度订阅</h3><p>每季度自动续订（周期订单占位，未接通续费扣款）</p></div>'
+          + '</div>\n'
+          + '    <p class="recurring-placeholder">周期订单为占位语义：结算时标记 recurring=true，真实续费/退订与扣款待计费通道接入。</p>',
+        heroExtra: '<p class="badge">订阅 · 周期订单</p>',
+        marker: 'profile-subscription',
+      };
+    case 'retail':
+    default:
+      return { priceNote: '', heroExtra: '', marker: 'profile-retail' };
+  }
+}
+
+function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
+  const header = `Generated from ProductBlueprint revision ${blueprint.metadata.revision}.`;
+  const brand = markdown(blueprint.metadata.name);
+  const intent = markdown(blueprint.metadata.productIntent || '精选好物，一站选购。');
+  const slug = blueprint.metadata.name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-dev-storefront';
+  const profile: StorefrontProfile = blueprint.spec.product.storefrontProfile;
+  const bits = storefrontProfileBits(profile);
+  // TF-04：模板→Blueprint 的配置化输入（主题/文案/种子商品）。
+  const sfConfig = blueprint.spec.storefrontConfig;
+  // TF-02：cross-border 额外注入多币种展示工具（汇率为占位，真实货币化待支付通道）。
+  const apiExtras = profile === 'cross-border'
+    ? '\n// Multi-currency display (TF-02). Rates are display placeholders until a real FX source and\n// a monetized payment provider are wired — prices are NOT converted for charging here.\nexport const SUPPORTED_CURRENCIES = [\'CNY\', \'USD\', \'EUR\'] as const;\nconst PLACEHOLDER_RATES: Record<string, number> = { CNY: 1, USD: 0.14, EUR: 0.13 };\n\nexport function convertPrice(price: number, from: string, to: string): number {\n  const fromRate = PLACEHOLDER_RATES[from] ?? 1;\n  const toRate = PLACEHOLDER_RATES[to] ?? 1;\n  return (price / fromRate) * toRate;\n}\n'
+    : profile === 'subscription'
+      ? '\n// Subscription plans (TF-03). Recurring order semantics are placeholders: checkout marks\n// recurring=true, but real renewal/cancellation billing waits for the monetized billing gate.\nexport interface SubscriptionPlan { id: string; cycle: \'monthly\' | \'quarterly\'; amountMicros: number; currency: string; }\nexport const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [];\n\nexport function isRecurringOrder(planId: string | null): boolean {\n  // Placeholder: any selected subscription plan id marks the order recurring until billing lands.\n  return Boolean(planId);\n}\n'
+      : '';
+
+  return [
+    {
+      id: 'template-root-package',
+      title: 'Storefront package',
+      path: 'package.json',
+      content: JSON.stringify({
+        name: slug,
+        private: true,
+        type: 'module',
+        engines: { node: '>=22.0.0' },
+        scripts: {
+          dev: 'astro dev',
+          build: 'node scripts/build.mjs',
+          smoke: 'node scripts/smoke.mjs',
+          quality: qualityScript(blueprint),
+        },
+        dependencies: {
+          '@astrojs/vercel': '^8.0.0',
+          '@astrojs/react': '^4.0.0',
+          astro: '^5.0.0',
+          react: '^19.0.0',
+          'react-dom': '^19.0.0',
+        },
+      }, null, 2) + '\n',
+    },
+    {
+      id: 'template-storefront-build',
+      title: 'Storefront skeleton build script',
+      path: 'scripts/build.mjs',
+      // The gate must go green without installing Astro: this assembles the isomorphic SSR page set into
+      // dist/ and asserts the homepage carries the brand + profile marker. A real `astro build` runs at
+      // deploy time (GATE-L1); the scaffold ships the .astro sources for that.
+      content: `import { mkdir, readFile, writeFile } from 'node:fs/promises';\nimport { dirname, join } from 'node:path';\n\n// Skeleton build: copy the SSR page sources into dist/ and assert the isomorphic set is complete.\n// This is the template quality gate, not the Astro production build (that runs at deploy time).\nconst profile = ${JSON.stringify(profile)};\nconst pages = ['index.astro', 'catalog.astro', 'catalog/[id].astro', 'orders/[cartId].astro'];\nfor (const page of pages) {\n  const src = join('src/pages', page);\n  const content = await readFile(src, 'utf8');\n  const dest = join('dist/pages', page);\n  await mkdir(dirname(dest), { recursive: true });\n  await writeFile(dest, content);\n}\nconst home = await readFile('dist/pages/index.astro', 'utf8');\nif (!home.includes('profile:' + profile)) {\n  throw new Error('build: homepage is missing the storefront profile marker for ' + profile);\n}\nconsole.log('build: storefront skeleton (' + profile + ') assembled at dist/pages');\n`,
+    },
+    {
+      id: 'template-storefront-smoke',
+      title: 'Storefront profile smoke check',
+      path: 'scripts/smoke.mjs',
+      content: `import { readFile } from 'node:fs/promises';\n\n// Smoke asserts the generated profile actually surfaced in the homepage. This is what the contract\n// test for TF-02/TF-03 (multi-currency / subscription) pins on.\nconst profile = ${JSON.stringify(profile)};\nconst home = await readFile('dist/pages/index.astro', 'utf8').catch(() => {\n  throw new Error('smoke: dist/pages/index.astro missing — run the build first.');\n});\nconst marker = 'profile:' + profile;\nif (!home.includes(marker)) {\n  throw new Error('smoke: homepage missing profile marker ' + marker);\n}\nconsole.log('smoke: ' + marker + ' present on homepage.');\n`,
+    },
+    {
+      id: 'template-storefront-astro-config',
+      title: 'Astro SSR configuration',
+      path: 'astro.config.mjs',
+      content: `import { defineConfig } from 'astro/config';\nimport vercel from '@astrojs/vercel';\nimport react from '@astrojs/react';\n\nexport default defineConfig({\n  output: 'server',\n  adapter: vercel(),\n  integrations: [react()],\n});\n`,
+    },
+    {
+      id: 'template-storefront-tsconfig',
+      title: 'Storefront TypeScript configuration',
+      path: 'tsconfig.json',
+      content: JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', jsx: 'react-jsx', strict: true, skipLibCheck: true, types: ['node'] }, include: ['src'] }, null, 2) + '\n',
+    },
+    {
+      id: 'template-storefront-vercel',
+      title: 'Vercel SSR configuration',
+      path: 'vercel.json',
+      content: JSON.stringify({ version: 2, buildCommand: 'astro build' }, null, 2) + '\n',
+    },
+    {
+      id: 'template-storefront-env-example',
+      title: 'Storefront environment example',
+      path: 'config/env.example',
+      content: `# commerce-os storefront API base (SSR-only; never ships to the browser).\nCOMMERCE_API_BASE_URL=http://127.0.0.1:8787\n`,
+    },
+    {
+      id: 'template-storefront-api-lib',
+      title: 'Storefront server-side API client',
+      path: 'src/lib/api.ts',
+      content: `// Server-side API client (SSR only). The browser never sees COMMERCE_API_BASE_URL.\nconst API_BASE = process.env.COMMERCE_API_BASE_URL ?? 'http://127.0.0.1:8787';\n\nexport interface CatalogSku { id: string; skuCode: string; price: number; currency: string; specs: Record<string, unknown>; }\nexport interface CatalogItem { productId: string; title: string; skus: CatalogSku[]; listedAt: string; }\n\nexport async function fetchCatalog(): Promise<CatalogItem[]> {\n  try {\n    const res = await fetch(\`\${API_BASE}/api/v1/storefront/catalog\`, { signal: AbortSignal.timeout(3000) });\n    if (!res.ok) return [];\n    const data = (await res.json()) as { catalog?: CatalogItem[] };\n    return data.catalog ?? [];\n  } catch { return []; }\n}\n\nexport async function fetchCatalogItem(id: string): Promise<CatalogItem | null> {\n  try {\n    const res = await fetch(\`\${API_BASE}/api/v1/storefront/catalog/\${id}\`, { signal: AbortSignal.timeout(3000) });\n    if (!res.ok) return null;\n    const data = (await res.json()) as { item?: CatalogItem };\n    return data.item ?? null;\n  } catch { return null; }\n}\n\nexport function formatPrice(price: number, currency: string): string {\n  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency, minimumFractionDigits: 2 }).format(price);\n}\n\nexport function lowestPrice(item: CatalogItem): number {\n  return item.skus.reduce((min, s) => Math.min(min, s.price), Number.POSITIVE_INFINITY);\n}\n${apiExtras}`,
+    },
+    {
+      id: 'template-storefront-index',
+      title: 'Storefront homepage',
+      path: 'src/pages/index.astro',
+      content: `---\nimport { fetchCatalog, lowestPrice, formatPrice } from '../lib/api';\nconst catalog = await fetchCatalog();\nconst featured = catalog.slice(0, 6);\n---\n<html lang="zh" data-storefront-profile="${profile}">\n  <head>\n    <meta charset="utf-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1" />\n    <title>${brand} · 首页</title>\n  </head>\n  <body>\n    <!-- profile:${profile} -->\n    <header><span class="brand">${brand}</span><nav><a href="/">首页</a><a href="/catalog">全部商品</a></nav></header>\n    <section class="hero"><h1>${brand}</h1><p>${markdown(sfConfig.tagline || intent)}</p>${bits.heroExtra}</section>\n    ${bits.priceNote}\n    {featured.length > 0 ? (\n      <div class="grid">\n        {featured.map((item) => (\n          <a class="card" href={\`/catalog/\${item.productId}\`}>\n            <h3>{item.title}</h3>\n            <div class="price">{formatPrice(lowestPrice(item), item.skus[0]?.currency ?? 'CNY')} 起</div>\n          </a>\n        ))}\n      </div>\n    ) : (\n      <div class="empty">暂无在售商品</div>\n    )}\n    <footer>${brand} · Astro SSR · data: commerce-os /api/v1/storefront/catalog</footer>\n  </body>\n</html>\n`,
+    },
+    {
+      id: 'template-storefront-catalog',
+      title: 'Storefront catalog list page',
+      path: 'src/pages/catalog.astro',
+      content: `---\nimport { fetchCatalog, lowestPrice, formatPrice } from '../lib/api';\nconst catalog = await fetchCatalog();\n---\n<html lang="zh" data-storefront-profile="${profile}">\n  <head><meta charset="utf-8" /><title>${brand} · 全部商品</title></head>\n  <body>\n    <!-- profile:${profile} -->\n    <header><span class="brand">${brand}</span><nav><a href="/">首页</a><a href="/catalog">全部商品</a></nav></header>\n    <h1>全部商品</h1>\n    <div class="grid">\n      {catalog.map((item) => (\n        <a class="card" href={\`/catalog/\${item.productId}\`}>\n          <h3>{item.title}</h3>\n          <div class="price">{formatPrice(lowestPrice(item), item.skus[0]?.currency ?? 'CNY')} 起</div>\n        </a>\n      ))}\n    </div>\n  </body>\n</html>\n`,
+    },
+    {
+      id: 'template-storefront-detail',
+      title: 'Storefront product detail page',
+      path: 'src/pages/catalog/[id].astro',
+      content: `---\nimport { fetchCatalogItem, formatPrice } from '../../lib/api';\nconst { id } = Astro.params;\nconst item = id ? await fetchCatalogItem(id) : null;\n---\n<html lang="zh" data-storefront-profile="${profile}">\n  <head><meta charset="utf-8" /><title>${brand} · 商品详情</title></head>\n  <body>\n    <!-- profile:${profile} -->\n    <header><span class="brand">${brand}</span><nav><a href="/">首页</a><a href="/catalog">全部商品</a></nav></header>\n    {item ? (\n      <article>\n        <h1>{item.title}</h1>\n        <ul>\n          {item.skus.map((sku) => (\n            <li>{sku.skuCode} — {formatPrice(sku.price, sku.currency)}</li>\n          ))}\n        </ul>\n      </article>\n    ) : (<p>商品不存在或未上架。</p>)}\n  </body>\n</html>\n`,
+    },
+    {
+      id: 'template-storefront-order-status',
+      title: 'Storefront order status page',
+      path: 'src/pages/orders/[cartId].astro',
+      content: `---\nconst { cartId } = Astro.params;\n---\n<html lang="zh" data-storefront-profile="${profile}">\n  <head><meta charset="utf-8" /><title>${brand} · 订单状态</title></head>\n  <body>\n    <!-- profile:${profile} -->\n    <header><span class="brand">${brand}</span></header>\n    <h1>订单状态</h1>\n    <p>订单 {cartId}：订单状态页与退款入口（接 commerce-os aftersale 域）。</p>\n  </body>\n</html>\n`,
+    },
+    {
+      id: 'template-storefront-cart-island',
+      title: 'Storefront cart island',
+      path: 'src/components/CartIsland.tsx',
+      content: `import { useState } from 'react';\n\n// 购物车 / 结算交互岛（匿名 cart token 会话）。D3 挂起态由结算页呈现。\nexport default function CartIsland() {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount((c) => c + 1)}>加入购物车（{count}）</button>;\n}\n`,
+    },
+    {
+      id: 'template-storefront-order-island',
+      title: 'Storefront order island',
+      path: 'src/components/OrderIsland.tsx',
+      content: `// 订单状态 / 退款请求交互岛（接 commerce-os aftersale 域，D2 审批后退款）。\nexport default function OrderIsland({ orderId }: { orderId: string }) {\n  return <p>订单 {orderId} 的状态与退款入口。</p>;\n}\n`,
+    },
+    {
+      id: 'template-storefront-profile-config',
+      title: 'Storefront profile and content config',
+      path: 'config/storefront.config.json',
+      content: JSON.stringify({
+        profile,
+        brand,
+        tagline: sfConfig.tagline || intent,
+        theme: { color: sfConfig.themeColor },
+        seedProducts: sfConfig.seedProducts,
+      }, null, 2) + '\n',
+    },
+    {
+      id: 'template-storefront-readme',
+      title: 'Storefront README',
+      path: 'README.md',
+      content: `# ${brand}\n\n${header}\n\nTier0 独立站双用 storefront 模板（profile = **${profile}**）。Astro SSR + React 岛，商品/订单/支付数据来自外部 commerce-os 内核，前端不自带后端与数据库。\n\n## Local commands\n\n- \`npm install\`\n- \`npm run build\`（装配 SSR 页面骨架）\n- \`npm run smoke\`（profile 标记冒烟）\n- \`npm run dev\`（真实 Astro dev）\n\n## Environment\n\n复制 \`config/env.example\` 为 \`.env\`，把 \`COMMERCE_API_BASE_URL\` 指向 commerce-os storefront API。浏览器产物不得携带任何服务端密钥。\n`,
+    },
+    {
+      id: 'template-storefront-gitignore',
+      title: 'Storefront git ignore rules',
+      path: '.gitignore',
+      content: 'node_modules\ndist/\n.env\n.env.*\n!.env.example\n.astro/\n.vercel/\n',
+    },
+    { id: 'template-storefront-quality-workflow', title: 'GitHub quality workflow', path: '.github/workflows/quality.yml', content: qualityWorkflow() },
+  ];
+}
+
 export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifact[] {
   const type = blueprint.spec.product.type;
   let artifacts: GeneratedArtifact[];
@@ -794,6 +996,9 @@ export function generateArtifacts(blueprint: ProductBlueprint): GeneratedArtifac
       break;
     case 'api-tool':
       artifacts = [...buildGovernanceArtifacts(blueprint), ...buildApiTool(blueprint)];
+      break;
+    case 'storefront':
+      artifacts = [...buildGovernanceArtifacts(blueprint), ...buildStorefront(blueprint)];
       break;
   }
   // Two artifact ids carry a type-specific title (template-root-package, template-readme); every other

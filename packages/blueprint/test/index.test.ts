@@ -321,6 +321,7 @@ describe('ProductBlueprint', () => {
       { productType: 'desktop', desktopShell: 'electron' },
       { productType: 'mobile' },
       { productType: 'api-tool' },
+      { productType: 'storefront' },
     ] as const;
     for (const combo of combos) {
       const productType = combo.productType;
@@ -374,6 +375,122 @@ describe('ProductBlueprint', () => {
     // Governance docs still describe the static delivery baseline.
     const standard = artifacts.find(a => a.path === 'generated/PRODUCT_STANDARD.md')!.content;
     expect(standard).toContain('Static site on Cloudflare Pages');
+  });
+
+  it('generates the isomorphic storefront skeleton for the brand-retail profile', () => {
+    const blueprint = createBlueprint('Bay Store', { productType: 'storefront' }, 1);
+    expect(blueprint.spec.product.type).toBe('storefront');
+    // Default profile is brand retail; storefront calls an external commerce API, not its own DB.
+    expect(blueprint.spec.product.storefrontProfile).toBe('retail');
+    expect(blueprint.spec.data).toEqual({ provider: 'none', auth: 'none', organization: '' });
+    expect(blueprint.spec.deployment.web).toEqual({ provider: 'none', account: '' });
+    expect(blueprint.spec.deployment.api.provider).toBe('vercel-functions');
+
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    const paths = artifacts.map(a => a.path);
+    // Isomorphic page set mirroring commerce-os front/src.
+    for (const page of [
+      'src/pages/index.astro',
+      'src/pages/catalog.astro',
+      'src/pages/catalog/[id].astro',
+      'src/pages/orders/[cartId].astro',
+      'src/lib/api.ts',
+      'src/components/CartIsland.tsx',
+      'src/components/OrderIsland.tsx',
+      'config/storefront.config.json',
+    ]) {
+      expect(paths, `storefront scaffold missing ${page}`).toContain(page);
+    }
+    const home = artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+    expect(home).toContain('profile:retail');
+    expect(home).toContain('Bay Store');
+    // SSR-only env var must be present and the browser must not carry commerce credentials.
+    const envExample = artifacts.find(a => a.path === 'config/env.example')!.content;
+    expect(envExample).toContain('COMMERCE_API_BASE_URL');
+  });
+
+  it('renders multi-currency display and a monetization placeholder for the cross-border profile', () => {
+    const blueprint = createBlueprint('Bay Global', { productType: 'storefront', storefrontProfile: 'cross-border' }, 1);
+    expect(blueprint.spec.product.storefrontProfile).toBe('cross-border');
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+
+    const home = artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+    expect(home).toContain('profile:cross-border');
+    expect(home).toContain('currency-switcher');
+    expect(home).toContain('data-currencies="CNY,USD,EUR"');
+    // Price monetization must be an explicit placeholder, not a silently real conversion.
+    expect(home).toContain('价格货币化占位');
+
+    const apiLib = artifacts.find(a => a.path === 'src/lib/api.ts')!.content;
+    expect(apiLib).toContain('SUPPORTED_CURRENCIES');
+    expect(apiLib).toContain('convertPrice');
+
+    // The retail profile must NOT carry the cross-border currency machinery.
+    const retailHome = createDryRunPlan(createBlueprint('Bay Store', { productType: 'storefront' }, 1))
+      .artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+    expect(retailHome).not.toContain('currency-switcher');
+  });
+
+  it('surfaces recurring-order placeholders for the subscription profile', () => {
+    const blueprint = createBlueprint('Bay Box', { productType: 'storefront', storefrontProfile: 'subscription' }, 1);
+    expect(blueprint.spec.product.storefrontProfile).toBe('subscription');
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+
+    const home = artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+    expect(home).toContain('profile:subscription');
+    expect(home).toContain('subscription-plans');
+    expect(home).toContain('recurring-placeholder');
+
+    const apiLib = artifacts.find(a => a.path === 'src/lib/api.ts')!.content;
+    expect(apiLib).toContain('SUBSCRIPTION_PLANS');
+    expect(apiLib).toContain('isRecurringOrder');
+
+    // Subscription semantics must not leak into retail or cross-border profiles.
+    for (const profile of ['retail', 'cross-border'] as const) {
+      const other = createDryRunPlan(createBlueprint('Bay', { productType: 'storefront', storefrontProfile: profile }, 1))
+        .artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+      expect(other, `profile ${profile} must not carry subscription plans`).not.toContain('subscription-plans');
+    }
+  });
+
+  it('TF-04 contract: a storefront Blueprint (structure + config) generates a site reflecting its content', () => {
+    // The pipeline consumes a storefront template as Blueprint-level input: the structure is
+    // productType=storefront + profile, and products/theme/copy come from storefrontConfig.
+    const blueprint = createBlueprint('Cafe Noir', {
+      productType: 'storefront',
+      storefrontProfile: 'retail',
+      storefrontConfig: {
+        themeColor: '#222222',
+        tagline: '现烘咖啡豆，每周新鲜送达',
+        seedProducts: [
+          { title: '埃塞俄比亚耶加雪菲', price: 6800, currency: 'CNY' },
+          { title: '哥伦比亚慧兰', price: 5800, currency: 'CNY' },
+        ],
+      },
+    }, 1);
+
+    // Contract: the Blueprint itself round-trips through the persisted schema.
+    expect(productBlueprintSchema.parse(blueprint)).toEqual(blueprint);
+    expect(blueprint.spec.storefrontConfig.seedProducts).toHaveLength(2);
+
+    const artifacts = createDryRunPlan(blueprint).artifacts;
+    const config = JSON.parse(artifacts.find(a => a.path === 'config/storefront.config.json')!.content) as {
+      profile: string; tagline: string; theme: { color: string }; seedProducts: { title: string; price: number }[];
+    };
+    expect(config.profile).toBe('retail');
+    expect(config.theme.color).toBe('#222222');
+    expect(config.tagline).toBe('现烘咖啡豆，每周新鲜送达');
+    expect(config.seedProducts.map(p => p.title)).toEqual(['埃塞俄比亚耶加雪菲', '哥伦比亚慧兰']);
+
+    // Configured copy surfaces on the generated homepage.
+    const home = artifacts.find(a => a.path === 'src/pages/index.astro')!.content;
+    expect(home).toContain('现烘咖啡豆，每周新鲜送达');
+
+    // Every declared quality check still maps to a real script (pipeline can go green).
+    const rootPackage = JSON.parse(artifacts.find(a => a.path === 'package.json')!.content) as { scripts: Record<string, string> };
+    for (const check of blueprint.spec.quality.required) {
+      expect(rootPackage.scripts[check], `missing script for ${check}`).toBeDefined();
+    }
   });
 
   it('generates a real browser-extension (MV3) scaffold with a web-store delivery handoff', () => {

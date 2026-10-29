@@ -12,6 +12,9 @@ export const defaultAnswers: BlueprintAnswers = {
   analyticsProviders: [],
   runtimeProvider: 'local-codex',
   customInstructions: '',
+  storefrontProfile: 'retail',
+  // Same defaults as storefrontConfigSchema so the literal satisfies the inferred type.
+  storefrontConfig: { themeColor: '#b45309', tagline: '', seedProducts: [] },
   githubOwner: '',
   vercelTeam: '',
   cloudflareAccount: '',
@@ -38,6 +41,8 @@ export function answersFromBlueprint(blueprint: ProductBlueprint): BlueprintAnsw
     analyticsProviders: blueprint.spec.analytics.providers,
     runtimeProvider: blueprint.spec.runtime.provider,
     customInstructions: blueprint.metadata.customInstructions,
+    storefrontProfile: blueprint.spec.product.storefrontProfile,
+    storefrontConfig: blueprint.spec.storefrontConfig,
     githubOwner: blueprint.spec.sourceControl.owner,
     vercelTeam: blueprint.spec.deployment.api.team,
     cloudflareAccount: blueprint.spec.deployment.web.account,

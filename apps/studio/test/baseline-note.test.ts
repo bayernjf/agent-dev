@@ -13,6 +13,9 @@ const EXPECTED: Record<(typeof productTypeSchema.options)[number], string | null
   desktop: null,
   mobile: null,
   'api-tool': null,
+  // Storefront is an Astro SSR shell that deploys to Vercel Functions and consumes the external
+  // commerce-os storefront API, so its only cloud baseline is Vercel.
+  storefront: 'Vercel Functions',
 };
 
 function placeholders(copy: string): string[] {
