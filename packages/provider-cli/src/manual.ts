@@ -7,7 +7,7 @@ export class ManualProviderAdapter implements ProviderAdapter {
     return { providerId: this.providerId, resources: [] };
   }
 
-  async plan(spec: ProviderResourceSpec[], current?: ProviderState): Promise<ProviderPlan> {
+  async plan(spec: ProviderResourceSpec[], _current?: ProviderState): Promise<ProviderPlan> {
     const resources = spec.map(resource => ({
       spec: resource,
       action: 'noop' as const,

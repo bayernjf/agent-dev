@@ -176,7 +176,7 @@ describe('InfisicalBackend (CLI path)', () => {
   const expectedShell = process.platform === 'win32' ? 'win32' : undefined;
 
   it('get parses CLI JSON output shapes and falls back to plain stdout', async () => {
-    const container = recordingRunner(({ args }) => ok(JSON.stringify({ secrets: [{ secretKey: 'K', secretValue: 'v1' }] })));
+    const container = recordingRunner(() => ok(JSON.stringify({ secrets: [{ secretKey: 'K', secretValue: 'v1' }] })));
     const backendContainer = new InfisicalBackend(cliConfig, container.runner);
     await expect(backendContainer.get('K')).resolves.toBe('v1');
 

@@ -28,7 +28,6 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const OPENCODE = process.env.OPENCODE_BIN ?? 'opencode';
-const SERVICE_URL = process.env.OPENCODE_SERVICE_URL ?? 'http://127.0.0.1:4096';
 const POLL_INTERVAL_MS = Number(process.env.OPENCODE_POLL_INTERVAL_MS ?? '4000');
 const MAX_OUTPUT_LENGTH = 2_000_000;
 const SERVICE_START_TIMEOUT_MS = 15_000;
@@ -73,7 +72,7 @@ function createSession() {
   if (result.status !== 0 || !result.output.trim()) fail(`OpenCode session create failed: ${result.output}`);
   try {
     return JSON.parse(result.output).data.id;
-  } catch (error) {
+  } catch {
     fail(`OpenCode session create returned no session id: ${result.output}`);
   }
 }
