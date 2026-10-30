@@ -12,7 +12,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync, existsSync, renameSy
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import type { SecretBackend, SecretBackendConfig, Secret, SecretVersion, SecretStatus } from './index.js';
+import type { SecretBackend, SecretBackendConfig, Secret, SecretVersion } from './index.js';
 
 type StorageFormat = {
   version: 1;

@@ -2,7 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 export { discoverAgentRuntimes, probeAgentCapabilities, resolveExecutablePath, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource, type CapabilityProbe } from './catalog.js';
 export {
@@ -119,10 +119,10 @@ const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
   // Claude Code has no `--cwd` flag; the working directory is set by the spawn cwd option.
   // `--dangerously-skip-permissions` avoids interactive approval prompts in the isolated task workspace.
   // `--output-format json` gives structured output parseable by the same runner as Codex.
-  'claude-code': { status: 'candidate', buildCommand: (prompt, cwd) => ['claude', '-p', prompt, '--allowedTools', 'Read,Write,Edit,Bash', '--dangerously-skip-permissions', '--output-format', 'json'] },
+  'claude-code': { status: 'candidate', buildCommand: (prompt, _cwd) => ['claude', '-p', prompt, '--allowedTools', 'Read,Write,Edit,Bash', '--dangerously-skip-permissions', '--output-format', 'json'] },
   // Aider has no `--cwd` flag; the working directory is set by the spawn cwd option.
   // `--message` sends a single prompt, `--yes-always` auto-accepts all prompts.
-  aider: { status: 'candidate', buildCommand: (prompt, cwd) => ['aider', '--message', prompt, '--yes-always'] },
+  aider: { status: 'candidate', buildCommand: (prompt, _cwd) => ['aider', '--message', prompt, '--yes-always'] },
   // OpenCode 2.0 (`lildax`) dropped the v1 `-p --print` interface, so tasks run through the
   // session-based driver script. The default model is the free `nemotron-3-ultra-free` from the
   // built-in `opencode` provider: it is the strongest free model verified working on the Zen
@@ -139,12 +139,12 @@ const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
   } },
   // OpenClaw runs an embedded agent turn via `agent --local --agent main --message`. No `--cwd` flag;
   // the working directory is set by the spawn cwd option. `--json` gives structured output.
-  openclaw: { status: 'candidate', buildCommand: (prompt, cwd) => ['openclaw', 'agent', '--local', '--agent', 'main', '--message', prompt, '--json'] },
+  openclaw: { status: 'candidate', buildCommand: (prompt, _cwd) => ['openclaw', 'agent', '--local', '--agent', 'main', '--message', prompt, '--json'] },
   // CodeBuddy runs non-interactively via `-p`, with permissions bypassed because it executes inside
   // an already-isolated task workspace. `--no-session-persistence` keeps each run stateless.
   // Execution contract exercised locally: `codebuddy -p ... "READY"` returned the response and
   // exited 0, and the child is captured through the same stdout/stderr runner as Codex.
-  codebuddy: { status: 'verified', buildCommand: (prompt, cwd) => ['codebuddy', '-p', '--permission-mode', 'bypassPermissions', '--no-session-persistence', prompt] },
+  codebuddy: { status: 'verified', buildCommand: (prompt, _cwd) => ['codebuddy', '-p', '--permission-mode', 'bypassPermissions', '--no-session-persistence', prompt] },
   // Hermes one-shot mode: `-z PROMPT` prints only the final response to stdout.
   // `--in DIR` sets the working directory, `--yolo` bypasses dangerous command approvals.
   // Execution contract exercised locally: `hermes -z "Create hello.txt" --in /tmp --yolo`
