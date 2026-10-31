@@ -855,6 +855,7 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
           dev: 'astro dev',
           build: 'node scripts/build.mjs',
           smoke: 'node scripts/smoke.mjs',
+          eval: 'node scripts/eval-run.mjs --baseline',
           quality: qualityScript(blueprint),
         },
         dependencies: {
@@ -880,6 +881,15 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
       title: 'Storefront profile smoke check',
       path: 'scripts/smoke.mjs',
       content: `import { readFile } from 'node:fs/promises';\n\n// Smoke asserts the generated profile actually surfaced in the homepage. This is what the contract\n// test for TF-02/TF-03 (multi-currency / subscription) pins on.\nconst profile = ${JSON.stringify(profile)};\nconst home = await readFile('dist/pages/index.astro', 'utf8').catch(() => {\n  throw new Error('smoke: dist/pages/index.astro missing — run the build first.');\n});\nconst marker = 'profile:' + profile;\nif (!home.includes(marker)) {\n  throw new Error('smoke: homepage missing profile marker ' + marker);\n}\nconsole.log('smoke: ' + marker + ' present on homepage.');\n`,
+    },
+    {
+      id: 'template-storefront-eval',
+      title: 'Storefront baseline eval runner',
+      path: 'scripts/eval-run.mjs',
+      // The platform Quality Gate parses the final EVAL_SUMMARY line (fallback: an `eval-score:` line)
+      // into eval-report.json. The gate verdict itself follows the command exit code — a missing or
+      // malformed summary is recorded as "absent" evidence and never softens the verdict (FR5-4).
+      content: `import { readFile } from 'node:fs/promises';\nimport { join } from 'node:path';\n\n// Baseline eval for the storefront skeleton (invoked via \`npm run eval\`). The --baseline flag is the\n// zeus-style invocation and the only mode this scaffold ships. Replace these cases with the product's\n// own suite — the machine contract to keep is the final EVAL_SUMMARY line (or an \`eval-score: <0-1>\`\n// line), which the Agent-Dev Quality Gate parses into eval-report.json.\nconst knownFlags = ['--baseline'];\nconst unknown = process.argv.slice(2).filter((arg) => !knownFlags.includes(arg));\nif (unknown.length > 0) {\n  console.error('eval: unknown arguments ' + unknown.join(', ') + ' — usage: node scripts/eval-run.mjs [--baseline]');\n  process.exit(2);\n}\nconst profile = ${JSON.stringify(profile)};\nconst pagesRoot = 'dist/pages';\nconst started = Date.now();\nconst readPage = (path) => readFile(join(pagesRoot, path), 'utf8').catch(() => null);\nconst home = await readPage('index.astro');\nif (home === null) {\n  console.error('eval: dist/pages/index.astro missing — run the build first (npm run build).');\n  process.exit(2);\n}\nconst catalog = await readPage('catalog.astro');\nconst detail = await readPage(join('catalog', '[id].astro'));\nconst order = await readPage(join('orders', '[cartId].astro'));\nconst cases = [\n  { id: 'homepage-profile-marker', pass: home.includes('profile:' + profile) },\n  { id: 'homepage-navigation', pass: home.includes('<nav>') },\n  { id: 'catalog-page-assembled', pass: catalog !== null && catalog.includes('profile:' + profile) },\n  { id: 'detail-page-assembled', pass: detail !== null },\n  { id: 'order-page-assembled', pass: order !== null },\n];\nlet failed = 0;\nfor (const item of cases) {\n  if (!item.pass) failed += 1;\n  console.log('eval: ' + (item.pass ? 'PASS' : 'FAIL') + ' ' + item.id);\n}\nconst total = cases.length;\nconst score = Math.round(((total - failed) / total) * 100) / 100;\nconst passed = failed === 0;\nconst durationMs = Date.now() - started;\nconsole.log('eval-score: ' + score);\nconsole.log('EVAL_SUMMARY ' + JSON.stringify({ score, passed, durationMs, cases: total, failed }));\nif (!passed) process.exit(1);\n`,
     },
     {
       id: 'template-storefront-astro-config',
@@ -963,7 +973,7 @@ function buildStorefront(blueprint: ProductBlueprint): GeneratedArtifact[] {
       id: 'template-storefront-readme',
       title: 'Storefront README',
       path: 'README.md',
-      content: `# ${brand}\n\n${header}\n\nTier0 独立站双用 storefront 模板（profile = **${profile}**）。Astro SSR + React 岛，商品/订单/支付数据来自外部 commerce-os 内核，前端不自带后端与数据库。\n\n## Local commands\n\n- \`npm install\`\n- \`npm run build\`（装配 SSR 页面骨架）\n- \`npm run smoke\`（profile 标记冒烟）\n- \`npm run dev\`（真实 Astro dev）\n\n## Environment\n\n复制 \`config/env.example\` 为 \`.env\`，把 \`COMMERCE_API_BASE_URL\` 指向 commerce-os storefront API。浏览器产物不得携带任何服务端密钥。\n`,
+      content: `# ${brand}\n\n${header}\n\nTier0 独立站双用 storefront 模板（profile = **${profile}**）。Astro SSR + React 岛，商品/订单/支付数据来自外部 commerce-os 内核，前端不自带后端与数据库。\n\n## Local commands\n\n- \`npm install\`\n- \`npm run build\`（装配 SSR 页面骨架）\n- \`npm run smoke\`（profile 标记冒烟）\n- \`npm run eval\`（基线评测，产出 EVAL_SUMMARY 分数摘要，供质量门解析进 eval-report.json）\n- \`npm run dev\`（真实 Astro dev）\n\n## Environment\n\n复制 \`config/env.example\` 为 \`.env\`，把 \`COMMERCE_API_BASE_URL\` 指向 commerce-os storefront API。浏览器产物不得携带任何服务端密钥。\n`,
     },
     {
       id: 'template-storefront-gitignore',

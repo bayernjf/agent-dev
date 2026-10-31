@@ -1,5 +1,12 @@
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { baselineProvidersFor, createBaselinePlan, createBlueprint, createDefaultBlueprint, createDryRunPlan, generateArtifacts, getBlueprintDecisions, getManualActions, productBlueprintSchema } from '../src/index.js';
+
+const execFileAsync = promisify(execFile);
 
 describe('ProductBlueprint', () => {
   it('creates the fixed v0.1 Web app Golden Path', () => {
@@ -407,7 +414,34 @@ describe('ProductBlueprint', () => {
     // SSR-only env var must be present and the browser must not carry commerce credentials.
     const envExample = artifacts.find(a => a.path === 'config/env.example')!.content;
     expect(envExample).toContain('COMMERCE_API_BASE_URL');
+
+    // The quality contract carries the shipped baseline eval check (FR5-4): a real runner backs it
+    // and its final EVAL_SUMMARY line is what the platform parses into eval-report.json.
+    expect(blueprint.spec.quality.required).toEqual(['build', 'smoke', 'eval']);
+    const storefrontScripts = JSON.parse(artifacts.find(a => a.path === 'package.json')!.content).scripts as Record<string, string>;
+    expect(storefrontScripts.eval).toContain('scripts/eval-run.mjs');
+    expect(artifacts.find(a => a.path === 'scripts/eval-run.mjs')!.content).toContain('EVAL_SUMMARY');
   });
+
+  it('generates a storefront scaffold whose own quality gate (build → smoke → eval) can pass', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storefront-'));
+    try {
+      const artifacts = createDryRunPlan(createBlueprint('Bay Store', { productType: 'storefront' }, 1)).artifacts;
+      for (const artifact of artifacts) {
+        const target = join(directory, artifact.path);
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, artifact.content, 'utf8');
+      }
+      // build/smoke/eval are plain node scripts, so the chain runs without any install.
+      const result = await execFileAsync('npm', ['run', 'quality'], { cwd: directory, timeout: 60_000 });
+      const output = `${result.stdout}${result.stderr}`;
+      expect(output).toContain('eval-score: 1');
+      expect(output).toContain('EVAL_SUMMARY');
+      expect(output).toContain('"passed":true');
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 90_000);
 
   it('renders multi-currency display and a monetization placeholder for the cross-border profile', () => {
     const blueprint = createBlueprint('Bay Global', { productType: 'storefront', storefrontProfile: 'cross-border' }, 1);
