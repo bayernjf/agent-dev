@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import initSqlJs from 'sql.js';
 import { createBlueprint, createDefaultBlueprint } from '@agent-dev/blueprint';
-import { AgentDevStore } from '../src/index.js';
+import { AgentDevStore, parseEvalSummary } from '../src/index.js';
 import { migrations } from '../src/migrations.js';
 
 const require = createRequire(import.meta.url);
@@ -128,6 +128,8 @@ describe('AgentDevStore', () => {
       await expect(store.getQualityGateResult(created.id, 1)).resolves.toMatchObject({ status: 'failed', command: 'npm run quality' });
       await expect(readFile(join(completed.workspacePath, 'quality-gate.json'), 'utf8')).resolves.toContain('"status": "failed"');
       await expect(readFile(join(completed.workspacePath, 'QUALITY_REPORT.md'), 'utf8')).resolves.toContain('# Quality Gate Report');
+      // The web-app quality contract declares no eval check, so no eval evidence is written at all.
+      await expect(readFile(join(completed.workspacePath, 'eval-report.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
       const task = await store.createFeatureTask({ projectId: created.id, blueprintRevision: 1, title: 'Add receipt list', objective: 'Show the user a list of saved receipts.', acceptanceCriteria: ['The list renders saved receipts.', 'Empty state is visible when there are no receipts.'] });
       expect(task.status).toBe('draft');
       const approvedTask = await store.approveFeatureTask(created.id, 1, 'test-user');
@@ -160,6 +162,69 @@ describe('AgentDevStore', () => {
       await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   }, 30_000);
+
+  it('parses the eval summary of a quality gate whose contract declares an eval check into eval-report.json', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-eval-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const created = await store.createProject({
+        name: 'Eval Storefront',
+        blueprint: createBlueprint('eval-storefront', { productType: 'storefront', githubOwner: 'acme', vercelTeam: 'acme' }, 1),
+      });
+      expect(created.blueprint.spec.quality.required).toContain('eval');
+      await store.approveBaseline(created.id, 1, 'test-user');
+      const applied = await store.executeApplyRun((await store.createApplyRun(created.id, 1)).id);
+
+      // The scaffold workspace has no node_modules; a fixture quality command stands in for the chain.
+      await writeFile(join(applied.workspacePath, 'package.json'), JSON.stringify({ name: 'eval-storefront', private: true, scripts: { quality: 'node quality-fixture.mjs' } }, null, 2) + '\n', 'utf8');
+      await writeFile(join(applied.workspacePath, 'quality-fixture.mjs'), "console.log('build ok');\nconsole.log('EVAL_SUMMARY ' + JSON.stringify({ score: 0.87, passed: true, durationMs: 1234 }));\n", 'utf8');
+
+      const quality = await store.runQualityGate(created.id, 1);
+      expect(quality.status).toBe('passed');
+      await expect(store.getEvalReport(created.id, 1)).resolves.toMatchObject({ status: 'present', command: 'npm run eval', score: 0.87, passed: true, durationMs: 1234 });
+      await expect(readFile(join(applied.workspacePath, 'eval-report.json'), 'utf8')).resolves.toContain('"status": "present"');
+      await expect(readFile(join(applied.workspacePath, 'QUALITY_REPORT.md'), 'utf8')).resolves.toContain('## Eval evidence');
+      await expect(readFile(join(applied.workspacePath, 'QUALITY_REPORT.md'), 'utf8')).resolves.toContain('Score: 0.87');
+      // The eval report joins the committed evidence chain next to quality-gate.json.
+      const tracked = await execFileAsync('git', ['ls-files', 'eval-report.json'], { cwd: applied.workspacePath });
+      expect(tracked.stdout.trim()).toBe('eval-report.json');
+
+      // The Acceptance Gate report references the eval evidence file.
+      await store.createFeatureTask({ projectId: created.id, blueprintRevision: 1, title: 'Add storefront hero', objective: 'Show the brand hero.', acceptanceCriteria: ['The hero renders.'] });
+      await store.approveFeatureTask(created.id, 1, 'test-user');
+      await store.submitAcceptance(created.id, 1, 'The storefront hero renders.', true);
+      await expect(readFile(join(applied.workspacePath, 'ACCEPTANCE_REPORT.md'), 'utf8')).resolves.toContain('eval-report.json');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 60_000);
+
+  it('records eval evidence as absent without failing the gate when the output carries no eval summary', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-eval-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const created = await store.createProject({
+        name: 'Eval Absent Storefront',
+        blueprint: createBlueprint('eval-absent-storefront', { productType: 'storefront', githubOwner: 'acme', vercelTeam: 'acme' }, 1),
+      });
+      await store.approveBaseline(created.id, 1, 'test-user');
+      const applied = await store.executeApplyRun((await store.createApplyRun(created.id, 1)).id);
+      await writeFile(join(applied.workspacePath, 'package.json'), JSON.stringify({ name: 'eval-absent-storefront', private: true, scripts: { quality: 'node quality-fixture.mjs' } }, null, 2) + '\n', 'utf8');
+      await writeFile(join(applied.workspacePath, 'quality-fixture.mjs'), "console.log('checks ran, but no eval summary was printed');\n", 'utf8');
+
+      // A missing eval summary is evidence-shaped (status absent), never a gate failure: the
+      // verdict follows the quality command exit code alone.
+      const quality = await store.runQualityGate(created.id, 1);
+      expect(quality.status).toBe('passed');
+      await expect(store.getEvalReport(created.id, 1)).resolves.toMatchObject({ status: 'absent', command: 'npm run eval', score: null, passed: null, durationMs: null });
+      await expect(readFile(join(applied.workspacePath, 'eval-report.json'), 'utf8')).resolves.toContain('"status": "absent"');
+      await expect(readFile(join(applied.workspacePath, 'QUALITY_REPORT.md'), 'utf8')).resolves.toContain('Summary: absent');
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 60_000);
 
   it('commits the code the agent wrote so the pushed branch carries the feature', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-storage-'));
@@ -760,4 +825,33 @@ describe('the Runtime executor is resolved once', () => {
       await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   }, 30_000);
+});
+
+describe('parseEvalSummary', () => {
+  it('parses the EVAL_SUMMARY JSON marker with score, verdict and duration', () => {
+    const output = 'build ok\nsmoke ok\nEVAL_SUMMARY {"score":0.87,"passed":true,"durationMs":1234,"cases":5,"failed":0}\n';
+    expect(parseEvalSummary(output)).toEqual({ score: 0.87, passed: true, durationMs: 1234 });
+  });
+
+  it('treats a JSON marker without a numeric score as unparseable', () => {
+    expect(parseEvalSummary('EVAL_SUMMARY {"cases":5}')).toBeNull();
+    expect(parseEvalSummary('EVAL_SUMMARY {"score":"high"}')).toBeNull();
+    expect(parseEvalSummary('EVAL_SUMMARY not-json')).toBeNull();
+  });
+
+  it('falls back to a plain eval-score line and normalizes percentages to 0-1', () => {
+    expect(parseEvalSummary('eval score: 0.5')).toEqual({ score: 0.5, passed: null, durationMs: null });
+    expect(parseEvalSummary('eval_score = 87%')).toMatchObject({ score: 0.87 });
+    expect(parseEvalSummary('eval-score: 1\neval duration: 250 ms')).toEqual({ score: 1, passed: null, durationMs: 250 });
+  });
+
+  it('keeps the last valid summary when several appear', () => {
+    const output = 'EVAL_SUMMARY {"score":0.5}\nretry\nEVAL_SUMMARY {"score":0.9,"passed":false}\n';
+    expect(parseEvalSummary(output)).toEqual({ score: 0.9, passed: false, durationMs: null });
+  });
+
+  it('returns null for output without any eval summary', () => {
+    expect(parseEvalSummary('all checks passed\nnpm output\n')).toBeNull();
+    expect(parseEvalSummary('')).toBeNull();
+  });
 });
