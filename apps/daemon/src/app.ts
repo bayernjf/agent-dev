@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -20,6 +20,23 @@ import { DaemonEventBus } from './events.js';
 import { createTokenAuthMiddleware } from './auth.js';
 import { buildFinalDeliveryReport, buildProviderSimulationReport, buildUnifiedDeliveryReport, providerSpecsFromBlueprint, buildRealProviderReport } from './providers.js';
 import { loadCustomAgents, saveCustomAgents } from './agent-catalog.js';
+
+// Unrecognized exceptions are reported as a minimal RFC 9457 ProblemDetails
+// body (Tier0 review 2026-10-30 H2): the caught error text may carry subprocess
+// output, absolute paths or credentialed remote URLs, so callers log it
+// server-side and never echo it. Business errors that carry a user-facing
+// message keep their existing `{ error }` shape.
+const PROBLEM_TITLES: Record<number, string> = { 409: 'Conflict', 500: 'Internal Server Error' };
+
+function problemDetails(context: Context, status: number, detail: string) {
+  return {
+    type: 'about:blank',
+    title: PROBLEM_TITLES[status] ?? 'Error',
+    status,
+    detail,
+    instance: context.req.path,
+  };
+}
 
 // A Runtime executor that cannot be resolved is refused, never substituted. The refusal carries the
 // shared code because GET runtime/plan already answers 409 for "nothing approved yet": one status,
@@ -567,7 +584,12 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       });
       return context.json({ run, imported: Boolean(parsed.data.importRepositoryUrl) }, run.status === 'completed' ? 200 : 422);
     } catch (error) {
-      return context.json({ error: error instanceof Error ? error.message : 'Unable to run local Apply.' }, 409);
+      // The failure may come from git subprocesses (clone/branch) whose stderr
+      // carries absolute paths and possibly credentialed remote URLs: log it
+      // server-side only and answer with a generic ProblemDetails body
+      // (Tier0 review 2026-10-30 H2).
+      console.error(`[agent-dev] local Apply failed for project ${projectId}:`, error);
+      return context.json(problemDetails(context, 409, 'Unable to run local Apply.'), 409);
     }
   });
 

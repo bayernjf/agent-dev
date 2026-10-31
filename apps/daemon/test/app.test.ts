@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentDevStore } from '@agent-dev/storage';
 import { getAgentAdapterStatus } from '@agent-dev/agent-runtime';
 import type { DaemonDependencies } from '../src/app.js';
@@ -128,6 +128,71 @@ describe('daemon API', () => {
       projects: [{ name: 'Receipt Desk', state: 'NEEDS_INPUT' }],
     });
     await store.close();
+  });
+
+  it('answers Apply with a generic ProblemDetails body when an unknown exception escapes', async () => {
+    // Tier0 review 2026-10-30 H2: the Apply route catches git subprocess
+    // failures whose stderr carries absolute paths and possibly credentialed
+    // remote URLs; that text must stay in the server log, never the body.
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-daemon-'));
+    directories.push(directory);
+    const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { app } = createDaemonApp(store, undefined, { isAgentDetected: () => true });
+      const created = await app.request('http://localhost/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Leaky Apply',
+          answers: {
+            mode: 'professional',
+            githubOwner: 'acme',
+            supabaseOrganization: 'acme',
+            vercelTeam: 'acme',
+            cloudflareAccount: 'acme',
+          },
+        }),
+      });
+      const { project } = await created.json() as { project: { id: string } };
+      const approved = await app.request(`http://localhost/api/projects/${project.id}/baseline-plan/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPROVE_BASELINE', approvedBy: 'test-user' }),
+      });
+      expect(approved.status).toBe(200);
+
+      const leak = 'fatal: could not read Username for https://user:ghp_secrettoken@github.com: terminal prompts disabled';
+      const patched = store as unknown as { createApplyRun: () => Promise<never> };
+      const originalCreate = patched.createApplyRun;
+      patched.createApplyRun = async () => { throw new Error(leak); };
+      try {
+        const res = await app.request(`http://localhost/api/projects/${project.id}/apply`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ blueprintRevision: 1, confirmation: 'APPLY_BASELINE' }),
+        });
+        expect(res.status).toBe(409);
+        const body = await res.json() as Record<string, unknown>;
+        expect(body).toEqual({
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          detail: 'Unable to run local Apply.',
+          instance: `/api/projects/${project.id}/apply`,
+        });
+        const raw = JSON.stringify(body);
+        expect(raw).not.toContain('ghp_secrettoken');
+        expect(raw).not.toContain('could not read Username');
+        const logged = errSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n');
+        expect(logged).toContain('ghp_secrettoken');
+      } finally {
+        patched.createApplyRun = originalCreate;
+      }
+    } finally {
+      errSpy.mockRestore();
+      await store.close();
+    }
   });
 
   it('requires explicit confirmation before recording a ready baseline approval', async () => {
