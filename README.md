@@ -85,7 +85,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - Local Apply 同时生成固定 Web SaaS 工程基线：Vite/React 前端、Hono API、Cloudflare Pages、Vercel Functions 和 GitHub Actions 质量门禁；
 - Local Apply 会在隔离工作区初始化 Git 并创建 baseline commit，作为后续 feature branch/PR 流程的起点；
 - Local Apply 会从 baseline commit 创建 `feature/agent-dev/revision-N` 本地 feature 分支，并把分支与基线提交写入 `apply-manifest.json` 和 Delivery Report；
-- Local Quality Gate 可在生成工作区执行 `npm run quality`，持久化 `quality-gate.json` 与 `QUALITY_REPORT.md`，失败时返回真实退出码和命令输出，不会伪报通过；
+- Local Quality Gate 可在生成工作区执行 `npm run quality`，持久化 `quality-gate.json` 与 `QUALITY_REPORT.md`，失败时返回真实退出码和命令输出，不会伪报通过；当 Blueprint 质量契约包含 eval 检查（如 storefront 模板的 `npm run eval`）时，还会把输出中的评测分数摘要解析进 `eval-report.json`（解析缺失仅标记 absent，不改变门的结论）；
 - Studio 会检查生成工作区的 `node_modules`、TypeScript quality binary 和 lock file 状态；依赖未安装时给出本地 `npm install` 指引，并禁用质量门禁执行；
 - 依赖安装是独立的显式动作（`INSTALL_DEPENDENCIES`）：只在用户确认后运行 `npm install`，并生成 `dependency-install.json` 与 `DEPENDENCY_INSTALL_REPORT.md`；
 - Local Apply 完成后可在 Studio 创建 Feature Task，提交目标、验收标准和任务边界；人工批准后生成 `TASK_APPROVAL.md` 并提交到本地 feature 分支；
