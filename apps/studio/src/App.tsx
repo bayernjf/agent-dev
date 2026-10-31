@@ -13,14 +13,14 @@ import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-de
 import { FailureDisplay } from './components/FailureDisplay';
 import { CredentialBackendStatus } from './components/CredentialBackendStatus';
 import type {
-  Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyStep, ApplyRun, DependencyReadiness,
-  QualityGateResult, DependencyInstallResult, FeatureTask, RuntimeAttempt, RuntimeRun, GitEvidence,
+  Project, ProjectDetail, ActivityEntry, BaselineApproval, ApplyRun, DependencyReadiness,
+  QualityGateResult, DependencyInstallResult, FeatureTask, RuntimeRun, GitEvidence,
   PrEvidence, PreviewEvidence, AcceptanceRecord, ProviderPlan, ProviderVerification, AgentDescriptor,
-  AgentCapabilityProbe, AgentProfile, CredentialBackendInfo, CredentialMeta, ProjectResources, CredentialVerifyResult, PreviewStep,
-  PreviewDeploymentResult, WorkspaceVerification, ReleaseStep, ReleaseRun, ReleaseEvidence,
-  ReleaseSource, ReleasePlan, View,
+  AgentCapabilityProbe, AgentProfile, CredentialBackendInfo, CredentialMeta, ProjectResources, CredentialVerifyResult,
+  PreviewDeploymentResult, ReleaseRun, ReleaseEvidence,
+  ReleasePlan, View,
 } from './types';
-import { formatDate, answersFromBlueprint, defaultAnswers, recordApprover } from './lib/utils';
+import { formatDate, answersFromBlueprint, defaultAnswers } from './lib/utils';
 import { agentCopyKeys } from './lib/agent-copy';
 import { adapterStatusOf, canProfileRunTasks, canRunSelectedAgent, canRunTasks } from './lib/agent-selectability';
 import { nonInteractiveVerdict } from './lib/capability-verdict';
@@ -34,8 +34,6 @@ export function App() {
   const { theme, toggleTheme } = useTheme();
 
   const [view, setView] = useState<View>({ kind: 'dashboard' });
-
-  const resetView = () => setView({ kind: 'dashboard' });
 
   const providerFields = useMemo(() => [
     { key: 'GITHUB_TOKEN' as const, label: t('credentials.provider.github.label'), tutorial: 'https://github.com/settings/tokens', hint: t('credentials.provider.github.hint'), providerId: 'github' as const },
@@ -1834,8 +1832,6 @@ export function App() {
               // prompt, model and tools, they do not exercise an execution contract.
               const runnable = canProfileRunTasks(profile, agents);
               const isSelected = selectedAgentId === profile.id;
-              const isEditing = editingProfileId === profile.id;
-              const isTesting = testingProfileId === profile.id;
               return (
                 <div className={`agent-item ${isSelected ? 'selected' : ''}`} key={profile.id} style={{ cursor: runnable ? 'pointer' : 'default' }} onClick={() => { if (runnable) setSelectedAgentId(profile.id); }}>
                   <div className="agent-info">

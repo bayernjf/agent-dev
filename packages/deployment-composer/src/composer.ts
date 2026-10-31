@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { CommandRunner, CliResult } from '@agent-dev/provider-cli';
+import type { CommandRunner } from '@agent-dev/provider-cli';
 import { defaultRunner, providerCredentialEnv } from '@agent-dev/provider-cli';
 import { fetchWithRetry } from './http.js';
 import { previewProjectNames } from './names.js';

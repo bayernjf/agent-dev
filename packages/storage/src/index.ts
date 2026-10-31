@@ -9,7 +9,7 @@ import { drizzle } from 'drizzle-orm/sql-js';
 import initSqlJs, { type Database } from 'sql.js';
 import type { ProductBlueprint } from '@agent-dev/blueprint';
 import { createBaselinePlan, createDryRunPlan, productBlueprintSchema } from '@agent-dev/blueprint';
-import { buildAgentExecutionPlan, describeRuntimeExecutorRejection, executeCodexPlan, isAgentExecutable, resolveRuntimeExecutor, type CodexExecutionPlan, type CodexExecutionResult, type CodexProcessRunner, type AgentProfile, resolvePipelinePrompt, getNextPipelineStep, isPipelineComplete, type FeatureTaskPipeline, type PipelineStep, type PipelineStepResult } from '@agent-dev/agent-runtime';
+import { buildAgentExecutionPlan, describeRuntimeExecutorRejection, executeCodexPlan, isAgentExecutable, resolveRuntimeExecutor, type CodexExecutionPlan, type CodexExecutionResult, type CodexProcessRunner, resolvePipelinePrompt, getNextPipelineStep, isPipelineComplete, type FeatureTaskPipeline, type PipelineStep, type PipelineStepResult } from '@agent-dev/agent-runtime';
 import { createNeedsInputRun, restoreDeliveryActor, isEventReplay, type DeliveryEvent, type DeliverySnapshot, type DeliveryState } from '@agent-dev/workflow';
 import { applyRuns, baselineApprovals, blueprintRevisions, deliveryRuns, projects, releaseRuns } from './schema.js';
 import { migrations } from './migrations.js';
@@ -146,6 +146,82 @@ export type QualityGateResult = {
   output: string;
   workspacePath: string;
 };
+
+export type EvalReport = {
+  projectId: string;
+  blueprintRevision: number;
+  /** 'present' = a machine-readable eval summary was parsed from the gate output; 'absent' = none found. */
+  status: 'present' | 'absent';
+  command: string;
+  /** Eval score normalized to 0-1. Null when no summary was found. */
+  score: number | null;
+  /** Eval verdict: the summary flag when it provides one, otherwise the quality gate exit code. Null when absent. */
+  passed: boolean | null;
+  durationMs: number | null;
+  recordedAt: string;
+  note: string;
+};
+
+export type EvalSummary = {
+  score: number;
+  passed: boolean | null;
+  durationMs: number | null;
+};
+
+/**
+ * Best-effort parse of an eval score summary from quality gate output (FR5-4). Recognized shapes,
+ * last valid match wins:
+ *  1. `EVAL_SUMMARY {...json...}` — JSON with a numeric `score` (0-1, or 0-100 normalized), optional
+ *     boolean `passed` and numeric `durationMs`.
+ *  2. A plain `eval score: 0.87` / `eval_score=87%` line, optionally with `eval duration: 1234 ms`.
+ * Returns null when nothing parseable is present — callers must treat that as "absent" evidence and
+ * never fail the gate over it: the gate verdict follows the command exit code alone.
+ */
+export function parseEvalSummary(output: string): EvalSummary | null {
+  const lines = output.split('\n');
+  let found: EvalSummary | null = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const parsed = parseEvalSummaryLine(lines[index]!, lines[index + 1] ?? '');
+    if (parsed) found = parsed;
+  }
+  return found;
+}
+
+function parseEvalSummaryLine(line: string, nextLine = ''): EvalSummary | null {
+  const markerIndex = line.indexOf('EVAL_SUMMARY');
+  if (markerIndex >= 0) {
+    const json = line.slice(markerIndex + 'EVAL_SUMMARY'.length).trim();
+    if (json.startsWith('{')) {
+      try {
+        const data = JSON.parse(json) as Record<string, unknown>;
+        const score = normalizeEvalScore(data.score);
+        if (score !== null) {
+          return {
+            score,
+            passed: typeof data.passed === 'boolean' ? data.passed : null,
+            durationMs: typeof data.durationMs === 'number' && Number.isFinite(data.durationMs) && data.durationMs >= 0 ? data.durationMs : null,
+          };
+        }
+      } catch {
+        // Fall through to the plain-score line parsing below.
+      }
+    }
+  }
+  const scoreMatch = /eval[\s_-]*score\s*[:=]\s*(\d+(?:\.\d+)?)\s*%?/i.exec(line);
+  if (!scoreMatch) return null;
+  const score = normalizeEvalScore(Number(scoreMatch[1]));
+  if (score === null) return null;
+  // Suites that print the summary as plain lines usually put the duration right after the score.
+  const durationMatch = /eval[\s_-]*(?:duration|took)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*ms/i.exec(line) ?? /eval[\s_-]*(?:duration|took)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*ms/i.exec(nextLine);
+  return { score, passed: null, durationMs: durationMatch ? Number(durationMatch[1]) : null };
+}
+
+function normalizeEvalScore(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  // Suites may report a 0-1 fraction or a 0-100 percentage; normalize to 0-1.
+  const normalized = value > 1 ? value / 100 : value;
+  return normalized <= 1 ? Math.round(normalized * 1000) / 1000 : null;
+}
 
 export type DependencyReadiness = {
   status: 'not-applied' | 'missing-dependencies' | 'ready';
@@ -798,15 +874,54 @@ export class AgentDevStore {
       output,
       workspacePath: run.workspacePath,
     };
+    // FR5-4: when the Blueprint's quality contract declares an eval check, parse the eval score
+    // summary from the gate output into eval-report.json. Parsing is best-effort: a missing or
+    // malformed summary marks the report absent and never changes the gate verdict, which follows
+    // the quality command exit code alone.
+    const evalRequired = this.getProject(projectId)?.blueprint.spec.quality.required.includes('eval') ?? false;
+    const evalReport = evalRequired ? this.buildEvalReport(projectId, blueprintRevision, output, exitCode) : null;
     await writeFile(join(run.workspacePath, 'quality-gate.json'), JSON.stringify(result, null, 2) + '\n', 'utf8');
-    await writeFile(join(run.workspacePath, 'QUALITY_REPORT.md'), this.buildQualityReport(result), 'utf8');
+    await writeFile(join(run.workspacePath, 'QUALITY_REPORT.md'), this.buildQualityReport(result, evalReport), 'utf8');
+    if (evalReport) {
+      await writeFile(join(run.workspacePath, 'eval-report.json'), JSON.stringify(evalReport, null, 2) + '\n', 'utf8');
+    }
     try {
-      await execFileAsync('git', ['add', 'quality-gate.json', 'QUALITY_REPORT.md'], { cwd: run.workspacePath });
+      await execFileAsync('git', ['add', 'quality-gate.json', 'QUALITY_REPORT.md', ...(evalReport ? ['eval-report.json'] : [])], { cwd: run.workspacePath });
       await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `chore: record quality gate ${status}`], { cwd: run.workspacePath });
     } catch {
       // The report remains available even if the local Git evidence commit cannot be created.
     }
     return result;
+  }
+
+  private buildEvalReport(projectId: string, blueprintRevision: number, output: string, exitCode: number): EvalReport {
+    const command = 'npm run eval';
+    const recordedAt = new Date().toISOString();
+    const summary = parseEvalSummary(output);
+    if (!summary) {
+      return {
+        projectId,
+        blueprintRevision,
+        status: 'absent',
+        command,
+        score: null,
+        passed: null,
+        durationMs: null,
+        recordedAt,
+        note: 'No eval summary was found in the quality gate output. The gate verdict follows the quality command exit code.',
+      };
+    }
+    return {
+      projectId,
+      blueprintRevision,
+      status: 'present',
+      command,
+      score: summary.score,
+      passed: summary.passed ?? (exitCode === 0),
+      durationMs: summary.durationMs,
+      recordedAt,
+      note: 'Score parsed from the eval summary in the quality gate output; the gate verdict follows the quality command exit code.',
+    };
   }
 
   async getDependencyReadiness(projectId: string, blueprintRevision: number): Promise<DependencyReadiness> {
@@ -830,6 +945,17 @@ export class AgentDevStore {
     if (!run) return null;
     try {
       return JSON.parse(await readFile(join(run.workspacePath, 'quality-gate.json'), 'utf8')) as QualityGateResult;
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  async getEvalReport(projectId: string, blueprintRevision: number): Promise<EvalReport | null> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run) return null;
+    try {
+      return JSON.parse(await readFile(join(run.workspacePath, 'eval-report.json'), 'utf8')) as EvalReport;
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
       throw error;
@@ -1303,6 +1429,7 @@ export class AgentDevStore {
     const task = await this.getFeatureTask(projectId, blueprintRevision);
     if (!task || task.status !== 'approved') throw new Error('Approve a Feature Task before submitting acceptance.');
     const quality = await this.getQualityGateResult(projectId, blueprintRevision);
+    const evalReport = await this.getEvalReport(projectId, blueprintRevision);
     const gitEvidence = await this.getGitEvidence(projectId, blueprintRevision);
     const submittedAt = new Date().toISOString();
     const status: AcceptanceRecord['status'] = quality?.status === 'passed' && criteriaConfirmed ? 'ready' : 'blocked';
@@ -1310,7 +1437,7 @@ export class AgentDevStore {
     const run = this.getLatestApplyRun(projectId, blueprintRevision);
     if (!run) throw new Error('A completed Local Apply run is required before submitting acceptance.');
     await writeFile(join(run.workspacePath, 'acceptance.json'), JSON.stringify(record, null, 2) + '\n', 'utf8');
-    await writeFile(join(run.workspacePath, 'ACCEPTANCE_REPORT.md'), this.buildAcceptanceReport(record), 'utf8');
+    await writeFile(join(run.workspacePath, 'ACCEPTANCE_REPORT.md'), this.buildAcceptanceReport(record, evalReport), 'utf8');
     await execFileAsync('git', ['add', 'acceptance.json', 'ACCEPTANCE_REPORT.md'], { cwd: run.workspacePath });
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `acceptance: ${status}`], { cwd: run.workspacePath });
     return record;
@@ -1336,7 +1463,7 @@ export class AgentDevStore {
     const run = this.getLatestApplyRun(projectId, blueprintRevision);
     if (!run) throw new Error('A completed Local Apply run is required before approving delivery.');
     await writeFile(join(run.workspacePath, 'acceptance.json'), JSON.stringify(record, null, 2) + '\n', 'utf8');
-    await writeFile(join(run.workspacePath, 'ACCEPTANCE_REPORT.md'), this.buildAcceptanceReport(record), 'utf8');
+    await writeFile(join(run.workspacePath, 'ACCEPTANCE_REPORT.md'), this.buildAcceptanceReport(record, await this.getEvalReport(projectId, blueprintRevision)), 'utf8');
     await execFileAsync('git', ['add', 'acceptance.json', 'ACCEPTANCE_REPORT.md'], { cwd: run.workspacePath });
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `acceptance: approve delivery`], { cwd: run.workspacePath });
     // Local approval closes implementation and local verification only. A real
@@ -1369,16 +1496,18 @@ export class AgentDevStore {
     if (!lockCommitted) throw new Error('Install dependencies before opening a pull request: the generated workflow runs `npm ci`, which needs a committed package-lock.json.');
 
     const quality = await this.getQualityGateResult(projectId, blueprintRevision);
+    const evalReport = await this.getEvalReport(projectId, blueprintRevision);
     const published = await publisher({
       branch: git.branch,
       base: project.blueprint.spec.sourceControl.integrationBranch,
       title: task.title,
-      body: `${acceptance.summary}\n\nAccepted commit: ${acceptance.gitEvidence.head}\nQuality gate: ${quality?.status ?? 'missing'} (${quality?.command ?? 'not run'})\n\nEvidence lives in ACCEPTANCE_REPORT.md, QUALITY_REPORT.md and RUNTIME_RUN_REPORT.md on this branch.`,
+      body: `${acceptance.summary}\n\nAccepted commit: ${acceptance.gitEvidence.head}\nQuality gate: ${quality?.status ?? 'missing'} (${quality?.command ?? 'not run'})\n\nEvidence lives in ACCEPTANCE_REPORT.md, QUALITY_REPORT.md and RUNTIME_RUN_REPORT.md${evalReport ? ', with eval scoring in eval-report.json' : ''} on this branch.`,
     });
     return this.recordPrEvidence(projectId, blueprintRevision, {
       url: published.url,
       checks: [
         `Local quality gate: ${quality?.status ?? 'missing'} (${quality?.command ?? 'not run'}, exit ${quality?.exitCode ?? 'none'})`,
+        ...(evalReport ? [`Local eval evidence: ${evalReport.status === 'present' ? `score ${evalReport.score}, ${evalReport.passed === null ? 'verdict not reported' : evalReport.passed ? 'passed' : 'failed'}` : 'summary absent'} (eval-report.json)`] : []),
         `Human acceptance: approved by ${acceptance.approvedBy ?? 'unknown'}`,
         `Pushed commit: ${published.head}`,
         'GitHub Actions: pending at pull request creation',
@@ -1669,8 +1798,18 @@ export class AgentDevStore {
     return `# ${projectName} Delivery Report\n\n- Blueprint revision: ${run.blueprintRevision}\n- Apply run: ${run.id}\n- Status: ${status}\n- Workspace: ${run.workspacePath}\n- Local feature branch: ${featureBranch}\n- External writes: none\n\n## Local evidence\n\n| Step | Result | Detail |\n| --- | --- | --- |\n${stepRows}\n\n## External actions not executed\n\n- No GitHub repository or remote branch was created.\n- No Supabase project, schema, or Auth configuration was changed.\n- No Vercel deployment was created.\n- No Cloudflare Pages project or deployment was created.\n\n## Recovery and rollback\n\nThis report describes the Local Apply Simulator only. Delete the ignored workspace directory to remove its generated files. A future provider Apply must provide idempotency keys, a provider diff, and an explicit rollback plan before executing remote writes.\n`;
   }
 
-  private buildQualityReport(result: QualityGateResult) {
-    return `# Quality Gate Report\n\n- Status: ${result.status}\n- Command: \`${result.command}\`\n- Exit code: ${result.exitCode}\n- Blueprint revision: ${result.blueprintRevision}\n- Started: ${result.startedAt}\n- Completed: ${result.completedAt}\n\n## Output\n\n\`\`\`text\n${result.output || '(no output)'}\n\`\`\`\n\n## Boundary\n\nThis report was produced by the local Agent-Dev quality gate. A passed local gate does not replace GitHub Actions or human acceptance testing.\n`;
+  private buildQualityReport(result: QualityGateResult, evalReport: EvalReport | null) {
+    const evalSection = evalReport ? `\n${this.buildEvalEvidenceSection(evalReport)}\n` : '\n';
+    return `# Quality Gate Report\n\n- Status: ${result.status}\n- Command: \`${result.command}\`\n- Exit code: ${result.exitCode}\n- Blueprint revision: ${result.blueprintRevision}\n- Started: ${result.startedAt}\n- Completed: ${result.completedAt}\n\n## Output\n\n\`\`\`text\n${result.output || '(no output)'}\n\`\`\`\n${evalSection}\n## Boundary\n\nThis report was produced by the local Agent-Dev quality gate. A passed local gate does not replace GitHub Actions or human acceptance testing.\n`;
+  }
+
+  private buildEvalEvidenceSection(report: EvalReport) {
+    if (report.status !== 'present') {
+      return `## Eval evidence\n\n- Command: \`${report.command}\`\n- Summary: absent — no eval summary was found in the gate output\n- Evidence: eval-report.json\n\nThe missing summary does not soften the gate: the verdict follows the quality command exit code alone.\n`;
+    }
+    const passed = report.passed === null ? 'not reported' : report.passed ? 'yes' : 'no';
+    const duration = report.durationMs !== null ? `\n- Duration: ${report.durationMs} ms` : '';
+    return `## Eval evidence\n\n- Command: \`${report.command}\`\n- Score: ${report.score}\n- Passed: ${passed}${duration}\n- Evidence: eval-report.json\n\nEval scoring is recorded as evidence only; the gate verdict follows the quality command exit code.\n`;
   }
 
   private buildDependencyInstallReport(result: DependencyInstallResult) {
@@ -1702,9 +1841,16 @@ export class AgentDevStore {
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', commitMessage], { cwd: run.plan.workspacePath });
   }
 
-  private buildAcceptanceReport(record: AcceptanceRecord) {
+  private buildAcceptanceReport(record: AcceptanceRecord, evalReport: EvalReport | null) {
     const blockers = [record.qualityStatus !== 'passed' ? `Quality Gate status is ${record.qualityStatus}.` : '', !record.criteriaConfirmed ? 'Human acceptance criteria confirmation is missing.' : ''].filter(Boolean);
-    return `# Acceptance Report\n\n- Status: ${record.status}\n- Task: ${record.taskId}\n- Blueprint revision: ${record.blueprintRevision}\n- Quality Gate: ${record.qualityStatus}\n- Criteria confirmed: ${record.criteriaConfirmed}\n- Submitted: ${record.submittedAt}\n${record.approvedBy ? `- Approved by: ${record.approvedBy}\n- Approved at: ${record.approvedAt}\n` : ''}\n## Summary\n\n${record.summary}\n\n## Git evidence\n\n- Branch: ${record.gitEvidence.branch}\n- HEAD: ${record.gitEvidence.head}\n- Working tree: ${record.gitEvidence.status || 'clean'}\n- Diff: ${record.gitEvidence.diffStat || 'no changes'}\n\n## Blockers\n\n${blockers.length ? blockers.map(item => `- ${item}`).join('\n') : '- None'}\n\nThis report is the local human acceptance boundary. It does not claim a production deployment.\n`;
+    return `# Acceptance Report\n\n- Status: ${record.status}\n- Task: ${record.taskId}\n- Blueprint revision: ${record.blueprintRevision}\n- Quality Gate: ${record.qualityStatus}\n- ${this.buildEvalEvidenceLine(evalReport)}\n- Criteria confirmed: ${record.criteriaConfirmed}\n- Submitted: ${record.submittedAt}\n${record.approvedBy ? `- Approved by: ${record.approvedBy}\n- Approved at: ${record.approvedAt}\n` : ''}\n## Summary\n\n${record.summary}\n\n## Git evidence\n\n- Branch: ${record.gitEvidence.branch}\n- HEAD: ${record.gitEvidence.head}\n- Working tree: ${record.gitEvidence.status || 'clean'}\n- Diff: ${record.gitEvidence.diffStat || 'no changes'}\n\n## Blockers\n\n${blockers.length ? blockers.map(item => `- ${item}`).join('\n') : '- None'}\n\nThis report is the local human acceptance boundary. It does not claim a production deployment.\n`;
+  }
+
+  private buildEvalEvidenceLine(evalReport: EvalReport | null) {
+    if (!evalReport) return 'Eval evidence: none recorded (eval-report.json is written when the Blueprint quality contract includes an eval check)';
+    if (evalReport.status !== 'present') return `Eval evidence: \`${evalReport.command}\` — summary absent (eval-report.json); the gate verdict follows the quality gate exit code`;
+    const passed = evalReport.passed === null ? 'not reported' : evalReport.passed ? 'passed' : 'failed';
+    return `Eval evidence: \`${evalReport.command}\` — score ${evalReport.score}, ${passed} (eval-report.json)`;
   }
 
   private async persist() {

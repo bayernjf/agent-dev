@@ -137,7 +137,11 @@ export const productBlueprintSchema = z.object({
       secretChangesRequireApproval: z.literal(true),
     }),
     quality: z.object({
-      required: z.array(z.enum(['lint', 'typecheck', 'unit', 'build', 'smoke', 'rust-check'])),
+      // 'eval' marks a baseline evaluation command: its output must carry a machine-readable
+      // score summary (EVAL_SUMMARY {...} or an `eval-score: <0-1>` line) that the Agent-Dev
+      // Quality Gate parses into eval-report.json (FR5-4). The gate verdict still follows the
+      // command exit code, never the parsed score.
+      required: z.array(z.enum(['lint', 'typecheck', 'unit', 'build', 'smoke', 'rust-check', 'eval'])),
     }),
   }),
 });
@@ -168,7 +172,9 @@ const QUALITY_CHECKS: Record<string, ProductBlueprint['spec']['quality']['requir
   'api-tool': ['lint', 'typecheck', 'unit', 'build'],
   // Storefront is a skeleton: build assembles the SSR page set and smoke asserts the profile-specific
   // markers. No astro/supabase install is required for the gate to go green (see scripts/build.mjs).
-  'storefront': ['build', 'smoke'],
+  // eval runs the shipped baseline runner (scripts/eval-run.mjs --baseline); the platform Quality
+  // Gate parses its EVAL_SUMMARY output into eval-report.json without ever softening the verdict.
+  'storefront': ['build', 'smoke', 'eval'],
 };
 
 export function qualityChecksFor(productType: string, desktopShell = 'tauri'): ProductBlueprint['spec']['quality']['required'] {

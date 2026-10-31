@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, readFile, rm, mkdir } from 'node:fs/promises';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { mkdtemp, readFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CommandRunner, CliResult } from '@agent-dev/provider-cli';

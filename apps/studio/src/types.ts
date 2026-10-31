@@ -1,5 +1,4 @@
-import type { BaselinePlan, BlueprintAnswers, DryRunPlan, ProductBlueprint } from '@agent-dev/blueprint';
-import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
+import type { ProductBlueprint } from '@agent-dev/blueprint';
 import type { DeliveryState } from '@agent-dev/workflow';
 
 export type Project = {

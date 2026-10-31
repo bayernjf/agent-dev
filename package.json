@@ -17,6 +17,7 @@
     "dev": "concurrently -k -n daemon,studio -c cyan,magenta \"npm run dev -w @agent-dev/daemon\" \"npm run dev -w @agent-dev/studio\"",
     "build": "npm run typecheck && npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
     "test": "vitest run",
     "doctor": "tsx -e \"import { runDoctor, formatDoctorSummary } from './packages/agent-runtime/src/doctor.ts'; const report = await runDoctor(); console.log(formatDoctorSummary(report));\"",
     "install:macos": "bash scripts/install-macos.sh",
@@ -27,8 +28,11 @@
   "devDependencies": {
     "@types/node": "^22.15.3",
     "concurrently": "^9.1.2",
+    "eslint": "^9.39.5",
+    "globals": "^15.15.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3",
+    "typescript-eslint": "^8.72.1",
     "vitest": "^3.1.2",
     "wrangler": "^4.120.0"
   }
