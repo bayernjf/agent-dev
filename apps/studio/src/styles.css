@@ -164,7 +164,9 @@ nav { display: grid; gap: 6px; margin-top: 46px; }
   cursor: pointer;
 }
 
-.locale-switcher button.active { background: var(--accent); color: #fff; }
+/* 选中态文字用近黑：白字 on --accent 实测 2.77:1（暗主题）/3.45:1（亮主题），
+   近黑在两主题 accent 上分别约 6.8:1 与 5.4:1，均过 WCAG AA。 */
+.locale-switcher button.active { background: var(--accent); color: #0b1220; }
 .locale-switcher button:not(.active):hover { background: var(--surface-muted); }
 
 .theme-switch {
