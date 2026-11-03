@@ -409,15 +409,43 @@ describe('local credential and resource files', () => {
     }
   });
 
-  it('persists project resources and generates an application env file', async () => {
+  it('persists project resources and generates an application env file without credentials', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-resources-'));
     try {
       writeProjectResources(directory, 'demo', 'project-1', 1, 'vercel', { projectId: 'prj_demo', productionUrl: 'https://demo.example' });
       const resources = loadProjectResources(directory);
       expect(resources?.providers.vercel).toMatchObject({ projectId: 'prj_demo' });
       generateEnvFile(directory, { OPENAI_API_KEY: 'fixture-key' }, resources, 'demo');
-      await expect(readFile(join(directory, '.env'), 'utf8')).resolves.toContain('OPENAI_API_KEY=fixture-key');
-      await expect(readFile(join(directory, '.env'), 'utf8')).resolves.toContain('VERCEL_PROJECT_ID=prj_demo');
+      const env = await readFile(join(directory, '.env'), 'utf8');
+      // P1-1 (2026-11-02 review): the workspace .env is whitelist-based and the
+      // allowlist is empty -- no stored credential may reach the agent workspace.
+      expect(env).not.toContain('OPENAI_API_KEY');
+      expect(env).not.toContain('fixture-key');
+      expect(env).toContain('VERCEL_PROJECT_ID=prj_demo');
+      expect(env).toContain('APP_NAME=demo');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('never writes service-role or user-defined credentials into the workspace env', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-env-allowlist-'));
+    try {
+      generateEnvFile(
+        directory,
+        {
+          SUPABASE_SERVICE_ROLE_KEY: 'fixture-service-role',
+          GITHUB_WEBHOOK_SECRET: 'fixture-webhook',
+          MY_CUSTOM_CREDENTIAL: 'fixture-custom',
+        },
+        null,
+        'demo'
+      );
+      const env = await readFile(join(directory, '.env'), 'utf8');
+      expect(env).not.toContain('fixture-service-role');
+      expect(env).not.toContain('fixture-webhook');
+      expect(env).not.toContain('fixture-custom');
+      expect(env).not.toContain('SUPABASE_SERVICE_ROLE_KEY');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
