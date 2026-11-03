@@ -1,13 +1,13 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import initSqlJs from 'sql.js';
 import { createBlueprint, createDefaultBlueprint } from '@agent-dev/blueprint';
-import { AgentDevStore, parseEvalSummary } from '../src/index.js';
+import { AgentDevStore, ProfileStore, parseEvalSummary } from '../src/index.js';
 import { migrations } from '../src/migrations.js';
 
 const require = createRequire(import.meta.url);
@@ -853,5 +853,72 @@ describe('parseEvalSummary', () => {
   it('returns null for output without any eval summary', () => {
     expect(parseEvalSummary('all checks passed\nnpm output\n')).toBeNull();
     expect(parseEvalSummary('')).toBeNull();
+  });
+});
+
+describe('storage durability hardening (2026-11-02 review P2-1 / P3-8)', () => {
+  it('persist replaces the database atomically and leaves no temp files behind', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-atomic-'));
+    const databasePath = join(directory, 'agent-dev.sqlite');
+    try {
+      const store = await AgentDevStore.open(databasePath);
+      await store.createProject({ name: 'Receipt Desk', blueprint: createDefaultBlueprint('receipt-desk') });
+      await store.close();
+
+      const entries = await readdir(directory);
+      expect(entries.filter(name => name.includes('.tmp-'))).toEqual([]);
+
+      const reopened = await AgentDevStore.open(databasePath);
+      expect(reopened.listProjects()).toHaveLength(1);
+      await reopened.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  });
+
+  it('ProfileStore degrades a corrupted file to an empty list but refuses to overwrite it', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-profiles-'));
+    try {
+      const profilePath = join(directory, 'agent-profiles.json');
+      await writeFile(profilePath, '[{"id": "broken"', 'utf8');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const store = new ProfileStore(directory);
+        expect(await store.listProfiles()).toEqual([]);
+        expect(warn).toHaveBeenCalledOnce();
+        await expect(store.createProfile({ name: 'Test Profile', baseAgentId: 'claude-code' })).rejects.toThrow(/corrupted/);
+        // The damaged bytes survive: overwriting them is the data loss.
+        expect(await readFile(profilePath, 'utf8')).toBe('[{"id": "broken"');
+      } finally {
+        warn.mockRestore();
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('ProfileStore treats a non-array JSON file as corrupted and recovers after repair', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-profiles-shape-'));
+    try {
+      const profilePath = join(directory, 'agent-profiles.json');
+      await writeFile(profilePath, '{"not":"an array"}', 'utf8');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const store = new ProfileStore(directory);
+        expect(await store.listProfiles()).toEqual([]);
+        await expect(store.createProfile({ name: 'Test Profile', baseAgentId: 'claude-code' })).rejects.toThrow(/corrupted/);
+
+        // Manual repair: a fresh store over a healthy file works again.
+        await writeFile(profilePath, '[]', 'utf8');
+        const repaired = new ProfileStore(directory);
+        const created = await repaired.createProfile({ name: 'Test Profile', baseAgentId: 'claude-code' });
+        expect(created.validation.valid).toBe(true);
+        expect(await repaired.listProfiles()).toHaveLength(1);
+      } finally {
+        warn.mockRestore();
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
