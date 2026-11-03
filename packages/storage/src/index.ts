@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
-import { lstat, readlink, access, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { lstat, readlink, access, mkdir, readFile, rename, writeFile, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/sql-js';
@@ -1855,7 +1855,14 @@ export class AgentDevStore {
 
   private async persist() {
     await mkdir(dirname(this.databasePath), { recursive: true });
-    await writeFile(this.databasePath, this.sqlite.export());
+    // Atomic replace (2026-11-02 review P2-1): the daemon lives for days and a
+    // single agent run can take 15 minutes, so an in-place write killed mid-way
+    // truncated agent-dev.sqlite and the store could never open again. Write to
+    // a temp file and rename over the database instead — a rename either
+    // happens fully or not at all, so the live file is never half-written.
+    const tmpPath = `${this.databasePath}.tmp-${process.pid}`;
+    await writeFile(tmpPath, this.sqlite.export());
+    await rename(tmpPath, this.databasePath);
   }
 }
 
