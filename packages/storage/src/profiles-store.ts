@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
   type AgentProfile,
@@ -39,6 +39,8 @@ export type ProfileValidationResult = {
 export class ProfileStore {
   private readonly filePath: string;
   private cache: AgentProfile[] | null = null;
+  /** Set when the on-disk file failed to parse; writes are refused afterwards. */
+  private corrupted = false;
 
   constructor(dataDirectory: string) {
     this.filePath = join(dataDirectory, 'agent-profiles.json');
@@ -171,27 +173,53 @@ export class ProfileStore {
   }
 
   private async loadFromDisk(): Promise<AgentProfile[]> {
+    let raw: string;
     try {
-      const raw = await readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .map(item => {
-          try {
-            return agentProfileSchema.parse(item);
-          } catch {
-            return null;
-          }
-        })
-        .filter((p): p is AgentProfile => p !== null);
+      raw = await readFile(this.filePath, 'utf8');
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
       throw error;
     }
+    // Corruption policy (2026-11-02 review P3-8, same family as the credential
+    // store P1-2 fix): a damaged profiles file must not 500 every profile
+    // route, so reads degrade to an empty list with a loud warning — but
+    // saveToDisk refuses to run afterwards, so the damaged bytes are never
+    // silently overwritten by the next write.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = undefined;
+    }
+    if (!Array.isArray(parsed)) {
+      this.corrupted = true;
+      console.warn(
+        `[ProfileStore] ${this.filePath} is corrupted or not a JSON array; serving an empty profile list and refusing writes until the file is repaired or removed`,
+      );
+      return [];
+    }
+    return parsed
+      .map(item => {
+        try {
+          return agentProfileSchema.parse(item);
+        } catch {
+          return null;
+        }
+      })
+      .filter((p): p is AgentProfile => p !== null);
   }
 
   private async saveToDisk(profiles: AgentProfile[]): Promise<void> {
+    if (this.corrupted) {
+      throw new Error(
+        `Refusing to overwrite ${this.filePath}: the existing profiles file is corrupted. Repair or remove it manually, then retry.`,
+      );
+    }
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(profiles, null, 2) + '\n', 'utf8');
+    // Atomic replace, same shape as the store persist fix: a crash mid-write
+    // must not leave a truncated profiles file behind.
+    const tmpPath = `${this.filePath}.tmp-${process.pid}`;
+    await writeFile(tmpPath, JSON.stringify(profiles, null, 2) + '\n', 'utf8');
+    await rename(tmpPath, this.filePath);
   }
 }
