@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { InfisicalBackend } from '../src/index.js';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { InfisicalBackend, LocalFileBackend } from '../src/index.js';
 import type { CliOptions, CliResult, CommandRunner } from '../src/cli.js';
 
 const ok = (stdout = ''): CliResult => ({ stdout, stderr: '', exitCode: 0, success: true });
@@ -267,5 +271,95 @@ describe('InfisicalBackend (CLI path)', () => {
     const rotated = await backend.rotate('GITHUB_TOKEN', 'rotated-value');
     expect(rotated.value).toBe('rotated-value');
     expect(calls.some(call => call.args.includes('GITHUB_TOKEN=rotated-value'))).toBe(true);
+  });
+});
+
+// P1-2 (2026-11-02 review): a corrupted credentials.json used to be read as an
+// empty store, so the next set() overwrote the file and silently destroyed
+// every stored credential. The backend now fails closed and keeps a .bak
+// rolling backup behind every atomic replace.
+describe('LocalFileBackend (corruption safety)', () => {
+  const localBackend = (dir: string) =>
+    new LocalFileBackend({ type: 'local-file', options: { path: join(dir, 'credentials.json') } });
+
+  it('fails closed on a corrupted store: reads and writes reject, the file is left untouched', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-dev-corrupt-'));
+    try {
+      const file = join(dir, 'credentials.json');
+      await writeFile(file, '{"version":1,"secrets":{"GITHUB_TOKEN', 'utf8');
+      const backend = localBackend(dir);
+
+      await expect(backend.listKeys()).rejects.toThrow(/corrupted/);
+      await expect(backend.get('GITHUB_TOKEN')).rejects.toThrow(/corrupted/);
+      await expect(backend.set('NEW_KEY', 'fixture-value')).rejects.toThrow(/corrupted/);
+
+      // The damaged bytes must survive: overwriting them is the data loss.
+      expect(await readFile(file, 'utf8')).toBe('{"version":1,"secrets":{"GITHUB_TOKEN');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a truncated (empty) store and a JSON value with the wrong shape', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-dev-corrupt-shape-'));
+    try {
+      const file = join(dir, 'credentials.json');
+      await writeFile(file, '', 'utf8');
+      await expect(localBackend(dir).listKeys()).rejects.toThrow(/corrupted/);
+      await writeFile(file, '[]', 'utf8');
+      await expect(localBackend(dir).listKeys()).rejects.toThrow(/corrupted/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes go through a backup: the previous store is recoverable from .bak', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-dev-backup-'));
+    try {
+      const backend = localBackend(dir);
+      await backend.set('FIRST_KEY', 'fixture-one');
+      await backend.set('SECOND_KEY', 'fixture-two');
+
+      const backup = JSON.parse(await readFile(join(dir, 'credentials.json.bak'), 'utf8')) as {
+        secrets: Record<string, { value: string }>;
+      };
+      expect(backup.secrets.FIRST_KEY?.value).toBe('fixture-one');
+      expect(backup.secrets.SECOND_KEY).toBeUndefined();
+      expect(await backend.get('SECOND_KEY')).toBe('fixture-two');
+      expect(await backend.listKeys()).toEqual(['FIRST_KEY', 'SECOND_KEY']);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves no temp files behind after a successful write', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-dev-atomic-'));
+    try {
+      const backend = localBackend(dir);
+      await backend.set('FIRST_KEY', 'fixture-one');
+      expect(existsSync(join(dir, 'credentials.json'))).toBe(true);
+      const leftover = (await readdir(dir)).filter((name) => name.includes('.tmp-'));
+      expect(leftover).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers after manual repair: a fixed store reads and writes again', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-dev-repair-'));
+    try {
+      const backend = localBackend(dir);
+      await backend.set('FIRST_KEY', 'fixture-one');
+      const good = await readFile(join(dir, 'credentials.json'), 'utf8');
+
+      const file = join(dir, 'credentials.json');
+      await writeFile(file, 'not json at all', 'utf8');
+      await expect(backend.listKeys()).rejects.toThrow(/corrupted/);
+
+      await writeFile(file, good, 'utf8');
+      expect(await backend.get('FIRST_KEY')).toBe('fixture-one');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
