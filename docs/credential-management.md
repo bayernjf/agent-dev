@@ -293,48 +293,29 @@ await writeProjectResources(workspacePath, providerId, result.state);
 
 路径：`<workspace>/.env`
 
-从 Layer 1（credentials.txt）和 Layer 2（project-resources.json）合并派生：
+**白名单契约（2026-11-02 评审 P1-1 后生效）**：工作区 `.env` 只包含
+`APP_NAME`、`NODE_ENV` 和 Layer 2（project-resources.json）中键名不含敏感
+字样的资源标识/URL。**Layer 1 的凭证（credentials）一律不写入**——Agent
+以绕过权限的模式（--yolo 等）在工作区运行，明文密钥落盘即可被读取/外发。
+某键确需进入工作区时，必须先在 Env Contract 中把 classification 定为
+非 secret，再加入 `env-generator.ts` 的 `WORKSPACE_CREDENTIAL_ALLOWLIST`。
 
 ```ini
 # .env（由 Agent-Dev 自动生成，请勿手动修改）
-# 生成时间：2026-08-08 03:05:00
-
-# ===== Provider Resource IDs（来自 project-resources.json）=====
-
-# GitHub
-GIT_REPOSITORY_URL=https://github.com/bayernjf/my-todo-app
-GIT_OWNER=bayernjf
-GIT_REPOSITORY=my-todo-app
-
-# Vercel
-VERCEL_PROJECT_ID=prj_abc123def456
-VERCEL_ORG_ID=team_xxxxxxxxxxxx
-VERCEL_PROJECT_NAME=my-todo-app
-VERCEL_URL=https://my-todo-app-bayernjfs-projects.vercel.app
-VERCEL_PREVIEW_URL=https://my-todo-app-git-dev-bayernjfs-projects.vercel.app
-
-# Cloudflare
-CLOUDFLARE_ACCOUNT_ID=23afa7f0233653f87dc9ceafd02eb79a
-CLOUDFLARE_PROJECT_NAME=my-todo-app
-CLOUDFLARE_PAGES_URL=https://my-todo-app.pages.dev
-
-# Supabase
-SUPABASE_URL=https://abcdefghijkl.supabase.co
-SUPABASE_ANON_KEY=<jwt-anon-key-placeholder>
-SUPABASE_PROJECT_REF=abcdefghijkl
-DATABASE_URL=postgresql://postgres:password@db.abcdefghijkl.supabase.co:5432/postgres
-
-# ===== Third-party API Keys（来自 credentials.txt）=====
-
-OPENAI_API_KEY=<your-openai-key>
-STRIPE_SECRET_KEY=<your-stripe-secret-key>
-RESEND_API_KEY=<your-resend-key>
-
-# ===== App Config =====
 
 APP_NAME=my-todo-app
 NODE_ENV=development
+
+# Provider 资源标识（来自 project-resources.json，键名含
+# key|token|secret|password|database|connection 的值一律跳过）
+VERCEL_PROJECT_ID=prj_abc123def456
+VERCEL_URL=https://my-todo-app-bayernjfs-projects.vercel.app
+CLOUDFLARE_ACCOUNT_ID=23afa7f0233653f87dc9ceafd02eb79a
+SUPABASE_URL=https://abcdefghijkl.supabase.co
 ```
+
+第三方 API Key（OPENAI_API_KEY 等）与 SUPABASE_ANON_KEY、DATABASE_URL
+不再由平台写入工作区 .env；应用确需时由开发者按 §5.2 模板手动维护。
 
 ### 5.2 .env.example 模板
 

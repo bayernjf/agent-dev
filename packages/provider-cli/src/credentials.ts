@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { defaultRunner } from './cli.js';
@@ -93,7 +93,12 @@ export async function saveCredentials(credentials: Credentials): Promise<void> {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const lines = ['# Agent-Dev credentials. Never commit or share this file.', `# Updated: ${new Date().toISOString()}`, ''];
   for (const [key, value] of Object.entries(credentials).sort(([a], [b]) => a.localeCompare(b))) lines.push(`${key}=${value}`);
-  writeFileSync(path, `${lines.join('\n')}\n`, { mode: 0o600 });
+  // Atomic replace (same shape as the JSON store fix, 2026-11-02 review P1-2
+  // family): a crash mid-write must never truncate the live credentials file,
+  // because the line-based reader would silently drop the missing tail keys.
+  const tmpPath = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmpPath, `${lines.join('\n')}\n`, { mode: 0o600 });
+  renameSync(tmpPath, path);
   chmodSync(path, 0o600);
   const meta: CredentialMeta = { version: 1, updatedAt: new Date().toISOString(), keys: Object.keys(credentials).sort() };
   writeFileSync(metaPath(), `${JSON.stringify(meta, null, 2)}\n`, { mode: 0o600 });

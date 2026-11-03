@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { discoverAgentRuntimes, resolveExecutablePath } from '../src/index.js';
+import { discoverAgentRuntimes, resolveExecutablePath, resolveProbeExecutable } from '../src/index.js';
 
 describe('agent runtime catalog', () => {
   // What is under test is the filter: a built-in this machine does not have is not returned at all,
@@ -137,5 +137,65 @@ describe('agent runtime catalog', () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+// 2026-11-02 review P2-3: probes run with shell:true on Windows, so the raw
+// launchCommand string used to reach cmd.exe uninterpreted-safe only for its
+// arguments, never for the command itself. The probes now spawn the resolved
+// executable instead.
+describe('probe executable resolution (P2-3)', () => {
+  it('spawns the resolved executable and drops any shell tail in the configured command', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-probe-target-'));
+    try {
+      await writeFile(join(directory, 'probe-target-p2'), '#!/bin/sh\necho 9.9.9\n', 'utf8');
+      await chmod(join(directory, 'probe-target-p2'), 0o755);
+      const originalPath = process.env.PATH;
+      process.env.PATH = directory;
+      const spawned: string[] = [];
+      const recordingSpawn = ((file: string) => {
+        spawned.push(file);
+        return { status: 0, stdout: '9.9.9\n', stderr: '', error: undefined };
+      }) as never;
+      try {
+        const agents = discoverAgentRuntimes(
+          [{ name: 'Tail Fixture', launchCommand: 'probe-target-p2 & calc.exe' }],
+          recordingSpawn,
+        );
+        const custom = agents.at(-1);
+        expect(custom?.detected).toBe(true);
+        expect(spawned).toHaveLength(1);
+        expect(spawned[0]).toBe(join(directory, 'probe-target-p2'));
+        expect(spawned[0]).not.toContain('&');
+      } finally {
+        process.env.PATH = originalPath;
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a resolved path containing cmd.exe metacharacters on win32 only', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-probe-meta-'));
+    try {
+      await writeFile(join(directory, 'evil&tool-p2'), '#!/bin/sh\necho x\n', 'utf8');
+      await chmod(join(directory, 'evil&tool-p2'), 0o755);
+      const originalPath = process.env.PATH;
+      process.env.PATH = directory;
+      try {
+        // POSIX: no shell involved, the ampersand is a plain filename character.
+        expect(resolveProbeExecutable('evil&tool-p2', 'darwin')).toBe(join(directory, 'evil&tool-p2'));
+        // win32: the same path would be interpreted by cmd.exe — refuse it.
+        expect(resolveProbeExecutable('evil&tool-p2', 'win32')).toBeNull();
+      } finally {
+        process.env.PATH = originalPath;
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('returns null for a command that resolves nowhere', () => {
+    expect(resolveProbeExecutable('definitely-not-a-real-command-p2')).toBeNull();
   });
 });

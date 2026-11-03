@@ -164,7 +164,9 @@ nav { display: grid; gap: 6px; margin-top: 46px; }
   cursor: pointer;
 }
 
-.locale-switcher button.active { background: var(--accent); color: #fff; }
+/* 选中态文字用近黑：白字 on --accent 实测 2.77:1（暗主题）/3.45:1（亮主题），
+   近黑在两主题 accent 上分别约 6.8:1 与 5.4:1，均过 WCAG AA。 */
+.locale-switcher button.active { background: var(--accent); color: #0b1220; }
 .locale-switcher button:not(.active):hover { background: var(--surface-muted); }
 
 .theme-switch {
@@ -363,7 +365,9 @@ h2 { font-size: 16px; margin-bottom: 5px; color: var(--text-1); }
   font-weight: 700;
 }
 
-.mode-switch button.active { color: #fff; background: var(--accent); }
+/* 激活态文字用近黑：白字 on --accent 实测 3.44:1（亮主题）/2.77:1（暗主题），
+   与 locale-switcher 同族处理（65e0114），近黑两主题均过 WCAG AA。 */
+.mode-switch button.active { color: #0b1220; background: var(--accent); }
 
 .blueprint-panel label {
   display: block;
@@ -536,7 +540,9 @@ select option {
   border: 0;
   border-radius: 4px;
   background: var(--accent);
-  color: #fff;
+  /* 近黑文字：白字 on --accent 仅 3.44:1（亮）/2.77:1（暗），hover 态
+     accent-2 上同样不达 AA；#0b1220 在 accent/accent-2 两主题均过 AA。 */
+  color: #0b1220;
   display: flex;
   justify-content: center;
   align-items: center;

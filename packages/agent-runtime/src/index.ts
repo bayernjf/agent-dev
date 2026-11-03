@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-export { discoverAgentRuntimes, probeAgentCapabilities, resolveExecutablePath, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource, type CapabilityProbe } from './catalog.js';
+export { discoverAgentRuntimes, probeAgentCapabilities, resolveExecutablePath, resolveProbeExecutable, type AgentDescriptor, type AgentCapability, type CustomAgentInput, type AgentSource, type CapabilityProbe, type ProbeSpawn } from './catalog.js';
 export {
   type AgentProfile,
   type AgentProfileOverrides,

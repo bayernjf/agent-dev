@@ -8,7 +8,7 @@
  * it is migrated to the new JSON format on first write.
  */
 
-import { chmodSync, mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -172,12 +172,21 @@ export class LocalFileBackend implements SecretBackend {
     }
 
     if (!existsSync(this.path)) return { version: 1, secrets: {} };
+
+    // Fail closed on a corrupted store (2026-11-02 review P1-2): reading it as
+    // an empty database let the next set() overwrite the file and silently
+    // destroy every stored credential. A truncated or damaged file must surface
+    // as a loud error on both reads and writes, never as an empty store.
+    let parsed: unknown;
     try {
-      const content = readFileSync(this.path, 'utf8');
-      return JSON.parse(content) as StorageFormat;
-    } catch {
-      return { version: 1, secrets: {} };
+      parsed = JSON.parse(readFileSync(this.path, 'utf8'));
+    } catch (error) {
+      throw corruptedStoreError(this.path, error);
     }
+    if (!isStorageFormat(parsed)) {
+      throw corruptedStoreError(this.path, new Error('unexpected shape'));
+    }
+    return parsed;
   }
 
   private migrateLegacy(): StorageFormat {
@@ -209,7 +218,30 @@ export class LocalFileBackend implements SecretBackend {
   private async writeStore(store: StorageFormat): Promise<void> {
     const dir = dirname(this.path);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(this.path, JSON.stringify(store, null, 2) + '\n', { mode: 0o600 });
+    // Atomic replace + rolling backup: write to a temp file and rename it over
+    // the store, so a crash mid-write can never truncate the live file; keep
+    // the previous contents as .bak for manual recovery (P1-2, same fix shape
+    // as the legacy migration backup).
+    const tmpPath = `${this.path}.tmp-${process.pid}`;
+    writeFileSync(tmpPath, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+    if (existsSync(this.path)) {
+      copyFileSync(this.path, `${this.path}.bak`);
+    }
+    renameSync(tmpPath, this.path);
     chmodSync(this.path, 0o600);
   }
+}
+
+function isStorageFormat(value: unknown): value is StorageFormat {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<StorageFormat>;
+  return candidate.version === 1 && !!candidate.secrets && typeof candidate.secrets === 'object';
+}
+
+function corruptedStoreError(path: string, cause: unknown): Error {
+  const reason = cause instanceof Error ? cause.message : String(cause);
+  return new Error(
+    `Credential store at ${path} is corrupted (${reason}); refusing to read or overwrite it. ` +
+      `Restore from ${path}.bak or repair the file manually.`
+  );
 }
