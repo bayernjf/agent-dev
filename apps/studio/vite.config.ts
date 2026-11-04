@@ -23,8 +23,29 @@ const proxy = {
   '/events': daemonOrigin,
 };
 
+// Studio ships as one SPA with no router: the App shell and every panel live in App.tsx.
+// Keeping React, icons and schema validation in their own chunks lets the browser cache them
+// across Studio releases instead of re-downloading them with the panel code.
+const vendorChunkPatterns: Array<[string, RegExp]> = [
+  ['vendor-react', /node_modules\/(react|react-dom|scheduler)\//],
+  ['vendor-icons', /node_modules\/lucide-react\//],
+  ['vendor-schema', /node_modules\/(zod|@agent-dev\/blueprint)\//],
+];
+
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          for (const [name, pattern] of vendorChunkPatterns) {
+            if (pattern.test(id)) return name;
+          }
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     strictPort: true,
