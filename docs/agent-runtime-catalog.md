@@ -119,7 +119,7 @@ Structured output: Unknown
 
 ### 3.4 发现的代价，以及测试因此要注入（2026-09-02 补充）
 
-`discoverAgentRuntimes()` 是顺序探测：内置目录里 **8 个 Agent** 一个个查，`--version` 与 `--help` 的预算各 5 s（`src/catalog.ts`），最坏 40 s。而 vitest 单用例默认预算也是 5 s，所以**任何在测试里顺手调一次真发现的用例，都在赌这台机器当时有多闲**。2026-09-02 连跑 8 次全量量到 2 次超时（`apps/cli/test/mcp.test.ts` 的只读工具用例、`packages/agent-runtime/test/catalog.test.ts` 的内置过滤用例），红讯都是 `Test timed out in 5000ms`；`vitest.config.ts` 的 `fileParallelism: false` 只把这条不等式变缓，没有改变它。
+`discoverAgentRuntimes()` 是顺序探测：内置目录里 **8 个 Agent** 一个个查，`--version` 与 `--help` 的预算各 5 s（`src/catalog.ts`），最坏 40 s。2026-11-04 起探测改为异步 `execFile` + 超时（2026-11-02 review P2-4），最坏延迟不变，但等待期间不再阻塞 daemon 的事件循环。而 vitest 单用例默认预算也是 5 s，所以**任何在测试里顺手调一次真发现的用例，都在赌这台机器当时有多闲**。2026-09-02 连跑 8 次全量量到 2 次超时（`apps/cli/test/mcp.test.ts` 的只读工具用例、`packages/agent-runtime/test/catalog.test.ts` 的内置过滤用例），红讯都是 `Test timed out in 5000ms`；`vitest.config.ts` 的 `fileParallelism: false` 只把这条不等式变缓，没有改变它。
 
 两条纪律：
 

@@ -12,7 +12,7 @@ type HelpCall = { command: string; subcommand?: string };
 
 function fakeHelp(levels: Record<string, string>) {
   const calls: HelpCall[] = [];
-  const readHelp = (command: string, subcommand?: string) => {
+  const readHelp = async (command: string, subcommand?: string) => {
     calls.push({ command, subcommand });
     return levels[subcommand ? `${command} ${subcommand}` : command] ?? '';
   };
@@ -59,7 +59,7 @@ afterAll(async () => {
 });
 
 describe('capability probe', () => {
-  it('reads the help level where the switch is documented', () => {
+  it('reads the help level where the switch is documented', async () => {
     // `codex --help` has no `--json`; `codex exec --help` does. Probing the top level reported a
     // verified-by-execution Adapter as lacking the switch, which is a bug about our question, not a
     // fact about the Agent.
@@ -67,66 +67,66 @@ describe('capability probe', () => {
       codex: 'Usage: codex [OPTIONS] [PROMPT]\n  --sandbox <MODE>\n',
       'codex exec': 'Usage: codex exec [OPTIONS] [PROMPT]\n      --json\n',
     });
-    expect(probeAgentCapabilities('codex', 'codex', readHelp).nonInteractive).toBe(true);
+    expect((await probeAgentCapabilities('codex', 'codex', readHelp)).nonInteractive).toBe(true);
     expect(calls).toEqual([{ command: 'codex', subcommand: 'exec' }]);
   });
 
-  it('reports a switch it looked for and did not find as not found', () => {
+  it('reports a switch it looked for and did not find as not found', async () => {
     const { readHelp } = fakeHelp({ 'codex exec': 'Usage: codex exec [OPTIONS] [PROMPT]\n      --json-lines\n' });
-    const probe = probeAgentCapabilities('codex', 'codex', readHelp);
+    const probe = await probeAgentCapabilities('codex', 'codex', readHelp);
     expect(probe).toMatchObject({ nonInteractive: false, helpAvailable: true });
   });
 
   // The pair (helpAvailable, nonInteractiveFlags) is what lets Studio tell "the help text contradicts
   // us" from "the help text never answered" from "there was nothing to look for". Collapsing those
   // into one boolean is what made a false render as an unknown and an unknown as a false.
-  it('keeps a silent CLI distinguishable from an answering one', () => {
+  it('keeps a silent CLI distinguishable from an answering one', async () => {
     const silent = fakeHelp({});
-    expect(probeAgentCapabilities('hermes', 'hermes', silent.readHelp)).toMatchObject({
+    expect(await probeAgentCapabilities('hermes', 'hermes', silent.readHelp)).toMatchObject({
       nonInteractive: false,
       helpAvailable: false,
       nonInteractiveFlags: ['-z'],
     });
     const answered = fakeHelp({ hermes: 'Usage: hermes [OPTIONS] [PROMPT]\n  -z, --zero-shot\n' });
-    expect(probeAgentCapabilities('hermes', 'hermes', answered.readHelp)).toMatchObject({
+    expect(await probeAgentCapabilities('hermes', 'hermes', answered.readHelp)).toMatchObject({
       nonInteractive: true,
       helpAvailable: true,
     });
   });
 
-  it('does not read a longer switch as a shorter one', () => {
+  it('does not read a longer switch as a shorter one', async () => {
     // Both halves of this used to confirm: `--json-lines` contains `--json`, and `--permission-mode`
     // contains `-p`. Neither documents the switch the Adapter passes.
     const jsonLines = fakeHelp({ 'codex exec': 'Usage: codex exec [OPTIONS]\n      --json-lines <MODE>\n' });
-    expect(probeAgentCapabilities('codex', 'codex', jsonLines.readHelp).nonInteractive).toBe(false);
+    expect((await probeAgentCapabilities('codex', 'codex', jsonLines.readHelp)).nonInteractive).toBe(false);
     const permissionOnly = fakeHelp({ codebuddy: 'Options:\n  --permission-mode <mode>  Session mode\n' });
-    expect(probeAgentCapabilities('codebuddy', 'codebuddy', permissionOnly.readHelp).nonInteractive).toBe(false);
+    expect((await probeAgentCapabilities('codebuddy', 'codebuddy', permissionOnly.readHelp)).nonInteractive).toBe(false);
   });
 
-  it('accepts any documented spelling of a switch', () => {
+  it('accepts any documented spelling of a switch', async () => {
     for (const spelling of ['-p', '--print']) {
       const { readHelp } = fakeHelp({ claude: `Options:\n  ${spelling}  print response and exit\n` });
-      expect(probeAgentCapabilities('claude-code', 'claude', readHelp).nonInteractive).toBe(true);
+      expect((await probeAgentCapabilities('claude-code', 'claude', readHelp)).nonInteractive).toBe(true);
     }
     const neither = fakeHelp({ claude: 'Options:\n  --help  show help\n' });
-    expect(probeAgentCapabilities('claude-code', 'claude', neither.readHelp).nonInteractive).toBe(false);
+    expect((await probeAgentCapabilities('claude-code', 'claude', neither.readHelp)).nonInteractive).toBe(false);
   });
 
-  it('does not treat a substring of the real switch as the switch', () => {
+  it('does not treat a substring of the real switch as the switch', async () => {
     // The table asked for `--yes`, so this help text used to confirm aider - while the Adapter passes
     // `--yes-always`, which is a different switch with different behaviour.
     const { readHelp } = fakeHelp({ aider: 'Options:\n  --message <text>\n  --yes  confirm each prompt\n' });
-    const probe = probeAgentCapabilities('aider', 'aider', readHelp);
+    const probe = await probeAgentCapabilities('aider', 'aider', readHelp);
     expect(probe.nonInteractive).toBe(false);
     expect(probe.nonInteractiveFlags).toContain('--yes-always');
   });
 
-  it('says nothing about an Agent whose non-interactive path is not a switch', () => {
+  it('says nothing about an Agent whose non-interactive path is not a switch', async () => {
     // OpenCode 2.0 runs through a driver script talking to a local service; its help text lists
     // subcommands, none of which is how a task is actually launched. Reporting that as "not
     // non-interactive" would be a lie in the other direction, so there is no expectation at all.
     const { readHelp } = fakeHelp({ opencode: 'Commands:\n  opencode run [message..]\n  opencode serve\n' });
-    const probe = probeAgentCapabilities('opencode', 'opencode', readHelp);
+    const probe = await probeAgentCapabilities('opencode', 'opencode', readHelp);
     expect(NON_INTERACTIVE_SWITCHES.opencode.switches).toEqual([]);
     expect(probe).toMatchObject({ nonInteractive: false, nonInteractiveFlags: [], helpAvailable: true });
   });
@@ -136,15 +136,15 @@ describe('capability probe', () => {
   // the text came from and how the process ended can tell them apart. Two cases, because one shared
   // case lets a defect in either half hide the other behind the first failed assertion.
   it('accepts a help page from a command that ran', async () => {
-    await withHelpFixtures(() => {
-      const answered = probeAgentCapabilities('aider', 'agent-dev-helps-ok');
+    await withHelpFixtures(async () => {
+      const answered = await probeAgentCapabilities('aider', 'agent-dev-helps-ok');
       expect(answered).toMatchObject({ nonInteractive: true, helpAvailable: true });
     });
   });
 
   it('does not accept a failing command as a help page', async () => {
-    await withHelpFixtures(() => {
-      const broken = probeAgentCapabilities('aider', 'agent-dev-helps-failing');
+    await withHelpFixtures(async () => {
+      const broken = await probeAgentCapabilities('aider', 'agent-dev-helps-failing');
       expect(broken).toMatchObject({ nonInteractive: false, helpAvailable: false });
     });
   });

@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { NON_INTERACTIVE_SWITCHES } from './non-interactive-switches.js';
@@ -106,15 +106,45 @@ export function resolveProbeExecutable(command: string, platform: NodeJS.Platfor
   return executable;
 }
 
-/** spawnSync signature, injectable so tests can observe the probe target. */
-export type ProbeSpawn = typeof spawnSync;
+/** Result of one probe process; `status` is null when it never ran to completion. */
+export type ProbeResult = { stdout: string; stderr: string; status: number | null; error?: Error };
+
+/**
+ * Async spawn signature, injectable so tests can observe the probe target.
+ * Probes used to call `spawnSync`, which blocked the daemon's event loop for
+ * up to 5 s per built-in Agent (review 2026-11-02 P2-4).
+ */
+export type ProbeSpawn = (
+  command: string,
+  args: string[],
+  options: { encoding: 'utf8'; timeout: number; shell?: boolean },
+) => Promise<ProbeResult>;
+
+/** Production probe: execFile with a hard timeout, never blocking the event loop. */
+export const runProbe: ProbeSpawn = (command, args, options) =>
+  new Promise(resolve => {
+    execFile(
+      command,
+      args,
+      { encoding: 'utf8', timeout: options.timeout, shell: options.shell, maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => {
+        resolve({
+          stdout: typeof stdout === 'string' ? stdout : '',
+          stderr: typeof stderr === 'string' ? stderr : '',
+          // A timed-out or unspawnable child never produced a usable status.
+          status: error ? null : 0,
+          error: error ?? undefined,
+        });
+      },
+    );
+  });
 
 // Measured on Windows with a shell: codex 4.2s, opencode 3.2s, the rest under 0.6s. The previous
 // 500 ms budget (2 s for codex) was below the real cost of every Node-based CLI on every platform.
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
 const HELP_PROBE_TIMEOUT_MS = 5_000;
 
-function detect(command: string, spawn: ProbeSpawn = spawnSync): DetectionResult {
+async function detect(command: string, spawn: ProbeSpawn = runProbe): Promise<DetectionResult> {
   const cached = detectionCache.get(command);
   if (cached) return cached;
   const executable = resolveProbeExecutable(command);
@@ -123,7 +153,7 @@ function detect(command: string, spawn: ProbeSpawn = spawnSync): DetectionResult
     detectionCache.set(command, result);
     return result;
   }
-  const result = spawn(executable, ['--version'], {
+  const result = await spawn(executable, ['--version'], {
     encoding: 'utf8',
     timeout: VERSION_PROBE_TIMEOUT_MS,
     ...probeSpawnOptions,
@@ -159,7 +189,7 @@ const helpCache = new Map<string, string>();
 // Windows, an unresolvable command still produces text - cmd.exe's "is not recognized as an
 // internal or external command" - and treating that as a help page let the probe report a CLI that
 // never started as having documented the opposite of what we expected.
-function probeHelp(command: string, subcommand?: string, spawn: ProbeSpawn = spawnSync): string {
+async function probeHelp(command: string, subcommand?: string, spawn: ProbeSpawn = runProbe): Promise<string> {
   const cacheKey = subcommand ? `${command} ${subcommand}` : command;
   const cached = helpCache.get(cacheKey);
   if (cached !== undefined) return cached;
@@ -170,7 +200,7 @@ function probeHelp(command: string, subcommand?: string, spawn: ProbeSpawn = spa
   }
   const level = subcommand ? [subcommand] : [];
   for (const flag of ['--help', '-h']) {
-    const result = spawn(executable, [...level, flag], { encoding: 'utf8', timeout: HELP_PROBE_TIMEOUT_MS, ...probeSpawnOptions });
+    const result = await spawn(executable, [...level, flag], { encoding: 'utf8', timeout: HELP_PROBE_TIMEOUT_MS, ...probeSpawnOptions });
     if (result.error || result.status !== 0) continue;
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
     if (output.length > 0) {
@@ -205,13 +235,13 @@ function documentsSwitch(helpOutput: string, spelling: string): boolean {
 
 // `readHelp` is injectable so the reasoning below can be tested against fixtures instead of against
 // whichever CLIs happen to be installed on the machine running the suite.
-export function probeAgentCapabilities(
+export async function probeAgentCapabilities(
   agentId: string,
   launchCommand: string,
-  readHelp: (command: string, subcommand?: string) => string = probeHelp,
-): CapabilityProbe {
+  readHelp: (command: string, subcommand?: string) => Promise<string> = probeHelp,
+): Promise<CapabilityProbe> {
   const expectation = NON_INTERACTIVE_SWITCHES[agentId] ?? { switches: [] };
-  const helpOutput = readHelp(launchCommand, expectation.subcommand);
+  const helpOutput = await readHelp(launchCommand, expectation.subcommand);
   const confirmed = expectation.switches.length > 0
     && expectation.switches.every(spellings => spellings.some(spelling => documentsSwitch(helpOutput, spelling)));
   return {
@@ -222,27 +252,29 @@ export function probeAgentCapabilities(
   };
 }
 
-export function discoverAgentRuntimes(custom: CustomAgentInput[] = [], spawn: ProbeSpawn = spawnSync): AgentDescriptor[] {
-  const builtIns = loadBuiltInAgents().flatMap(agent => {
-    const result = detect(agent.launchCommand, spawn);
-    if (!result.detected) return [];
-    return [{
+export async function discoverAgentRuntimes(custom: CustomAgentInput[] = [], spawn: ProbeSpawn = runProbe): Promise<AgentDescriptor[]> {
+  const builtIns: AgentDescriptor[] = [];
+  for (const agent of loadBuiltInAgents()) {
+    const result = await detect(agent.launchCommand, spawn);
+    if (!result.detected) continue;
+    builtIns.push({
       ...agent,
       ...result,
       capabilities: BUILT_IN_CAPABILITIES[agent.id] ?? ['version-detection'],
       detail: result.detail,
-    }];
-  });
-  const customAgents = custom.map((agent, index) => {
-    const result = detect(agent.launchCommand, spawn);
-    return {
+    });
+  }
+  const customAgents: AgentDescriptor[] = [];
+  for (const [index, agent] of custom.entries()) {
+    const result = await detect(agent.launchCommand, spawn);
+    customAgents.push({
       id: `custom-${index + 1}`,
       ...agent,
-      source: 'custom' as const,
+      source: 'custom',
       ...result,
-      capabilities: ['version-detection'] as AgentCapability[],
+      capabilities: ['version-detection'],
       detail: result.detail,
-    };
-  });
+    });
+  }
   return [...builtIns, ...customAgents];
 }

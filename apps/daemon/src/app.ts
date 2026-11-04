@@ -187,7 +187,7 @@ export type DaemonDependencies = {
    * Agent id. Injectable because the honest answer depends on the machine running the daemon, and a
    * refusal that depends on the machine has to be testable without uninstalling an Agent.
    */
-  isAgentDetected?: (agentId: string) => boolean;
+  isAgentDetected?: (agentId: string) => boolean | Promise<boolean>;
   /**
    * The whole catalog fact behind that question. Injectable for the same reason, and because it is
    * expensive: discovery walks all eight built-in commands in sequence and each version probe is
@@ -195,7 +195,7 @@ export type DaemonDependencies = {
    * CLIs it never asked about. An injected catalog is a fixture, so it cannot see a custom Agent
    * `POST /api/runtime/catalog` just appended - asserting that entry needs real discovery.
    */
-  discoverRuntimes?: () => AgentDescriptor[];
+  discoverRuntimes?: () => AgentDescriptor[] | Promise<AgentDescriptor[]>;
 };
 
 const githubPullRequestWebhookSchema = z.object({
@@ -272,7 +272,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
   // machine-local fact. `detect()` caches per command, so repeat requests do not re-spawn.
   const discoverRuntimes = dependencies.discoverRuntimes ?? (() => discoverAgentRuntimes(customAgents));
   const isAgentDetected = dependencies.isAgentDetected
-    ?? ((agentId: string) => discoverRuntimes().some(agent => agent.id === agentId));
+    ?? (async (agentId: string) => (await discoverRuntimes()).some(agent => agent.id === agentId));
 
   app.use('*', cors({ origin: 'http://localhost:5173' }));
   // Registered before all routes so nothing slips past the check.
@@ -687,19 +687,19 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
 
   app.get('/api/runtime/probe', context => context.json({ probe: probeCodexRuntime() }));
 
-  app.get('/api/runtime/probe/:agentId', context => {
+  app.get('/api/runtime/probe/:agentId', async context => {
     const agentId = context.req.param('agentId');
-    const catalog = discoverRuntimes();
+    const catalog = await discoverRuntimes();
     const agent = catalog.find(a => a.id === agentId);
     if (!agent) return context.json({ error: 'Agent not found in catalog.' }, 404);
-    return context.json({ probe: probeAgentCapabilities(agent.id, agent.launchCommand), adapterStatus: getAgentAdapterStatus(agent.id) });
+    return context.json({ probe: await probeAgentCapabilities(agent.id, agent.launchCommand), adapterStatus: getAgentAdapterStatus(agent.id) });
   });
 
   // `detected` answers "is this CLI installed here", which is not the claim Studio makes next to
   // the name. Only the Adapter registry knows whether the execution contract has been exercised, so
   // the answer travels with the catalog instead of being guessed by the browser.
-  app.get('/api/runtime/catalog', context => context.json({
-    agents: discoverRuntimes().map(agent => ({ ...agent, adapterStatus: getAgentAdapterStatus(agent.id) })),
+  app.get('/api/runtime/catalog', async context => context.json({
+    agents: (await discoverRuntimes()).map(agent => ({ ...agent, adapterStatus: getAgentAdapterStatus(agent.id) })),
   }));
 
   app.post('/api/runtime/catalog', async context => {
@@ -708,7 +708,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     if (customAgents.some(agent => agent.name.toLowerCase() === parsed.data.name.toLowerCase())) return context.json({ error: 'An Agent with this name already exists.' }, 409);
     customAgents.push(parsed.data);
     if (dataDirectory) saveCustomAgents(dataDirectory, customAgents);
-    const agent = discoverRuntimes().at(-1);
+    const agent = (await discoverRuntimes()).at(-1);
     return context.json({ agent: agent ? { ...agent, adapterStatus: getAgentAdapterStatus(agent.id) } : agent }, 201);
   });
 
@@ -801,7 +801,7 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
       if (!resolved.ok) return context.json(runtimeExecutorRejection(resolved), 409);
       // Everything the registry can answer has been answered. What is left is machine-local, and a run
       // record for a CLI that is not here would only move the failure to the spawn.
-      if (!isAgentDetected(resolved.agentId)) return context.json(agentNotDetectedRejection(resolved.agentId), 409);
+      if (!(await isAgentDetected(resolved.agentId))) return context.json(agentNotDetectedRejection(resolved.agentId), 409);
       const run = await store.prepareRuntimeRun(project.id, project.blueprint.metadata.revision, requested);
       return context.json({ run }, 201);
     } catch (error) {
