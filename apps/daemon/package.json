@@ -19,7 +19,7 @@
     "@agent-dev/policy": "file:../../packages/policy",
     "@agent-dev/storage": "file:../../packages/storage",
     "@agent-dev/workflow": "file:../../packages/workflow",
-    "@hono/node-server": "^1.14.1",
+    "@hono/node-server": "^2.1.6",
     "hono": "^4.7.7",
     "zod": "^3.24.3"
   }
