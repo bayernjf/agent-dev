@@ -2,6 +2,14 @@
 
 Convention for database migration files in this repository.
 
+## 0. Scope in this repository
+
+agent-dev currently keeps its schema changes inline in
+`packages/storage/src/migrations.ts` (`0001`–`0006`, numbered and ordered in
+code). `tools/check-migrations.sh` therefore reports **not applicable** and
+exits 0 while neither `supabase/migrations/` nor `db/migrations/` exists; the
+checks below apply in full as soon as either directory is added.
+
 ## 1. Directory
 
 - **Supabase projects** → `supabase/migrations/`

@@ -12,7 +12,7 @@
     "@agent-dev/blueprint": "file:../blueprint",
     "@agent-dev/agent-runtime": "file:../agent-runtime",
     "@agent-dev/workflow": "file:../workflow",
-    "drizzle-orm": "^0.41.0",
+    "drizzle-orm": "^0.45.4",
     "sql.js": "^1.13.0"
   },
   "devDependencies": {

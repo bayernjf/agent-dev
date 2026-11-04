@@ -3,6 +3,7 @@ import { Activity, ArrowLeft, ArrowRight, CheckCircle2, CircleDot, FolderKanban,
 } from 'lucide-react';
 import { useI18n, type KeyPath } from './i18n/i18n';
 import { useDomainText } from './lib/domain-text';
+import { apiFetch } from './lib/api';
 import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
 import { baselineProvidersFor, getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
@@ -170,7 +171,7 @@ export function App() {
   const loadProjects = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/projects');
+      const response = await apiFetch('/api/projects');
       if (!response.ok) throw new Error(t('errors.daemonUnavailable'));
       const payload = await response.json() as { projects: Project[] };
       setProjects(payload.projects);
@@ -184,7 +185,7 @@ export function App() {
 
   const selectProject = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}`);
+      const response = await apiFetch(`/api/projects/${projectId}`);
       if (!response.ok) throw new Error(t('errors.loadBlueprint'));
       const payload = await response.json() as { project: ProjectDetail };
       setSelected(payload.project);
@@ -212,7 +213,7 @@ export function App() {
 
   const loadBaselinePlan = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/baseline-plan`);
+      const response = await apiFetch(`/api/projects/${projectId}/baseline-plan`);
       if (!response.ok) throw new Error(t('errors.prepareBaselinePlan'));
       const payload = await response.json() as { plan: BaselinePlan; approval: BaselineApproval | null };
       setBaselinePlan(payload.plan);
@@ -224,7 +225,7 @@ export function App() {
 
   const loadDryRun = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/dry-run`);
+      const response = await apiFetch(`/api/projects/${projectId}/dry-run`);
       if (!response.ok) throw new Error(t('errors.prepareDeliveryPlan'));
       const payload = await response.json() as { plan: DryRunPlan };
       setDryRun(payload.plan);
@@ -238,7 +239,7 @@ export function App() {
 
   const loadApplyRun = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/apply`);
+      const response = await apiFetch(`/api/projects/${projectId}/apply`);
       if (!response.ok) throw new Error(t('errors.loadApplyRun'));
       const payload = await response.json() as { run: ApplyRun | null };
       setApplyRun(payload.run);
@@ -250,8 +251,8 @@ export function App() {
   const loadRelease = async (projectId: string) => {
     try {
       const [planResponse, stateResponse] = await Promise.all([
-        fetch(`/api/projects/${projectId}/release/plan`),
-        fetch(`/api/projects/${projectId}/release`),
+        apiFetch(`/api/projects/${projectId}/release/plan`),
+        apiFetch(`/api/projects/${projectId}/release`),
       ]);
       // A 409 here is informative, not an error: it carries the reason the workspace is unusable.
       const plan = planResponse.status === 404 ? null : await planResponse.json() as ReleasePlan;
@@ -283,7 +284,7 @@ export function App() {
     if (!selected || releaseBusy) return;
     setReleaseBusy(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/release/request`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/release/request`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirmation: CONFIRMATIONS.REQUEST_RELEASE }),
       });
@@ -308,7 +309,7 @@ export function App() {
     if (!window.confirm(t('confirmations.releaseToProduction', { name: selected.name, approvedBy }))) return;
     setReleaseBusy(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/release/approve`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/release/approve`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirmation: CONFIRMATIONS.APPROVE_RELEASE, approvedBy, summary: releaseSummary.trim() }),
       });
@@ -329,7 +330,7 @@ export function App() {
     if (!selected || releaseBusy) return;
     setReleaseBusy(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/release/retry`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/release/retry`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirmation: CONFIRMATIONS.RETRY_RELEASE }),
       });
@@ -351,7 +352,7 @@ export function App() {
     if (!window.confirm(t('errors.recoverWorkspaceConfirm'))) return;
     setRecoveringWorkspace(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/apply/recover`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/apply/recover`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirmation: CONFIRMATIONS.RECOVER_WORKSPACE }),
       });
@@ -370,7 +371,7 @@ export function App() {
 
   const loadDependencyReadiness = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/dependencies`);
+      const response = await apiFetch(`/api/projects/${projectId}/dependencies`);
       if (!response.ok) throw new Error(t('errors.inspectDependencies'));
       const payload = await response.json() as { readiness: DependencyReadiness };
       setDependencyReadiness(payload.readiness);
@@ -381,7 +382,7 @@ export function App() {
 
   const loadQualityGate = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/quality-gate`);
+      const response = await apiFetch(`/api/projects/${projectId}/quality-gate`);
       if (!response.ok) throw new Error(t('errors.loadQualityGate'));
       const payload = await response.json() as { result: QualityGateResult | null };
       setQualityGateResult(payload.result);
@@ -392,7 +393,7 @@ export function App() {
 
   const loadFeatureTask = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/feature-task`);
+      const response = await apiFetch(`/api/projects/${projectId}/feature-task`);
       if (!response.ok) throw new Error(t('errors.loadFeatureTask'));
       const payload = await response.json() as { task: FeatureTask | null };
       setFeatureTask(payload.task);
@@ -403,7 +404,7 @@ export function App() {
 
   const loadRuntimePlan = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/runtime/plan`);
+      const response = await apiFetch(`/api/projects/${projectId}/runtime/plan`);
       if (response.status === 409) {
         // Two facts share the 409: no approved run exists, and the executor this project names
         // cannot run a task. The first one leaves the panel empty; the second is named out loud,
@@ -426,7 +427,7 @@ export function App() {
 
   const loadGitEvidence = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/runtime/evidence`);
+      const response = await apiFetch(`/api/projects/${projectId}/runtime/evidence`);
       if (!response.ok) throw new Error(t('errors.loadGitEvidence'));
       const payload = await response.json() as { evidence: GitEvidence };
       setGitEvidence(payload.evidence);
@@ -437,7 +438,7 @@ export function App() {
 
   const loadAcceptance = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/acceptance`);
+      const response = await apiFetch(`/api/projects/${projectId}/acceptance`);
       if (!response.ok) throw new Error(t('errors.loadAcceptance'));
       const payload = await response.json() as { acceptance: AcceptanceRecord | null };
       setAcceptance(payload.acceptance);
@@ -449,7 +450,7 @@ export function App() {
 
   const loadFinalDeliveryReport = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/delivery-report`);
+      const response = await apiFetch(`/api/projects/${projectId}/delivery-report`);
       if (!response.ok) throw new Error(t('errors.loadFinalDeliveryReport'));
       const payload = await response.json() as { report: string };
       setFinalDeliveryReport(payload.report);
@@ -461,8 +462,8 @@ export function App() {
   const loadDeliveryEvidence = async (projectId: string) => {
     try {
       const [prResponse, previewResponse] = await Promise.all([
-        fetch(`/api/projects/${projectId}/delivery/pr-evidence`),
-        fetch(`/api/projects/${projectId}/delivery/preview-evidence`),
+        apiFetch(`/api/projects/${projectId}/delivery/pr-evidence`),
+        apiFetch(`/api/projects/${projectId}/delivery/preview-evidence`),
       ]);
       if (!prResponse.ok || !previewResponse.ok) throw new Error(t('errors.loadDeliveryEvidence'));
       const prPayload = await prResponse.json() as { evidence: PrEvidence | null };
@@ -478,7 +479,7 @@ export function App() {
     if (!selected || selected.state !== 'LOCAL_ACCEPTED') return;
     setRecordingDeliveryEvidence(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/delivery/pull-request`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/delivery/pull-request`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirmation: CONFIRMATIONS.OPEN_PULL_REQUEST }),
       });
@@ -496,7 +497,7 @@ export function App() {
     if (!selected || selected.state !== 'PR_OPEN' || !previewApiUrl.trim() || !previewWebUrl.trim() || !previewSmokeTest.trim()) return;
     setRecordingDeliveryEvidence(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/delivery/preview-evidence`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/delivery/preview-evidence`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirmation: CONFIRMATIONS.RECORD_PREVIEW_EVIDENCE, apiUrl: previewApiUrl.trim(), webUrl: previewWebUrl.trim(), smokeTest: previewSmokeTest.trim() }),
       });
@@ -513,7 +514,7 @@ export function App() {
 
   const loadProviderPlan = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/provider-plan`);
+      const response = await apiFetch(`/api/projects/${projectId}/provider-plan`);
       if (!response.ok) throw new Error(t('errors.loadProviderPlan'));
       const payload = await response.json() as { plans: ProviderPlan[] };
       setProviderPlans(payload.plans);
@@ -527,7 +528,7 @@ export function App() {
   const loadAgents = async () => {
     setLoadingAgents(true);
     try {
-      const response = await fetch('/api/runtime/catalog');
+      const response = await apiFetch('/api/runtime/catalog');
       if (!response.ok) throw new Error(t('errors.loadAgentCatalog'));
       const payload = await response.json() as { agents: AgentDescriptor[] };
       setAgents(payload.agents);
@@ -550,7 +551,7 @@ export function App() {
   const loadProfiles = async () => {
     setLoadingProfiles(true);
     try {
-      const response = await fetch('/api/runtime/profiles');
+      const response = await apiFetch('/api/runtime/profiles');
       if (!response.ok) throw new Error(t('errors.loadAgentProfiles'));
       const payload = await response.json() as { profiles: AgentProfile[] };
       setProfiles(payload.profiles);
@@ -595,7 +596,7 @@ export function App() {
     if (!profileForm.name.trim() || !profileForm.baseAgentId) return;
     setSavingProfile(true);
     try {
-      const response = await fetch('/api/runtime/profiles', {
+      const response = await apiFetch('/api/runtime/profiles', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -622,7 +623,7 @@ export function App() {
     if (!editingProfileId || !profileForm.name.trim()) return;
     setSavingProfile(true);
     try {
-      const response = await fetch(`/api/runtime/profiles/${encodeURIComponent(editingProfileId)}`, {
+      const response = await apiFetch(`/api/runtime/profiles/${encodeURIComponent(editingProfileId)}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -664,7 +665,7 @@ export function App() {
   const deleteProfile = async (profileId: string) => {
     if (!window.confirm(t('errors.deleteProfileConfirm'))) return;
     try {
-      const response = await fetch(`/api/runtime/profiles/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
+      const response = await apiFetch(`/api/runtime/profiles/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
       if (!response.ok) throw new Error(t('errors.deleteProfile'));
       setProfiles(current => current.filter(p => p.id !== profileId));
       if (selectedAgentId === profileId) setSelectedAgentId(null);
@@ -706,7 +707,7 @@ export function App() {
         if (!p.name || !p.baseAgentId) continue;
         // Skip if profile with same id already exists
         if (profiles.some(existing => existing.id === p.id)) continue;
-        const response = await fetch('/api/runtime/profiles', {
+        const response = await apiFetch('/api/runtime/profiles', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -737,7 +738,7 @@ export function App() {
     setTestResult({ output: '', exitCode: null, status: 'running' });
     try {
       // Use the profile's base agent to execute a simple test in a temp workspace
-      const response = await fetch(`/api/runtime/probe/${encodeURIComponent(profile.baseAgentId)}`);
+      const response = await apiFetch(`/api/runtime/probe/${encodeURIComponent(profile.baseAgentId)}`);
       const payload = await response.json() as { probe?: Record<string, unknown>; error?: string };
       if (!response.ok) throw new Error(payload.error ?? t('errors.testProfile'));
       setTestResult({
@@ -762,7 +763,7 @@ export function App() {
     // settles nothing. Naming the executor is the row's own click, never a side effect of looking.
     setProbingAgentId(agent.id);
     try {
-      const response = await fetch(`/api/runtime/probe/${encodeURIComponent(agent.id)}`);
+      const response = await apiFetch(`/api/runtime/probe/${encodeURIComponent(agent.id)}`);
       const payload = await response.json() as { probe?: Omit<AgentCapabilityProbe, 'adapterStatus'>; adapterStatus?: AgentCapabilityProbe['adapterStatus']; error?: string };
       if (!response.ok || !payload.probe) throw new Error(payload.error ?? t('errors.probeAgent'));
       setAgentProbes(current => ({ ...current, [agent.id]: { ...payload.probe!, adapterStatus: payload.adapterStatus ?? 'unsupported' } }));
@@ -781,7 +782,7 @@ export function App() {
     }
     setSavingAgent(true);
     try {
-      const response = await fetch('/api/runtime/catalog', {
+      const response = await apiFetch('/api/runtime/catalog', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: customAgentName.trim(), launchCommand: customAgentCommand.trim() }),
@@ -805,7 +806,7 @@ export function App() {
   // from being overwritten by a narrower one, and gives the sidebar indicator a fact to report.
   const checkDaemon = async () => {
     try {
-      const response = await fetch('/api/health');
+      const response = await apiFetch('/api/health');
       const payload = response.ok ? await response.json() as { status?: string } : null;
       setDaemonOnline(payload?.status === 'ok');
     } catch {
@@ -816,11 +817,11 @@ export function App() {
   const loadCredentials = async () => {
     // Best-effort: the backend status line must not block the credentials list, so a
     // failed /api/credentials/backend probe (e.g. older daemon) is silently ignored.
-    void fetch('/api/credentials/backend')
+    void apiFetch('/api/credentials/backend')
       .then(async response => { if (response.ok) setCredentialBackend(await response.json() as CredentialBackendInfo); })
       .catch(() => setCredentialBackend(null));
     try {
-      const response = await fetch('/api/credentials');
+      const response = await apiFetch('/api/credentials');
       if (!response.ok) throw new Error(t('errors.loadCredentials'));
       const payload = await response.json() as { meta: CredentialMeta };
       setCredentialMeta(payload.meta);
@@ -833,7 +834,7 @@ export function App() {
   const verifyAllCredentials = async () => {
     setVerifying(true);
     try {
-      const response = await fetch('/api/credentials/verify', { method: 'POST' });
+      const response = await apiFetch('/api/credentials/verify', { method: 'POST' });
       if (!response.ok) throw new Error(t('errors.verifyCredentials'));
       const payload = await response.json() as { results: CredentialVerifyResult[] };
       setVerifyResults(payload.results);
@@ -851,7 +852,7 @@ export function App() {
     if (credentialMeta?.keys.includes(key)) { setError(t('errors.customKeyExists', { key })); return; }
     setSavingCredentials(true);
     try {
-      const response = await fetch('/api/credentials', {
+      const response = await apiFetch('/api/credentials', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ [key]: value }),
       });
@@ -873,7 +874,7 @@ export function App() {
     if (entries.length === 0) { setError(t('errors.supabaseUrlRequired')); return; }
     setSavingCredentials(true);
     try {
-      const response = await fetch('/api/credentials', {
+      const response = await apiFetch('/api/credentials', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify(Object.fromEntries(entries.map(([key, value]) => [key, value.trim()]))),
       });
@@ -894,7 +895,7 @@ export function App() {
     if (entries.length === 0) { setError(t('errors.tokenRequired')); return; }
     setSavingCredentials(true);
     try {
-      const response = await fetch('/api/credentials', {
+      const response = await apiFetch('/api/credentials', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify(Object.fromEntries(entries.map(([key, value]) => [key, value.trim()]))),
       });
@@ -913,7 +914,7 @@ export function App() {
   const deleteCredential = async (key: string) => {
     if (!window.confirm(t('errors.deleteCredentialConfirm', { key }))) return;
     try {
-      const response = await fetch(`/api/credentials/${key}`, { method: 'DELETE' });
+      const response = await apiFetch(`/api/credentials/${key}`, { method: 'DELETE' });
       const payload = await response.json() as { saved?: boolean; meta?: CredentialMeta; error?: string };
       if (!response.ok || !payload.saved) throw new Error(payload.error ?? t('errors.deleteCredential'));
       setCredentialMeta(payload.meta ?? null);
@@ -925,7 +926,7 @@ export function App() {
 
   const loadProjectResources = async (projectId: string) => {
     try {
-      const response = await fetch(`/api/projects/${projectId}/resources`);
+      const response = await apiFetch(`/api/projects/${projectId}/resources`);
       if (!response.ok) throw new Error(t('errors.loadProjectResources'));
       const payload = await response.json() as { resources: ProjectResources };
       setProjectResources(payload.resources);
@@ -938,7 +939,7 @@ export function App() {
     if (!selected) return;
     setRegeneratingEnv(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/env/regenerate`, { method: 'POST' });
+      const response = await apiFetch(`/api/projects/${selected.id}/env/regenerate`, { method: 'POST' });
       if (!response.ok) throw new Error(t('errors.regenerateEnv'));
       setError('');
     } catch (cause) {
@@ -982,7 +983,7 @@ export function App() {
   const runPreflight = async () => {
     setCheckingPreflight(true);
     try {
-      const response = await fetch('/api/connectors/preflight');
+      const response = await apiFetch('/api/connectors/preflight');
       if (!response.ok) throw new Error(t('errors.runPreflight'));
       setPreflight(await response.json() as ConnectorPreflightReport);
       setError('');
@@ -996,7 +997,7 @@ export function App() {
   const discoverAccounts = async () => {
     setDiscoveringAccounts(true);
     try {
-      const response = await fetch('/api/connectors/discovery');
+      const response = await apiFetch('/api/connectors/discovery');
       if (!response.ok) throw new Error(t('errors.discoverIdentities'));
       setAccountDiscovery(await response.json() as AccountDiscoveryReport);
       setError('');
@@ -1018,7 +1019,7 @@ export function App() {
     if (!confirmed) return;
     setApprovingBaseline(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/baseline-plan/approve`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/baseline-plan/approve`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ blueprintRevision: baselinePlan.blueprintRevision, confirmation: CONFIRMATIONS.APPROVE_BASELINE, approvedBy }),
@@ -1041,7 +1042,7 @@ export function App() {
     if (!confirmed) return;
     setApplyingBaseline(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/apply`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/apply`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ blueprintRevision: baselinePlan.blueprintRevision, confirmation: CONFIRMATIONS.APPLY_BASELINE, ...(importRepoUrl.trim() ? { importRepositoryUrl: importRepoUrl.trim() } : {}) }),
@@ -1062,7 +1063,7 @@ export function App() {
     if (!selected || !applyRun || applyRun.status !== 'failed' || applyRun.attempts >= 3 || applyingBaseline) return;
     setApplyingBaseline(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/apply/retry`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/apply/retry`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirmation: CONFIRMATIONS.RETRY_APPLY }),
@@ -1083,7 +1084,7 @@ export function App() {
     if (!selected || !applyRun || applyRun.status !== 'completed' || dependencyReadiness?.status !== 'ready') return;
     setApplyingBaseline(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/quality-gate`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/quality-gate`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ blueprintRevision: applyRun.blueprintRevision, confirmation: CONFIRMATIONS.RUN_QUALITY_GATE }),
       });
@@ -1104,7 +1105,7 @@ export function App() {
     if (!window.confirm(t('confirmations.runNpmInstall'))) return;
     setInstallingDependencies(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/dependencies/install`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/dependencies/install`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ blueprintRevision: applyRun.blueprintRevision, confirmation: CONFIRMATIONS.INSTALL_DEPENDENCIES }),
       });
@@ -1128,7 +1129,7 @@ export function App() {
     setDeployingPreview(true);
     setError('');
     try {
-      const response = await fetch(`/api/projects/${selected.id}/preview/deploy`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/preview/deploy`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirmation: CONFIRMATIONS.DEPLOY_PREVIEW, previewBranch }),
       });
@@ -1148,7 +1149,7 @@ export function App() {
     if (!window.confirm(t('confirmations.deletePreviewProjects'))) return;
     setDeployingPreview(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/preview/cleanup`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/preview/cleanup`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirmation: CONFIRMATIONS.CLEANUP_PREVIEW, vercelProject: previewResult.cleanupRequired.vercel, cloudflareProject: previewResult.cleanupRequired.cloudflare }),
       });
@@ -1172,7 +1173,7 @@ export function App() {
     }
     setSavingFeatureTask(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/feature-task`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/feature-task`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ blueprintRevision: applyRun.blueprintRevision, title: featureTitle, objective: featureObjective, acceptanceCriteria }),
       });
@@ -1197,7 +1198,7 @@ export function App() {
     if (!window.confirm(t('confirmations.approveTask', { approvedBy }))) return;
     setSavingFeatureTask(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/feature-task/approve`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/feature-task/approve`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ blueprintRevision: featureTask.blueprintRevision, confirmation: CONFIRMATIONS.APPROVE_FEATURE_TASK, approvedBy }),
       });
@@ -1218,7 +1219,7 @@ export function App() {
     if (!window.confirm('Execute the pipeline? This will run all steps sequentially.')) return;
     setSavingFeatureTask(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/pipeline/execute`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/pipeline/execute`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ blueprintRevision: featureTask.blueprintRevision }),
       });
@@ -1260,7 +1261,7 @@ export function App() {
     if (pipelineDraft.some(s => !s.name.trim() || !s.profileId)) { setError('All steps must have a name and selected profile.'); return; }
     setSavingPipeline(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/pipeline`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/pipeline`, {
         method: 'PUT', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ steps: pipelineDraft.map(s => ({ id: s.id, name: s.name, profileId: s.profileId, prompt: s.prompt })) }),
       });
@@ -1318,7 +1319,7 @@ export function App() {
     if (!window.confirm(t('confirmations.prepareRuntimeDryRun'))) return;
     setPreparingRuntime(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/runtime/run`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/runtime/run`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.PREPARE_RUNTIME_RUN, agentId: selectedAgentId }),
       });
       const payload = await response.json() as { run?: RuntimeRun; error?: string; code?: unknown; agentId?: unknown };
@@ -1352,7 +1353,7 @@ export function App() {
     if (!selected || !runtimeRun || runtimeRun.status !== 'planned' || preparingRuntime) return;
     setPreparingRuntime(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/runtime/cancel`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/runtime/cancel`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.CANCEL_RUNTIME_RUN }),
       });
       const payload = await response.json() as { run?: RuntimeRun; error?: string };
@@ -1372,7 +1373,7 @@ export function App() {
     if (!window.confirm(t('confirmations.startAgent', { agent: agentDisplayName(runtimeRun.agentId) }))) return;
     setPreparingRuntime(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/runtime/execute`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/runtime/execute`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.EXECUTE_RUNTIME_RUN }),
       });
       const payload = await response.json() as { run?: RuntimeRun; error?: string };
@@ -1392,7 +1393,7 @@ export function App() {
     if (!window.confirm(t('confirmations.retryAgent', { agent: agentDisplayName(runtimeRun.agentId) }))) return;
     setPreparingRuntime(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/runtime/retry`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/runtime/retry`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.RETRY_RUNTIME_RUN }),
       });
       const payload = await response.json() as { run?: RuntimeRun; error?: string };
@@ -1412,7 +1413,7 @@ export function App() {
     if (acceptanceSummary.trim().length < 10) { setError(t('errors.acceptanceSummaryRequired')); return; }
     setSubmittingAcceptance(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/acceptance`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/acceptance`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ summary: acceptanceSummary, criteriaConfirmed }),
       });
       const payload = await response.json() as { acceptance?: AcceptanceRecord; error?: string };
@@ -1437,7 +1438,7 @@ export function App() {
     if (!window.confirm(t('confirmations.approveDeliveryEvidence', { approvedBy }))) return;
     setSubmittingAcceptance(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/acceptance/approve`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/acceptance/approve`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: CONFIRMATIONS.APPROVE_DELIVERY, approvedBy }),
       });
       const payload = await response.json() as { acceptance?: AcceptanceRecord; error?: string };
@@ -1458,7 +1459,7 @@ export function App() {
     if (!confirmed) return;
     setApplyingFakeProviders(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/provider-plan/apply`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/provider-plan/apply`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ confirmation: CONFIRMATIONS.APPLY_FAKE_PROVIDERS }),
       });
@@ -1477,7 +1478,7 @@ export function App() {
     if (!selected || verifyingProviders) return;
     setVerifyingProviders(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/provider-plan/verify`);
+      const response = await apiFetch(`/api/projects/${selected.id}/provider-plan/verify`);
       if (!response.ok) throw new Error(t('errors.verifyProviderSimulation'));
       const payload = await response.json() as { verification: ProviderVerification[]; deliveryReport: string; unifiedDeliveryReport: string };
       setProviderVerification(payload.verification);
@@ -1548,7 +1549,7 @@ export function App() {
     setSaving(true);
     try {
       const url = selected ? `/api/projects/${selected.id}/blueprint` : '/api/projects';
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method: selected ? 'PUT' : 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(selected ? { answers } : { name: name.trim(), answers }),
@@ -1573,7 +1574,7 @@ export function App() {
   async function exportBlueprint() {
     if (!selected) return;
     try {
-      const response = await fetch(`/api/projects/${selected.id}/blueprint/export`);
+      const response = await apiFetch(`/api/projects/${selected.id}/blueprint/export`);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? 'Export failed');
       // Download as JSON file
@@ -1598,7 +1599,7 @@ export function App() {
     try {
       const text = await file.text();
       const blueprint = JSON.parse(text);
-      const response = await fetch(`/api/projects/${selected.id}/blueprint/import`, {
+      const response = await apiFetch(`/api/projects/${selected.id}/blueprint/import`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ blueprint }),
@@ -1623,7 +1624,7 @@ export function App() {
     setLoadingDiff(true);
     setShowDiff(true);
     try {
-      const response = await fetch(`/api/projects/${selected.id}/blueprint/diff`);
+      const response = await apiFetch(`/api/projects/${selected.id}/blueprint/diff`);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? 'Diff failed');
       setBlueprintDiff({ added: payload.added ?? [], removed: payload.removed ?? [], modified: payload.modified ?? [] });

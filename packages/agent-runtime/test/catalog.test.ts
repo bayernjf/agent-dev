@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { discoverAgentRuntimes, resolveExecutablePath, resolveProbeExecutable } from '../src/index.js';
+import { discoverAgentRuntimes, resolveExecutablePath, resolveProbeExecutable, runProbe } from '../src/index.js';
 
 describe('agent runtime catalog', () => {
   // What is under test is the filter: a built-in this machine does not have is not returned at all,
@@ -23,7 +23,7 @@ describe('agent runtime catalog', () => {
       const originalPath = process.env.PATH;
       process.env.PATH = directory;
       try {
-        const agents = discoverAgentRuntimes();
+        const agents = await discoverAgentRuntimes();
         expect(agents.map(agent => agent.id)).toEqual(['opencode']);
         expect(agents[0]).toMatchObject({ source: 'built-in', detected: true, launchCommand: 'opencode' });
         // The fixture is a POSIX script, so cmd.exe cannot run it on Windows. That is not a failure of
@@ -38,13 +38,13 @@ describe('agent runtime catalog', () => {
     }
   });
 
-  it('supports minimal custom Agent configuration', () => {
-    const agents = discoverAgentRuntimes([{ name: 'Fixture Agent', launchCommand: 'node' }]);
+  it('supports minimal custom Agent configuration', async () => {
+    const agents = await discoverAgentRuntimes([{ name: 'Fixture Agent', launchCommand: 'node' }]);
     expect(agents.at(-1)).toMatchObject({ id: 'custom-1', source: 'custom', name: 'Fixture Agent', launchCommand: 'node', detected: true });
   });
 
-  it('keeps a PATH command visible when its version probe fails', () => {
-    const agents = discoverAgentRuntimes([{ name: 'Shell Fixture', launchCommand: 'sh' }]);
+  it('keeps a PATH command visible when its version probe fails', async () => {
+    const agents = await discoverAgentRuntimes([{ name: 'Shell Fixture', launchCommand: 'sh' }]);
     expect(agents.at(-1)).toMatchObject({ detected: true, name: 'Shell Fixture' });
   });
 
@@ -63,7 +63,7 @@ describe('agent runtime catalog', () => {
       const originalPath = process.env.PATH;
       process.env.PATH = directory;
       try {
-        const agents = discoverAgentRuntimes([{ name: 'Error Agent', launchCommand: 'agent-dev-error-first-line' }]);
+        const agents = await discoverAgentRuntimes([{ name: 'Error Agent', launchCommand: 'agent-dev-error-first-line' }]);
         expect(agents.at(-1)?.detected).toBe(true);
         if (process.platform !== 'win32') {
           expect(agents.at(-1)?.version).toBeNull();
@@ -102,7 +102,7 @@ describe('agent runtime catalog', () => {
           process.platform === 'win32' ? expected.toLowerCase() : expected,
         );
 
-        const agent = discoverAgentRuntimes([{ name: 'Fixture', launchCommand: 'agent-dev-fixture-cli' }]).at(-1);
+        const agent = (await discoverAgentRuntimes([{ name: 'Fixture', launchCommand: 'agent-dev-fixture-cli' }])).at(-1);
         expect(agent?.detected).toBe(true);
       } finally {
         process.env.PATH = originalPath;
@@ -119,7 +119,7 @@ describe('agent runtime catalog', () => {
       expect(resolveExecutablePath('node')).toBeNull();
       // Absence is now a completed fact rather than a retryable unknown, so the wording has to
       // stay distinguishable from a probe that ran and merely failed.
-      const absent = discoverAgentRuntimes([{ name: 'Off Path', launchCommand: 'agent-dev-off-path-fixture' }]).at(-1);
+      const absent = (await discoverAgentRuntimes([{ name: 'Off Path', launchCommand: 'agent-dev-off-path-fixture' }])).at(-1);
       expect(absent?.detected).toBe(false);
       expect(absent?.detail).toBe('Command not found on local PATH.');
     } finally {
@@ -138,6 +138,27 @@ describe('agent runtime catalog', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  // 2026-11-02 review P2-4: probes used spawnSync, so a hung CLI blocked the
+  // daemon's event loop for the whole 5 s budget. The probe must time out
+  // without blocking anything else running in the process.
+  it('times out a hung probe and leaves the event loop free while it waits', async () => {
+    let ticked = false;
+    const timer = setTimeout(() => {
+      ticked = true;
+    }, 20);
+    const started = Date.now();
+    const result = await runProbe(process.execPath, ['-e', 'setTimeout(() => {}, 10_000)'], {
+      encoding: 'utf8',
+      timeout: 150,
+    });
+    clearTimeout(timer);
+    expect(result.status).toBeNull();
+    expect(result.error).toBeDefined();
+    expect(ticked).toBe(true);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(result.stdout).toBe('');
+  });
 });
 
 // 2026-11-02 review P2-3: probes run with shell:true on Windows, so the raw
@@ -153,12 +174,12 @@ describe('probe executable resolution (P2-3)', () => {
       const originalPath = process.env.PATH;
       process.env.PATH = directory;
       const spawned: string[] = [];
-      const recordingSpawn = ((file: string) => {
+      const recordingSpawn = (async (file: string) => {
         spawned.push(file);
         return { status: 0, stdout: '9.9.9\n', stderr: '', error: undefined };
       }) as never;
       try {
-        const agents = discoverAgentRuntimes(
+        const agents = await discoverAgentRuntimes(
           [{ name: 'Tail Fixture', launchCommand: 'probe-target-p2 & calc.exe' }],
           recordingSpawn,
         );
