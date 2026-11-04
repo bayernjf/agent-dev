@@ -6,7 +6,7 @@
 Agent-Dev：面向 AI 产品创作者的自主产品交付平台。不替代 Codex / Claude Code 等 coding agent，
 而是在其上层管理产品规范、权限、交付状态、云平台连接、人工审批和验收证据。
 
-v0.1 面向已使用 GitHub 和 Codex 的独立开发者，先提供一条固定的 Web SaaS Golden Path：
+v0.1 面向已使用 GitHub 和 Codex 的独立开发者，先提供一条固定的 Web App Golden Path：
 
 ```text
 React/Vite 前端 -> Cloudflare Pages

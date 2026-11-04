@@ -6,7 +6,7 @@ Agent-Dev 是面向 AI 产品创作者的自主产品交付平台。它不替代
 
 ## 第一版定位
 
-`v0.1` 面向已经使用 GitHub 和 Codex 的独立开发者，先提供一条固定的 Web SaaS Golden Path。Web SaaS 是验证交付控制面的第一种产品类型，不是 Agent-Dev 的最终产品边界。多产品类型的扩展原则和阶段见 [多产品类型交付方案](docs/multi-product-delivery-plan.md)。
+`v0.1` 面向已经使用 GitHub 和 Codex 的独立开发者，先提供一条固定的 Web App Golden Path。Web App 是验证交付控制面的第一种产品类型，不是 Agent-Dev 的最终产品边界。多产品类型的扩展原则和阶段见 [多产品类型交付方案](docs/multi-product-delivery-plan.md)。
 
 ```text
 React/Vite 前端 -> Cloudflare Pages
@@ -39,7 +39,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - [市场与竞争分析](docs/market-analysis.md)：相邻产品、竞争压力、差异化与商业判断。
 - [参考项目能力矩阵](docs/reference-project-blueprint-matrix.md)：六个真实项目到 Blueprint、Adapter 和验收用例的映射。
 - [产品路线图](docs/roadmap.md)：从内部闭环到托管运行时、模板生态和企业能力。
-- [多产品类型交付方案](docs/multi-product-delivery-plan.md)：Web SaaS、落地页、浏览器插件、桌面端和移动端的共享层、类型层与推进门槛。
+- [多产品类型交付方案](docs/multi-product-delivery-plan.md)：Web App、落地页、浏览器插件、桌面端和移动端的共享层、类型层与推进门槛。
 - [AI Agent 全周期开发 SOP](ai-agent-development-sop.md)：需求到生产交付的通用治理基线。
 - [现有项目组合复盘](portfolio-development-review.md)：六个已有项目的流程资产、缺口和证据。
 
@@ -68,7 +68,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 本地可运行能力：
 
-- 创建 Web SaaS 项目并保存结构化 Product Blueprint；
+- 创建 Web App 项目并保存结构化 Product Blueprint；
 - 新手模式使用推荐答案，专业模式可配置数据敏感度、Preview、埋点和受控自定义说明；
 - 每次修改生成新的 Blueprint Revision，不覆盖历史；
 - 显示哪些决策会自动处理、必须获得批准，或只能由用户手动完成；
@@ -82,7 +82,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 在专业模式保存 GitHub Owner、Supabase Organization、Vercel Team 与 Cloudflare Account，并生成不执行创建操作的资源基线计划；
 - 对已完整选择归属的基线计划记录显式、本地且按 Blueprint Revision 绑定的审批；
 - 在审批后运行本地 Apply Simulator，将生成物、无 Secret 的执行清单和 `DELIVERY_REPORT.md` 写入忽略的 `.agent-dev/apply/` 工作区，并保留逐步骤结果；
-- Local Apply 同时生成固定 Web SaaS 工程基线：Vite/React 前端、Hono API、Cloudflare Pages、Vercel Functions 和 GitHub Actions 质量门禁；
+- Local Apply 同时生成固定 Web App 工程基线：Vite/React 前端、Hono API、Cloudflare Pages、Vercel Functions 和 GitHub Actions 质量门禁；
 - Local Apply 会在隔离工作区初始化 Git 并创建 baseline commit，作为后续 feature branch/PR 流程的起点；
 - Local Apply 会从 baseline commit 创建 `feature/agent-dev/revision-N` 本地 feature 分支，并把分支与基线提交写入 `apply-manifest.json` 和 Delivery Report；
 - Local Quality Gate 可在生成工作区执行 `npm run quality`，持久化 `quality-gate.json` 与 `QUALITY_REPORT.md`，失败时返回真实退出码和命令输出，不会伪报通过；当 Blueprint 质量契约包含 eval 检查（如 storefront 模板的 `npm run eval`）时，还会把输出中的评测分数摘要解析进 `eval-report.json`（解析缺失仅标记 absent，不改变门的结论）；
@@ -111,7 +111,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 
 身份发现只读取本机 CLI 已有登录状态；资源基线计划只显示阻塞项和待批准的创建意图。审批当前只是一条本地审计记录；Apply Simulator 只写入本仓库忽略的本地工作区，绝不写入 GitHub、Supabase、Vercel 或 Cloudflare。
 
-已实现本地生成物物化、Provider 计划与真实 CLI Adapter、凭证连接、模板代码生成、受控 Codex 执行、Dual Preview 编排和交付报告。真实云端全链路已于 2026-08-23 跑通：`Receipt Test` 从 Blueprint 走到 `DELIVERED`，PR 经 GitHub Actions 质量门禁后合并，生产 API 与页面均对外可访问并在平台报告之外独立复验。这一轮暴露的两处架构缺口（生产须从记录仓库的生产分支 checkout 后发布、每个人工闸门必须具名）随后修掉并在第二个项目验证。截至目前四个真实项目全部完整交付上线：`Receipt Test`（1/4，web-saas）、`Workspace Verify Fresh`（2/4，验证具名闸门与生产分支发布修复）、`Link Vault`（3/4）、`MCP Word Tools`（4/4，首个非 web-saas 类型）。项目 2 还暴露并修掉第 7 个真实缺陷——Agent 以 workspace 外部符号链接绕过产物提交拦截（`commitAgentChanges` 新增外部 symlink 守卫，生成器 `.gitignore` 改用 `node_modules` 同时匹配目录/文件/symlink）。
+已实现本地生成物物化、Provider 计划与真实 CLI Adapter、凭证连接、模板代码生成、受控 Codex 执行、Dual Preview 编排和交付报告。真实云端全链路已于 2026-08-23 跑通：`Receipt Test` 从 Blueprint 走到 `DELIVERED`，PR 经 GitHub Actions 质量门禁后合并，生产 API 与页面均对外可访问并在平台报告之外独立复验。这一轮暴露的两处架构缺口（生产须从记录仓库的生产分支 checkout 后发布、每个人工闸门必须具名）随后修掉并在第二个项目验证。截至目前四个真实项目全部完整交付上线：`Receipt Test`（1/4，web-app）、`Workspace Verify Fresh`（2/4，验证具名闸门与生产分支发布修复）、`Link Vault`（3/4）、`MCP Word Tools`（4/4，首个非 web-app 类型）。项目 2 还暴露并修掉第 7 个真实缺陷——Agent 以 workspace 外部符号链接绕过产物提交拦截（`commitAgentChanges` 新增外部 symlink 守卫，生成器 `.gitignore` 改用 `node_modules` 同时匹配目录/文件/symlink）。
 
 已经取得本地 Evidence：
 
