@@ -21,7 +21,6 @@ Agent-Dev 发布已知 Agent 的简单目录，文件为 `packages/agent-runtime
 "Aider" = "aider"
 "OpenCode" = "opencode"
 "CodeBuddy" = "codebuddy"
-"Pi" = "pi"
 "Hermes" = "hermes"
 "OpenClaw" = "openclaw"
 ```
@@ -119,7 +118,7 @@ Structured output: Unknown
 
 ### 3.4 发现的代价，以及测试因此要注入（2026-09-02 补充）
 
-`discoverAgentRuntimes()` 是顺序探测：内置目录里 **8 个 Agent** 一个个查，`--version` 与 `--help` 的预算各 5 s（`src/catalog.ts`），最坏 40 s。2026-11-04 起探测改为异步 `execFile` + 超时（2026-11-02 review P2-4），最坏延迟不变，但等待期间不再阻塞 daemon 的事件循环。而 vitest 单用例默认预算也是 5 s，所以**任何在测试里顺手调一次真发现的用例，都在赌这台机器当时有多闲**。2026-09-02 连跑 8 次全量量到 2 次超时（`apps/cli/test/mcp.test.ts` 的只读工具用例、`packages/agent-runtime/test/catalog.test.ts` 的内置过滤用例），红讯都是 `Test timed out in 5000ms`；`vitest.config.ts` 的 `fileParallelism: false` 只把这条不等式变缓，没有改变它。
+`discoverAgentRuntimes()` 是顺序探测：内置目录里 **7 个 Agent** 一个个查，`--version` 与 `--help` 的预算各 5 s（`src/catalog.ts`），最坏 35 s。2026-11-04 起探测改为异步 `execFile` + 超时（2026-11-02 review P2-4），最坏延迟不变，但等待期间不再阻塞 daemon 的事件循环。而 vitest 单用例默认预算也是 5 s，所以**任何在测试里顺手调一次真发现的用例，都在赌这台机器当时有多闲**。2026-09-02 连跑 8 次全量量到 2 次超时（`apps/cli/test/mcp.test.ts` 的只读工具用例、`packages/agent-runtime/test/catalog.test.ts` 的内置过滤用例），红讯都是 `Test timed out in 5000ms`；`vitest.config.ts` 的 `fileParallelism: false` 只把这条不等式变缓，没有改变它。
 
 两条纪律：
 
@@ -211,7 +210,7 @@ runtime:
 ### 阶段 A：Catalog 和 Discovery（已完成）
 
 - [x] 定义 `AgentDescriptor` 和 custom 输入契约；
-- [x] 注册 Codex、Claude Code、OpenClaw、Pi Agent、CodeBuddy 内置目录；
+- [x] 注册 Codex、Claude Code、OpenClaw、CodeBuddy 内置目录；
 - [x] 增加 Daemon `/api/runtime/catalog` 查询与 custom 登记 API；
 - [x] 将 Catalog 接入 Studio 展示和 Runtime 选择。
 
@@ -226,7 +225,8 @@ runtime:
 ### 阶段 C：多 Runtime 交付
 
 - Claude Code Adapter；
-- OpenClaw、Pi Agent、CodeBuddy 按真实重复需求接入；
+- OpenClaw、CodeBuddy 按真实重复需求接入；
+- Pi Agent 若要支持，先补 `AGENT_ADAPTERS` 条目，再重新登记内置目录——在没有任何执行契约时留在目录里只会让 Studio 展示一个永远 `unsupported` 的 Agent；
 - 统一取消、恢复、输出解析和 Evidence Schema；
 - 失败后备用 Agent 选择和恢复流程。
 

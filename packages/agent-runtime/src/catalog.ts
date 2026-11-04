@@ -48,7 +48,6 @@ const BUILT_IN_CAPABILITIES: Record<string, AgentCapability[]> = {
   openclaw: ['workspace-write', 'version-detection', 'non-interactive'],
   codebuddy: ['workspace-write', 'version-detection', 'non-interactive'],
   hermes: ['workspace-write', 'version-detection', 'non-interactive'],
-  pi: ['read-only', 'version-detection'],
 };
 
 type DetectionResult = { detected: boolean; version: string | null; detail: string };
