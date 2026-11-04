@@ -35,8 +35,11 @@ if [ -z "$DIR" ]; then
   elif [ -d "$ROOT/db/migrations" ]; then
     DIR="$ROOT/db/migrations"
   else
-    echo "x No migration directory found (supabase/migrations or db/migrations)."
-    exit 1
+    # No file-based migrations at all in this repository (agent-dev keeps its
+    # migrations inline in packages/storage/src/migrations.ts). Nothing to
+    # check is a pass, not a failure — review 2026-11-02 P3-5.
+    echo "i Not applicable: no supabase/migrations or db/migrations directory; this repository uses inline migrations."
+    exit 0
   fi
 fi
 
@@ -53,7 +56,7 @@ FILES=("$DIR"/*.sql)
 shopt -u nullglob
 
 if [ ${#FILES[@]} -eq 0 ]; then
-  echo "i No migration files in $DIR"
+  echo "i No migration files in $DIR (nothing to check)."
   exit 0
 fi
 
@@ -66,6 +69,7 @@ first=1
 for f in "${FILES[@]}"; do
   base="$(basename "$f")"
   issues=()
+  warnings=()
 
   # --- 1. naming ---
   if [[ "$base" =~ ^([0-9]{3})_([a-z][a-z0-9_]*)\.sql$ ]]; then
@@ -121,7 +125,7 @@ for f in "${FILES[@]}"; do
     verb="$(printf '%s' "$name" | cut -d_ -f1)"
     case "$verb" in
       create|add|alter|fix|drop|set|update|rename|delete|migrate) ;;
-      *) issues+=("warning: description should start with a verb (got '$verb')"); WARN=$((WARN+1));;
+      *) warnings+=("warning: description should start with a verb (got '$verb')"); WARN=$((WARN+1)) ;;
     esac
   fi
 
@@ -132,6 +136,12 @@ for f in "${FILES[@]}"; do
       echo "    - $i"
     done
     FAIL=$((FAIL+1))
+  fi
+  if [ ${#warnings[@]} -gt 0 ]; then
+    echo "! $base"
+    for w in "${warnings[@]}"; do
+      echo "    - $w"
+    done
   fi
 done
 

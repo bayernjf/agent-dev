@@ -21,5 +21,6 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+      - run: bash tools/check-migrations.sh
       - run: npm test
       - run: npm run build
