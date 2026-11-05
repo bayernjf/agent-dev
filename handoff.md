@@ -1,5 +1,7 @@
 # Agent-Dev 项目交接
 
+> **2026-11-06 补登：dev → main 已于 2026-11-05 经 PR #108 合并（合并前 CI 全绿）；实测 origin/main 与 origin/dev 内容完全一致（git diff 为空）。**
+
 > 更新时间：2026-10-26（Preview 残留 dry-run 复验：Vercel/Cloudflare 两控制台均零符合删除条件；Vercel CLI 本机登录态失效；PR 关闭 webhook 真云端验证仍待下一个真实项目）
 > 当前阶段：四个真实项目全部完整交付上线（`Receipt Test` 1/3、`Workspace Verify Fresh` 2/3、`Link Vault` 3/3、`MCP Word Tools` 4/4 首个非 web-saas 类型）——BluePrint → Preview → Production 全周期在真实云端跑通，4/4 验证目标达成；v0.2 P0-2/P0-3/P1-1/P1-3/P2-4 已完成（P2-4 无托管部署类型交付闭环于 2026-08-28 落地），P0-1（Claude Runtime 验证）已于 2026-08-29 由用户决策推迟（不阻塞 Pilot，恢复触发条件见 [v0.2 计划](docs/implementation-plan-v0.2.md) §3）；2026-08-28 新增 agent-dev MCP 桥、web-saas→web-app 类型重命名与 Studio 主题收尾，2026-08-29 MCP 桥完成化并扩至 21 工具（2026-08-31 随自更新端点移除减至 20），2026-08-31 完成全仓安全与质量审计（4 条高危，核心是 daemon 无鉴权监听所有网卡），审计整改 **P0 网络边界 §6.1 全部 4 项**、**P1 状态机 §6.2 全部 3 项**、**P2 §6.3 清理全部 6 项**与 **P3 §6.4 Windows 兼容全部 3 项**已于同日完成，**P4 §6.5 测试补齐全部 4 项已于同日完成**（storage pipeline resume/isStepApproved 4 例并修复 resume 未落盘缺陷、MCP 桥 20 工具全覆盖 +2 例、Studio 渲染冒烟 3 例 + vitest include/子路径 alias 收敛），**审计整改全部完成，当时全仓 220 例测试全绿**，方案与验收见 [审计文档](docs/audit-2026-08-31.md)；2026-09-01~02 的 Studio 界面走查与待办清理已连发 21 刀（第二轮 `e75a1ba`→`a072c55` 另清掉只读探测顺带改选择、能力探测语义与中英文标签大小写三项，`2e1440e` 再清掉 Runtime 路由的第二种拒绝与响应里那份 Codex 探测章，之后测试证据读取收敛为单一模块 `test/source-evidence.ts`），同日再关掉两项：`64c2a72` 把那条「未归因的间歇失败」归因为 **2 条**超时用例（根因是发现要顺序探测 8 个内置 Agent、每个版本探测预算 5 s，而 vitest 单用例默认预算也是 5 s），`ebe7ec4` 修掉「决策卡不看 productType」这条内容错误（两张卡与界面上那句基线注记改读 per-type 表），2026-10-07 复验全仓 530 例全绿
 > 工作目录：仓库根目录
