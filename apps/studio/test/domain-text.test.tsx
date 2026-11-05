@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderToString } from 'react-dom/server';
+import { renderAsync } from './render';
 import { I18nProvider, type KeyPath } from '../src/i18n/i18n';
 import { useDomainText } from '../src/lib/domain-text';
 import { dictionaries, resolveKey } from './key-resolution';
@@ -14,7 +14,7 @@ function Probe({ text, i18nKey, params }: { text: string; i18nKey?: string; para
 }
 
 function render(text: string, i18nKey?: string, params?: Record<string, string | number>) {
-  return renderToString(
+  return renderAsync(
     <I18nProvider>
       <Probe text={text} i18nKey={i18nKey} params={params} />
     </I18nProvider>,
@@ -22,26 +22,26 @@ function render(text: string, i18nKey?: string, params?: Record<string, string |
 }
 
 describe('useDomainText', () => {
-  it('resolves a present key through the locale table', () => {
-    const html = render('English fallback', 'dryRun.automaticPreparation.validateSchema');
+  it('resolves a present key through the locale table', async () => {
+    const html = await render('English fallback', 'dryRun.automaticPreparation.validateSchema');
     expect(html).toContain('Validate the ProductBlueprint schema');
     expect(html).not.toContain('English fallback');
   });
 
-  it('interpolates params into the resolved translation', () => {
-    const html = render('English fallback', 'dryRun.summary', { artifactCount: 12, actionCount: 4 });
+  it('interpolates params into the resolved translation', async () => {
+    const html = await render('English fallback', 'dryRun.summary', { artifactCount: 12, actionCount: 4 });
     expect(html).toContain('12 generated artifacts');
     expect(html).toContain('4 manual actions');
   });
 
-  it('falls back to the English prose when the key is absent from both locales', () => {
-    const html = render('Keep this English text', 'dryRun.this.key.does.not.exist');
+  it('falls back to the English prose when the key is absent from both locales', async () => {
+    const html = await render('Keep this English text', 'dryRun.this.key.does.not.exist');
     expect(html).toContain('Keep this English text');
     expect(html).not.toContain('dryRun.this.key.does.not.exist');
   });
 
-  it('returns the prose unchanged when no key is supplied (un-migrated fields)', () => {
-    const html = render('Plain English prose with no key');
+  it('returns the prose unchanged when no key is supplied (un-migrated fields)', async () => {
+    const html = await render('Plain English prose with no key');
     expect(html).toContain('Plain English prose with no key');
   });
 });

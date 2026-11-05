@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderToString } from 'react-dom/server';
+import { renderAsync } from './render';
 import { I18nProvider } from '../src/i18n/i18n';
 import { ThemeProvider } from '../src/theme/theme';
 import { CredentialBackendStatus } from '../src/components/CredentialBackendStatus';
@@ -20,12 +20,13 @@ Object.defineProperty(globalThis, 'localStorage', {
   },
 });
 
-// Smoke tests render the key Studio views through the same server-side renderer used in production,
-// wrapped in the real providers. They assert that the initial UI shell mounts and exposes its core
-// surface (brand, project list, empty state, entry points) without a DOM — catching crashes from bad
-// providers, i18n lookups or component wiring early.
+// Smoke tests render the key Studio views through React's streaming server renderer, wrapped in the
+// real providers. They assert that the initial UI shell mounts and exposes its core surface (brand,
+// project list, empty state, entry points) without a DOM — catching crashes from bad providers, i18n
+// lookups or component wiring early. The stream waits for lazy panels, so the assertions cover the
+// same full-page output the synchronous renderer used to produce.
 function renderStudioApp() {
-  return renderToString(
+  return renderAsync(
     <ThemeProvider>
       <I18nProvider>
         <App />
@@ -35,8 +36,8 @@ function renderStudioApp() {
 }
 
 describe('Studio smoke render', () => {
-  it('mounts the dashboard shell with the brand and project surface', () => {
-    const html = renderStudioApp();
+  it('mounts the dashboard shell with the brand and project surface', async () => {
+    const html = await renderStudioApp();
     // Brand is always rendered in the header.
     expect(html).toContain('Agent-Dev');
     // Dashboard is the initial view: the projects section heading renders.
@@ -45,8 +46,8 @@ describe('Studio smoke render', () => {
     expect(html).toContain('Loading projects...');
   });
 
-  it('renders the table column labels of the dashboard project list', () => {
-    const html = renderStudioApp();
+  it('renders the table column labels of the dashboard project list', async () => {
+    const html = await renderStudioApp();
     // The four dashboard table columns are part of the initial mount. "Mode" used to sit here while
     // the cells underneath it held product types.
     expect(html).toContain('Project');
@@ -54,15 +55,15 @@ describe('Studio smoke render', () => {
     expect(html).toContain('Delivery state');
   });
 
-  it('renders every provider entry point on the dashboard', () => {
-    const html = renderStudioApp();
+  it('renders every provider entry point on the dashboard', async () => {
+    const html = await renderStudioApp();
     // The primary action to start a delivery is present in the initial shell.
     expect(html).toContain('New Blueprint');
   });
 });
 
 const renderBackendStatus = (backend: CredentialBackendInfo | null) =>
-  renderToString(
+  renderAsync(
     <I18nProvider>
       <CredentialBackendStatus backend={backend} />
     </I18nProvider>,
@@ -73,8 +74,8 @@ const renderBackendStatus = (backend: CredentialBackendInfo | null) =>
 // and the storage note must never claim Infisical while reporting the local file (or the other way
 // round) — that would send users looking for secrets in the wrong place.
 describe('Credential backend status render', () => {
-  it('reports a connected Infisical backend and switches the note away from the local file', () => {
-    const html = renderBackendStatus({ type: 'infisical', available: true, projectId: 'proj-1', environment: 'dev' });
+  it('reports a connected Infisical backend and switches the note away from the local file', async () => {
+    const html = await renderBackendStatus({ type: 'infisical', available: true, projectId: 'proj-1', environment: 'dev' });
     expect(html).toContain('class="credential-backend connected"');
     expect(html).toContain('Secret backend: infisical');
     expect(html).toContain('Infisical secret backend');
@@ -83,16 +84,16 @@ describe('Credential backend status render', () => {
     expect(html).not.toContain('stored only in ~/.agent-dev/credentials.txt');
   });
 
-  it('keeps the local-file note when the backend is the default store', () => {
-    const html = renderBackendStatus({ type: 'local-file', available: true });
+  it('keeps the local-file note when the backend is the default store', async () => {
+    const html = await renderBackendStatus({ type: 'local-file', available: true });
     expect(html).toContain('class="credential-backend connected"');
     expect(html).toContain('Secret backend: local-file');
     expect(html).toContain('stored only in ~/.agent-dev/credentials.txt');
     expect(html).not.toContain('Infisical secret backend');
   });
 
-  it('surfaces the reason when the configured backend is unavailable', () => {
-    const html = renderBackendStatus({ type: 'infisical', available: false, reason: 'project unreachable' });
+  it('surfaces the reason when the configured backend is unavailable', async () => {
+    const html = await renderBackendStatus({ type: 'infisical', available: false, reason: 'project unreachable' });
     expect(html).toContain('class="credential-backend unavailable"');
     expect(html).toContain('Secret backend infisical unavailable');
     expect(html).toContain('project unreachable');
@@ -101,8 +102,8 @@ describe('Credential backend status render', () => {
     expect(html).toContain('Infisical secret backend');
   });
 
-  it('renders no status line while the backend probe has not answered yet', () => {
-    const html = renderBackendStatus(null);
+  it('renders no status line while the backend probe has not answered yet', async () => {
+    const html = await renderBackendStatus(null);
     expect(html).not.toContain('credential-backend');
     expect(html).toContain('stored only in ~/.agent-dev/credentials.txt');
   });
