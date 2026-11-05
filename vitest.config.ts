@@ -11,6 +11,7 @@ const appsDir = resolve(__dirname, 'apps');
 // directory-relative path that does not exist.
 function collectWorkspaceAliases(): Array<{ find: string; replacement: string }> {
   const subpaths: Array<{ find: string; replacement: string }> = [
+    { find: '@agent-dev/blueprint/client', replacement: join(packagesDir, 'blueprint', 'src', 'client.ts') },
     { find: '@agent-dev/blueprint/workspace', replacement: join(packagesDir, 'blueprint', 'src', 'workspace.ts') },
     { find: '@agent-dev/policy/confirmations', replacement: join(packagesDir, 'policy', 'src', 'confirmations.ts') },
     { find: '@agent-dev/agent-runtime/failure-classification', replacement: join(packagesDir, 'agent-runtime', 'src', 'failure-classification.ts') },

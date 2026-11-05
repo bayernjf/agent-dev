@@ -1,4 +1,4 @@
-import { baselineProvidersFor, type BaselineProviderId, type BlueprintAnswers } from '@agent-dev/blueprint';
+import { baselineProvidersFor, type BaselineProviderId, type BlueprintAnswers } from '@agent-dev/blueprint/client';
 import type { KeyPath } from '../i18n/i18n';
 
 // Provider names are proper nouns and read the same in both locales, so only the list is composed
