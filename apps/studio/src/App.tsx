@@ -6,7 +6,7 @@ import { useDomainText } from './lib/domain-text';
 import { apiFetch } from './lib/api';
 import { Dashboard } from './views/Dashboard';
 import { useTheme } from './theme/theme';
-import { baselineProvidersFor, getBlueprintDecisions, runtimeProviderSchema, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint';
+import { baselineProvidersFor, getBlueprintDecisions, isRuntimeProviderId, type BaselinePlan, type BlueprintAnswers, type DryRunPlan } from '@agent-dev/blueprint/client';
 // Import CONFIRMATIONS from the sub-path: the policy package's top-level entry re-exports
 // node-only modules (connectors) that break the Vite browser build. This file is a pure constant.
 import { CONFIRMATIONS } from '@agent-dev/policy/confirmations';
@@ -2211,8 +2211,8 @@ export function App() {
                   {agents.length === 0 && profiles.length === 0 ? <small>{t('blueprint.runtimeCatalogLoading')}</small> : <>
                     {agents
                       .flatMap(agent => {
-                        const provider = runtimeProviderSchema.safeParse(`local-${agent.id}`);
-                        return agent.detected && provider.success ? [{ agent, provider: provider.data }] : [];
+                        const provider = `local-${agent.id}`;
+                        return agent.detected && isRuntimeProviderId(provider) ? [{ agent, provider }] : [];
                       })
                       .map(({ agent, provider }) => {
                         const copy = agentCopyKeys(agent.id);
