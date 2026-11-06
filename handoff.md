@@ -218,7 +218,19 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
     2. ~~**各 Agent 在实际安装环境的 Adapter 验证**（§8-4 遗留）~~：**已于 2026-09-02 完成**（`ecde9eb`）——八个内置 Agent 全量只读对账，六个能答且 Adapter flag 全部在帮助里有据；openclaw/pi 因 ambient node v20.20.2（启动器要求 ≥22）答不出，属环境而非产品缺陷。逐 Agent 明细见 [Agent Runtime Catalog](docs/agent-runtime-catalog.md) §3.5。
     3. ~~**资源清单外部 ID/URL 与 Provider 控制台一致性逐项核对**~~（§8-3 遗留）：**已于 2026-09-10 完成**（`977139c`）——4 个项目的真实交付资源三家控制台全部存在，详见 [核对记录](docs/resource-reconciliation-2026-09-10.md)；带出两个新待办：清单 `projectName` 字段语义（apply 裸名 vs 生产名）待修正、4 个废弃裸名项目是否删除待用户拍板。
     4. ~~**Preview 遗留资源清理 + PR 关闭清理链路真实验证**（§8-7 与§7 段遗留；生产项目是交付物，不清理）~~：**2026-10-26 dry-run 复验两控制台均零符合删除条件**（详见「最近进度」首条）——2026-10-08 的清理事实成立，§8-7 旧文字「receipt-test-*-pr-1、workspace-verify-fresh-*、link-vault-*-pr-1 仍在账号里」已被事实超越。仅剩 **PR 关闭 webhook 的真实云端端到端验证**待下一个真实项目交付时自然触发（本地 HMAC/payload/路由测试已覆盖）；Vercel CLI 本机登录态已失效、4 个废弃裸名项目仍待 owner 拍板。
-    5. **Windows 上 agent 执行路径不通（探测部分已于 2026-09-01 修复）**：`agent-runtime` 的版本探测与 PATH 发现已修（见「最近进度」同日条目，本机 6/6 agent 可探）；**尚余执行路径**：`runCodexProcess` 仍以无 shell 方式 spawn，npm shim 类 CLI（codex / claude / opencode / openclaw / codebuddy）一律 ENOENT，Windows 用户走 Apply → Feature Task 时 agent 起不来。修法待决策表「Windows agent 启动方式」拍板（`install-macos.sh` 表明 Pilot 目标为 macOS，因此推荐先显式降级而非引入注入面）。**当前开发环境为 macOS（2026-09-02 确认），Windows 相关无法真实验证，先搁置；待出现真实 Windows Pilot 用户再推进方案④（显式报错 + 可操作提示）。**
+    5. **Windows 上 agent 执行路径（方案④已于 2026-11-06 落地）**：`agent-runtime` 的版本探测与 PATH 发现已修（见「最近进度」同日条目，本机 6/6 agent 可探）。执行路径 `runCodexProcess` 仍以无 shell 方式 spawn，npm shim 类 CLI（codex / claude / opencode / openclaw / codebuddy）在 Windows 一律 ENOENT；按决策④，Windows 现在**在 spawn 之前显式拒绝**：返回 `errorCode: 'unsupported_platform'` 与可操作提示（改跑 macOS/Linux 或 WSL），不再表现为一次普通的运行失败。该分支由 `runCodexProcessOnPlatform('win32')` 注入测试覆盖（断言拒绝前没有启动任何进程），macOS/Linux 行为不变。真实 Windows 执行（shim 解析）仍需决策①/②/③，触发条件：出现真实 Windows Pilot。
+
+        **平台 × 能力支持矩阵**（2026-11-06）：
+
+        | 能力 | macOS | Linux | Windows |
+        | --- | --- | --- | --- |
+        | CLI 发现与版本探测（`probeCodexRuntime` / catalog） | ✅ | ✅ | ✅（2026-09-01 修复 PATH 与 `.cmd` 解析） |
+        | Agent 执行（`runCodexProcess`，codex/opencode/codebuddy/hermes 等） | ✅ | ✅（CI 与 Linux 容器实测） | ❌ 显式拒绝 `unsupported_platform`（方案④） |
+        | 超时终止（SIGTERM → SIGKILL 升级） | ✅ | ✅ | 不适用（执行已拒绝） |
+        | Candidate Adapter（claude-code / aider / openclaw） | 仅 dry-run | 仅 dry-run | 仅 dry-run |
+        | 安装脚本 | `scripts/install-macos.sh` | 无（手动） | 无（手动） |
+
+        未验证项：真实 Windows 上的执行路径（方案①/②/③）与 Windows 上的 `install-macos.sh` 等价安装流程，均需真实 Windows 机器才能闭环。
 
     走查进度：§8-11.1 已完成两个阶段——第一阶段（首屏 / 凭证面板 / Activity / zh 切换，只读）、第二阶段（界面建 Blueprint → 四个项目详情标签页中英各一遍 → Apply 前停手，无远端副作用）；冷启动鉴权缺陷已修复并验证；Windows 探测与发现路径已修。走查发现的具体缺陷与待办见「最近进度」2026-09-01 条目的「走查待办」子列。
 
@@ -239,7 +251,7 @@ OpenAI 官方 Codex 手册和页面在 2026-08-02 的核对请求中返回 `403`
 | 版本号升级 | 已确认（2026-08-31） | 全部 13 个 package.json 从 `0.1.0-alpha.0` 升到 `0.2.0`，与 v0.2 Pilot 定位对齐 |
 | P1-2 Infisical 集成方式 | 已确认（2026-09-01） | 凭证系统后端化（`credentials.ts` 经 `SecretBackend` 抽象切换，默认 `local-file` 字节级不变），不恢复独立 secret-backend 路由 |
 | P1-2 真实验证时机 | 已确认（2026-09-01） | 延后：本轮交付代码 + 单元测试 + 探测脚本与配置指南；P1-2 标记「代码完成，真实验证待办」，不满足 ✅ |
-| Windows agent 启动方式 | 待确认（2026-09-01） | **探测与 PATH 发现已修（同日，无争议部分先落地）**；待定的只剩**执行路径** `runCodexProcess`。候选：① 引入 cross-spawn（社区维护的 shim 解析 + cmd 参数转义）；② 自实现同等逻辑（无新依赖，但转义正确性要自己扛测试）；③ 从 npm `.cmd` shim 解析出 `node <entry.js>` 后无 shell 启动（无注入面，依赖 shim 格式，非 npm 安装需回退）；④ **推荐**：Windows 上检测到 shim 就显式报错 + 给可操作提示（改用原生 exe / 指到真实可执行 / 走 WSL），因为 `scripts/install-macos.sh` 说明 Pilot 目标是 macOS，目前没有 Windows Pilot；待出现真实 Windows 用户再升级到 ①/② |
+| Windows agent 启动方式 | 方案④已落地（2026-11-06）；①/②/③ 仍待真实 Windows Pilot | **探测与 PATH 发现已修（2026-09-01）**；**执行路径按④于 2026-11-06 落地**：Windows 上 spawn 前显式返回 `errorCode: 'unsupported_platform'` + 可操作提示（改跑 macOS/Linux 或 WSL），不再以 `spawn ENOENT` 伪装成普通失败；单测覆盖在 `packages/agent-runtime/test`。候选：① cross-spawn；② 自实现 shim 解析 + cmd 转义；③ 从 `.cmd` 解析 `node <entry.js>` 后无 shell 启动。待出现真实 Windows 用户再升级到 ①/②/③ |
 | 领域文案的 i18n 边界 | ✅ 方案②五批全部落地（2026-09-02，4019905/ff5f664/caa3b07/6e1ee52/b22ec08） | 决策卡、dry-run 计划、manual actions、baseline plan、artifact titles 的英文文案**已全部并行发稳定 key+params**，Studio 用 key 查 locale、miss 回退英文，MCP 桥零改动。五批覆盖：dryRun(4)、decisions(37)、baselinePlan(15)、manualActions(37)、artifact titles(80 key，76 固定 + 2 可变×2 类型)。全量 530 测试绿。完整数据、字段形状、分批与风险见 [领域文案 i18n 边界决策依据](docs/i18n-domain-prose-decision.md)。 |
 
 ## 10. 交接完成定义

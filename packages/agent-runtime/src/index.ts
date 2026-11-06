@@ -67,6 +67,14 @@ export type CodexRuntimeProbe = {
   reason: string;
 };
 
+/**
+ * Reasons a runner can refuse to start a process, as opposed to reporting how one exited.
+ *
+ * A refusal still has to travel through CodexExecutionResult because every caller already handles
+ * `exitCode === null`, and a boolean "did it run" would be re-derived in each of them.
+ */
+export type CodexExecutionErrorCode = 'unsupported_platform';
+
 export type CodexExecutionResult = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -74,7 +82,27 @@ export type CodexExecutionResult = {
   output: string;
   startedAt: string;
   completedAt: string;
+  /** Set only when the runner declined to spawn; `output` then carries the reason for humans. */
+  errorCode?: CodexExecutionErrorCode;
 };
+
+/**
+ * Windows is rejected up front by decision ④ in handoff.md §9: every supported CLI (codex, claude,
+ * opencode, openclaw, codebuddy) ships as an npm `.cmd` shim that a shell-less spawn cannot resolve.
+ * The old behaviour surfaced that as a bare `spawn ENOENT`, which reads like a broken install and
+ * leaves the run looking like it merely failed rather than refused. Resolving shims correctly means
+ * adding a command-injection surface (cross-spawn or hand-rolled quoting), and the Pilot target is
+ * macOS, so the honest answer until a real Windows Pilot exists is an explicit refusal.
+ */
+export const WINDOWS_EXECUTION_UNSUPPORTED_CODE: CodexExecutionErrorCode = 'unsupported_platform';
+
+export function describeWindowsExecutionUnsupported(command: string): string {
+  return [
+    `Agent execution is not supported on Windows yet (refused before launching "${command}").`,
+    'Agent CLIs are installed as npm .cmd shims, which this runner starts without a shell, so they cannot be resolved.',
+    'Next steps: run Agent-Dev on macOS or Linux, or use WSL. A native Windows execution path needs a shim-resolution design and a real Windows Pilot to verify it.',
+  ].join(' ');
+}
 
 export type CodexExecutionPlan = {
   mode: 'dry-run' | 'execute';
@@ -300,35 +328,56 @@ export type CodexProcessRunner = (command: string, arguments_: string[], options
   timeoutMs: number;
 }) => Promise<CodexExecutionResult>;
 
-export const runCodexProcess: CodexProcessRunner = (command, arguments_, options) => new Promise(resolve => {
-  const startedAt = new Date().toISOString();
-  const child: ChildProcess = spawn(command, arguments_, { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
-  let output = '';
-  let timedOut = false;
-  let exited = false;
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    child.kill('SIGTERM');
-    // `child.killed` only records that a signal was delivered, so it is already true here and can
-    // never report whether the process actually died. An agent that keeps working through SIGTERM
-    // has to be escalated against observed exit, otherwise the timeout bounds nothing.
-    setTimeout(() => {
-      if (!exited) child.kill('SIGKILL');
-    }, 5_000).unref();
-  }, options.timeoutMs);
-  child.stdout?.on('data', chunk => { output = boundedAppend(output, String(chunk)); });
-  child.stderr?.on('data', chunk => { output = boundedAppend(output, String(chunk)); });
-  child.once('error', error => {
-    exited = true;
-    clearTimeout(timeout);
-    resolve({ exitCode: null, signal: null, timedOut, output: boundedAppend(output, error.message), startedAt, completedAt: new Date().toISOString() });
+/**
+ * Builds the runner for one platform. Exposed so the Windows refusal is testable on macOS/Linux CI;
+ * production code only ever uses `runCodexProcess`, bound to the platform it runs on.
+ */
+export function runCodexProcessOnPlatform(platform: NodeJS.Platform): CodexProcessRunner {
+  return (command, arguments_, options) => new Promise(resolve => {
+    if (platform === 'win32') {
+      const refusedAt = new Date().toISOString();
+      resolve({
+        exitCode: null,
+        signal: null,
+        timedOut: false,
+        errorCode: WINDOWS_EXECUTION_UNSUPPORTED_CODE,
+        output: describeWindowsExecutionUnsupported(command),
+        startedAt: refusedAt,
+        completedAt: refusedAt,
+      });
+      return;
+    }
+    const startedAt = new Date().toISOString();
+    const child: ChildProcess = spawn(command, arguments_, { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    let timedOut = false;
+    let exited = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+      // `child.killed` only records that a signal was delivered, so it is already true here and can
+      // never report whether the process actually died. An agent that keeps working through SIGTERM
+      // has to be escalated against observed exit, otherwise the timeout bounds nothing.
+      setTimeout(() => {
+        if (!exited) child.kill('SIGKILL');
+      }, 5_000).unref();
+    }, options.timeoutMs);
+    child.stdout?.on('data', chunk => { output = boundedAppend(output, String(chunk)); });
+    child.stderr?.on('data', chunk => { output = boundedAppend(output, String(chunk)); });
+    child.once('error', error => {
+      exited = true;
+      clearTimeout(timeout);
+      resolve({ exitCode: null, signal: null, timedOut, output: boundedAppend(output, error.message), startedAt, completedAt: new Date().toISOString() });
+    });
+    child.once('close', (exitCode, signal) => {
+      exited = true;
+      clearTimeout(timeout);
+      resolve({ exitCode, signal, timedOut, output, startedAt, completedAt: new Date().toISOString() });
+    });
   });
-  child.once('close', (exitCode, signal) => {
-    exited = true;
-    clearTimeout(timeout);
-    resolve({ exitCode, signal, timedOut, output, startedAt, completedAt: new Date().toISOString() });
-  });
-});
+}
+
+export const runCodexProcess: CodexProcessRunner = runCodexProcessOnPlatform(process.platform);
 
 // A real feature task spends most of its wall clock inside model turns, not inside the shell. The
 // first live run on this machine was still reading files at 5m22s, so a three-minute bound cut off

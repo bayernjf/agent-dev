@@ -1,5 +1,8 @@
+import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildAgentExecutionPlan, describeRuntimeExecutorRejection, executeCodexPlan, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, resolveRuntimeExecutor, runCodexProcess, runtimeProviderAgentId } from '../src/index.js';
+import { buildAgentExecutionPlan, describeRuntimeExecutorRejection, executeCodexPlan, getAgentAdapterStatus, isAgentExecutable, probeCodexRuntime, resolveRuntimeExecutor, runCodexProcess, runCodexProcessOnPlatform, runtimeProviderAgentId, WINDOWS_EXECUTION_UNSUPPORTED_CODE } from '../src/index.js';
 import type { AgentProfile } from '../src/profiles.js';
 
 describe('Local Codex Runtime', () => {
@@ -42,6 +45,21 @@ describe('Local Codex Runtime', () => {
     expect(getAgentAdapterStatus('claude-code')).toBe('candidate');
     expect(getAgentAdapterStatus('custom-1')).toBe('unsupported');
     expect(() => buildAgentExecutionPlan(task, '/tmp/agent-task', 'claude-code', { execute: true })).toThrow('has not passed execution verification');
+  });
+
+  it('refuses Windows instead of spawning a shim it cannot resolve', async () => {
+    // The marker proves the refusal happens before spawn: if the guard regressed, node would run
+    // and write it, so the assertion fails somewhere other than in prose.
+    const marker = join(tmpdir(), `agent-dev-win32-refusal-${Date.now()}.txt`);
+    const plan = buildAgentExecutionPlan({ id: 'task-win', title: 'Never runs', objective: 'Refuse.', acceptanceCriteria: ['Refused.'] }, tmpdir(), 'codex', { execute: true });
+    const result = await executeCodexPlan(
+      { ...plan, command: [process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`] },
+      runCodexProcessOnPlatform('win32'),
+    );
+    expect(result).toMatchObject({ exitCode: null, timedOut: false, errorCode: WINDOWS_EXECUTION_UNSUPPORTED_CODE });
+    expect(result.output).toContain('not supported on Windows');
+    expect(result.output).toContain('Next steps');
+    expect(existsSync(marker)).toBe(false);
   });
 
   it('force-kills a process that keeps running through SIGTERM', async () => {
