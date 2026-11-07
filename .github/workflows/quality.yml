@@ -24,3 +24,37 @@ jobs:
       - run: bash tools/check-migrations.sh
       - run: npm test
       - run: npm run build
+
+  docker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the daemon image
+        run: docker build --tag agent-dev-daemon:ci .
+      - name: Start the container and wait for health
+        run: |
+          docker run --detach --name agent-dev-daemon agent-dev-daemon:ci
+          for attempt in $(seq 1 30); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' agent-dev-daemon 2>/dev/null || true)"
+            if [ "$status" = "healthy" ]; then
+              echo "daemon reported healthy after ${attempt} probe(s)"
+              exit 0
+            fi
+            if [ "$status" = "unhealthy" ]; then
+              echo "daemon reported unhealthy"
+              docker logs agent-dev-daemon
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "daemon did not become healthy within 60s"
+          docker logs agent-dev-daemon
+          exit 1
+      - name: Probe the health endpoint inside the container
+        run: |
+          docker exec agent-dev-daemon node -e "fetch('http://127.0.0.1:3737/api/health').then(r=>r.text()).then(t=>{console.log(t);process.exit(t.includes('\"status\":\"ok\"')?0:1)})"
+      - name: Assert the container runs as non-root
+        run: test "$(docker inspect --format '{{.Config.User}}' agent-dev-daemon)" = "node"
+      - name: Remove the smoke container
+        if: always()
+        run: docker rm --force agent-dev-daemon || true

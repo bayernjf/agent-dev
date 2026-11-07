@@ -1,0 +1,37 @@
+# Dependencies and generated output
+node_modules
+**/node_modules
+**/dist
+coverage
+
+# Local runtime state and caches
+.agent-dev
+.codegraph
+.claude
+.scratch
+spikes/**/tmp
+spikes/**/output
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.log
+
+# VCS, CI metadata and docs are not needed inside the image
+.git
+.github
+docs
+
+# Secrets: never copy them into the build context
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Editor and OS files
+.DS_Store
+.idea
+.vscode
+*.swp
