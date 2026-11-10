@@ -1,0 +1,29 @@
+# agent-dev daemon. The API binds 127.0.0.1 by design (it is authenticated only
+# by a per-user bearer token and pinned to loopback, see docs/audit-2026-08-31.md
+# S1/§6.1-2), so a port mapping cannot publish it. Host networking is the
+# documented way to reach it; the daemon then listens on 127.0.0.1:3737 of the
+# host, exactly as it does when run locally.
+#
+# Usage: docker compose up -d
+services:
+  agent-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agent-dev:local
+    container_name: agent-dev
+    network_mode: host
+    environment:
+      AGENT_DEV_PORT: "3737"
+      AGENT_DEV_DATABASE_PATH: /data/agent-dev.sqlite
+    volumes:
+      - agent-dev-data:/data
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  agent-dev-data:
