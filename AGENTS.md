@@ -2,6 +2,14 @@
 
 供 AI coding agents（Claude Code / Codex / Cursor / Copilot 等）在本仓库工作时自动读取。
 
+## 本地容器运行时（macOS）
+
+本机 macOS 开发只用 OrbStack，不再使用 Docker Desktop。`docker` / `docker compose`
+命令不变（`docker context` 为 `orbstack`）。拉公共镜像直连失败时，用
+`docker.m.daocloud.io` 等镜像站前缀兜底。完整约定与恢复步骤见
+`../bayjf/AGENTS.md` 的「本地容器运行时约定（macOS）」和
+`~/000mycodes-backups/README.md`。
+
 ## 项目概览
 Agent-Dev：面向 AI 产品创作者的自主产品交付平台。不替代 Codex / Claude Code 等 coding agent，
 而是在其上层管理产品规范、权限、交付状态、云平台连接、人工审批和验收证据。

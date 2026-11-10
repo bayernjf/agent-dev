@@ -4,6 +4,9 @@
 # tag float.
 FROM node:22-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS deps
 WORKDIR /app
+# registry.npmjs.org drops TLS connections at random from this network; the
+# mirror serves the same packages.
+ENV npm_config_registry=https://registry.npmmirror.com
 
 # Manifests first so a source-only change reuses this layer.
 COPY package.json package-lock.json .npmrc ./
