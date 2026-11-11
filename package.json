@@ -19,7 +19,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "test": "vitest run",
-    "doctor": "tsx -e \"import { runDoctor, formatDoctorSummary } from './packages/agent-runtime/src/doctor.ts'; const report = await runDoctor(); console.log(formatDoctorSummary(report));\"",
+    "doctor": "tsx -e \"import { runDoctor, formatDoctorSummary } from './packages/agent-runtime/src/doctor.ts'; (async () => { const report = await runDoctor(); console.log(formatDoctorSummary(report)); })();\"",
     "install:macos": "bash scripts/install-macos.sh",
     "update": "bash scripts/update.sh",
     "backup": "node --experimental-sqlite scripts/backup-agent-dev.mjs",
