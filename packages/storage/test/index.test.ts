@@ -251,6 +251,9 @@ describe('AgentDevStore', () => {
       expect(tracked.stdout).toContain('apps/web/src/ReceiptList.tsx');
       const evidence = await store.getGitEvidence(created.id, 1);
       expect(evidence.status).toBe('');
+      const lastCommit = await store.getLastImplementationCommit(created.id, 1);
+      expect(lastCommit?.subject).toBe('feat: Add receipt list');
+      expect(lastCommit?.diffStat).toContain('ReceiptList.tsx');
       await store.close();
     } finally {
       await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });

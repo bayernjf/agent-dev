@@ -291,6 +291,13 @@ export type GitEvidence = {
   diffStat: string;
 };
 
+/** The last implementation commit, for human review after the runtime auto-commit. */
+export type LastCommitEvidence = {
+  hash: string;
+  subject: string;
+  diffStat: string;
+};
+
 export type PullRequestPublisher = (request: { branch: string; base: string; title: string; body: string }) => Promise<{ url: string; head: string }>;
 
 export type PrEvidence = {
@@ -1035,7 +1042,15 @@ export class AgentDevStore {
     await writeFile(join(task.workspacePath, 'TASK_APPROVAL.md'), `# Feature Task Approval\n\n- Task: ${approved.title}\n- Approved by: ${approved.approvedBy}\n- Approved at: ${approved.approvedAt}\n- Blueprint revision: ${approved.blueprintRevision}\n\nThe acceptance criteria in FEATURE_TASK.md are the governing human approval boundary for this task.\n`, 'utf8');
     await execFileAsync('git', ['add', 'feature-task.json', 'FEATURE_TASK.md', 'TASK_APPROVAL.md'], { cwd: task.workspacePath });
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `task: approve ${approved.title}`], { cwd: task.workspacePath });
-    await this.advanceDelivery(projectId, [{ type: 'START_IMPLEMENTATION' }]);
+    // The approval is already persisted and committed. A project that has
+    // already reached its terminal delivery state has no START_IMPLEMENTATION
+    // transition, but that must not turn a successful approval into an HTTP
+    // error that makes the caller think nothing was approved.
+    try {
+      await this.advanceDelivery(projectId, [{ type: 'START_IMPLEMENTATION' }]);
+    } catch (error) {
+      console.warn(`Delivery transition after approval was skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return approved;
   }
 
@@ -1154,7 +1169,15 @@ export class AgentDevStore {
       : completed;
     await this.writeRuntimeRun(finished, `runtime: ${finished.status}`);
     if (finished.status === 'completed') {
-      await this.advanceDelivery(task.projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }]);
+      // The run and its commit are already durable; a terminal delivery state
+      // without IMPLEMENTATION_COMPLETE must not be reported as an execution
+      // failure. Keep the completed run and surface the skipped transition in
+      // the daemon log instead.
+      try {
+        await this.advanceDelivery(task.projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }]);
+      } catch (error) {
+        console.warn(`Delivery transition after runtime completion was skipped: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     return finished;
   }
@@ -1423,6 +1446,27 @@ export class AgentDevStore {
     if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before collecting Git evidence.');
     const execute = async (args: string[]) => (await execFileAsync('git', args, { cwd: run.workspacePath })).stdout.trim();
     return { branch: await execute(['branch', '--show-current']), head: await execute(['rev-parse', 'HEAD']), status: await execute(['status', '--short']), diffStat: await execute(['diff', '--stat']) };
+  }
+
+  /**
+   * The runtime auto-commits the agent's changes, so `git diff --stat` is empty
+   * afterwards. Human review still needs the implementation diff; return the
+   * latest `feat:` commit instead of losing it with the clean worktree.
+   */
+  async getLastImplementationCommit(projectId: string, blueprintRevision: number): Promise<LastCommitEvidence | null> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before collecting commit evidence.');
+    const execute = async (args: string[]) => (await execFileAsync('git', args, { cwd: run.workspacePath })).stdout.trim();
+    const log = await execute(['log', '--format=%H%x09%s', '-30']);
+    const line = log.split('\n').find(item => /^[0-9a-f]{40}\tfeat:/.test(item));
+    if (!line) return null;
+    const [hash, ...subject] = line.split('\t');
+    if (!hash) return null;
+    return {
+      hash,
+      subject: subject.join('\t'),
+      diffStat: await execute(['show', '--stat', '--format=', '--no-renames', hash]),
+    };
   }
 
   async submitAcceptance(projectId: string, blueprintRevision: number, summary: string, criteriaConfirmed: boolean): Promise<AcceptanceRecord> {
