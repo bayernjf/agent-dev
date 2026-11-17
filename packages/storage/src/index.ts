@@ -273,6 +273,8 @@ export type RuntimeRun = {
   history: RuntimeAttempt[];
   createdAt: string;
   updatedAt: string;
+  /** The completed or cancelled run this fresh preparation supersedes. */
+  previousRunId?: string;
 };
 
 export type RuntimeAttempt = {
@@ -1078,7 +1080,12 @@ export class AgentDevStore {
     const task = await this.getFeatureTask(projectId, blueprintRevision);
     if (!task || task.status !== 'approved') throw new Error('Approve a Feature Task before preparing a Runtime run.');
     const existing = await this.getRuntimeRun(projectId, blueprintRevision);
-    if (existing) return existing;
+    // A completed or cancelled run is terminal: returning it would leave execute
+    // with nothing to do (completed) or a dead end (cancelled). Preparing again
+    // starts a fresh lifecycle and records which run it supersedes. Planned and
+    // running runs stay idempotent, and a failed run still requires the explicit
+    // retry route so a failure cannot be silently replaced.
+    if (existing && existing.status !== 'completed' && existing.status !== 'cancelled') return existing;
     const now = new Date().toISOString();
     // One resolution rule for every layer (see resolveRuntimeExecutor): strip the Blueprint provider
     // namespace, resolve an Agent Profile to its base agent, and refuse when the result has no
@@ -1090,7 +1097,7 @@ export class AgentDevStore {
     // Record the narrowest true name of the executor: a Profile id keeps pointing at the Profile the
     // user picked (its overrides are baked into the plan), a plain provider loses the `local-`
     // namespace so the record and the Adapter registry speak the same key.
-    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId: resolved.profile ? resolved.requestedId : resolved.agentId, status: 'planned', plan, attempts: 0, history: [], createdAt: now, updatedAt: now };
+    const run: RuntimeRun = { id: randomUUID(), taskId: task.id, projectId, blueprintRevision, agentId: resolved.profile ? resolved.requestedId : resolved.agentId, status: 'planned', plan, attempts: 0, history: [], createdAt: now, updatedAt: now, ...(existing ? { previousRunId: existing.id } : {}) };
     await writeFile(join(task.workspacePath, 'runtime-run.json'), JSON.stringify(run, null, 2) + '\n', 'utf8');
     await writeFile(join(task.workspacePath, 'RUNTIME_RUN_REPORT.md'), this.buildRuntimeRunReport(run, await this.getGitEvidence(projectId, blueprintRevision)), 'utf8');
     await execFileAsync('git', ['add', 'runtime-run.json', 'RUNTIME_RUN_REPORT.md'], { cwd: task.workspacePath });
@@ -1875,7 +1882,8 @@ export class AgentDevStore {
       ? 'This run records a guarded dry-run plan only. No Codex process was started and no feature code was changed.'
       : 'Codex execution was explicitly requested for this approved task. Quality Gate and human acceptance are still required.';
     const history = run.history.length ? `\n## Attempt history\n\n${run.history.map(item => `### Attempt ${item.attempt}\n\n- Status: ${item.status}\n- Started: ${item.startedAt}\n- Completed: ${item.completedAt ?? 'in progress'}\n- Exit code: ${item.result?.exitCode ?? 'none'}\n- Timed out: ${item.result?.timedOut ?? false}\n`).join('\n')}` : '';
-    return `# Runtime Run Report\n\n- Run: ${run.id}\n- Task: ${run.taskId}\n- Agent: ${run.agentId}\n- Status: ${run.status}\n- Attempts: ${run.attempts}\n- Mode: ${run.plan.mode}\n- Execution allowed: ${run.plan.executionAllowed}\n- No external changes: ${run.plan.noExternalChanges}\n\n## Planned command\n\n\`\`\`text\n${run.plan.command.join(' ')}\n\`\`\`\n${history}${result}\n## Git evidence\n\n- Branch: ${evidence.branch}\n- HEAD: ${evidence.head}\n- Working tree: ${evidence.status || 'clean'}\n- Diff stat: ${evidence.diffStat || 'no changes'}\n\n## Boundary\n\n${boundary}\n`;
+    const previous = run.previousRunId ? `- Previous run: ${run.previousRunId}\n` : '';
+    return `# Runtime Run Report\n\n- Run: ${run.id}\n${previous}- Task: ${run.taskId}\n- Agent: ${run.agentId}\n- Status: ${run.status}\n- Attempts: ${run.attempts}\n- Mode: ${run.plan.mode}\n- Execution allowed: ${run.plan.executionAllowed}\n- No external changes: ${run.plan.noExternalChanges}\n\n## Planned command\n\n\`\`\`text\n${run.plan.command.join(' ')}\n\`\`\`\n${history}${result}\n## Git evidence\n\n- Branch: ${evidence.branch}\n- HEAD: ${evidence.head}\n- Working tree: ${evidence.status || 'clean'}\n- Diff stat: ${evidence.diffStat || 'no changes'}\n\n## Boundary\n\n${boundary}\n`;
   }
 
   private async writeRuntimeRun(run: RuntimeRun, commitMessage: string) {
