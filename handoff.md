@@ -8,6 +8,7 @@
 
 ## 最近进度
 
+- **Tier0 M5 P2 · Runtime 终态重开 daemon 路由级测试（2026-11-17，dev）**：补上 P1 行为在 daemon 路由层的回归——`apps/daemon/test/app.test.ts` 新增用例：真实路由 prepare → execute → prepare 完整路径，execute 通过 Proxy 注入 fake CLI（不 spawn 真 codex）；断言 completed 后再次 prepare 返回新 run 且带 `previousRunId`，首次 run 无该字段。门禁 typecheck 0 error、lint 0 error、全量 38 文件 / 570 例（+1）、build 绿。
 - **Tier0 M5 P1 · Runtime run 终态重开（2026-11-17，dev）**：修复 `prepareRuntimeRun` 对 `completed` / `cancelled` run 直接复用导致的死路。现在这两种终态会新建 run，并用 `RuntimeRun.previousRunId` 与 `RUNTIME_RUN_REPORT.md` 的 `Previous run` 记录被替代的 run；`planned` / `running` 仍保持幂等，`failed` 仍必须走显式 retry。提交 `bec50c2`（storage）、`f326127`（测试 +1 例：planned 幂等、cancelled 重开、completed 重开、fake execute）；门禁 typecheck 0 error、lint 0 error、全量 38 文件 / 569 例、build 绿。
 - **Tier0 M5 P2 · last-commit 证据路由文档化（2026-11-17，dev）**：README 明确 Runtime 自动提交后 `git diff --stat` 为空，`GET /api/projects/:projectId/runtime/last-commit` 返回最近 `feat:` 提交的 `hash` / `subject` / `diffStat`，无实现提交为 `{ lastCommit: null }`、apply run 未完成时 409；zeus agent-dev 执行臂据此回填 `result.git.lastCommit`。
 - **Tier0 M2 · TF-06 模板清单登记（2026-10-28，feature/20260802）**：新增 `docs/storefront-template-checklist.md`，沿用 agent-world `template-checklist.md` 登记惯例。对账：已实现 storefront 站点模板 3 个（retail/cross-border/subscription），本表登记 3 条，一一对应；agent-world `tpl-*` 工作流模板 35 个属另一域，未改动。GATE-L1 真实部署状态如实标注于 TF-05。
