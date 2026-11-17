@@ -291,6 +291,13 @@ export type GitEvidence = {
   diffStat: string;
 };
 
+/** The last implementation commit, for human review after the runtime auto-commit. */
+export type LastCommitEvidence = {
+  hash: string;
+  subject: string;
+  diffStat: string;
+};
+
 export type PullRequestPublisher = (request: { branch: string; base: string; title: string; body: string }) => Promise<{ url: string; head: string }>;
 
 export type PrEvidence = {
@@ -1423,6 +1430,27 @@ export class AgentDevStore {
     if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before collecting Git evidence.');
     const execute = async (args: string[]) => (await execFileAsync('git', args, { cwd: run.workspacePath })).stdout.trim();
     return { branch: await execute(['branch', '--show-current']), head: await execute(['rev-parse', 'HEAD']), status: await execute(['status', '--short']), diffStat: await execute(['diff', '--stat']) };
+  }
+
+  /**
+   * The runtime auto-commits the agent's changes, so `git diff --stat` is empty
+   * afterwards. Human review still needs the implementation diff; return the
+   * latest `feat:` commit instead of losing it with the clean worktree.
+   */
+  async getLastImplementationCommit(projectId: string, blueprintRevision: number): Promise<LastCommitEvidence | null> {
+    const run = this.getLatestApplyRun(projectId, blueprintRevision);
+    if (!run || run.status !== 'completed') throw new Error('A completed Local Apply run is required before collecting commit evidence.');
+    const execute = async (args: string[]) => (await execFileAsync('git', args, { cwd: run.workspacePath })).stdout.trim();
+    const log = await execute(['log', '--format=%H%x09%s', '-30']);
+    const line = log.split('\n').find(item => /^[0-9a-f]{40}\tfeat:/.test(item));
+    if (!line) return null;
+    const [hash, ...subject] = line.split('\t');
+    if (!hash) return null;
+    return {
+      hash,
+      subject: subject.join('\t'),
+      diffStat: await execute(['show', '--stat', '--format=', '--no-renames', hash]),
+    };
   }
 
   async submitAcceptance(projectId: string, blueprintRevision: number, summary: string, criteriaConfirmed: boolean): Promise<AcceptanceRecord> {
