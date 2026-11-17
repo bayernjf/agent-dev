@@ -1042,7 +1042,15 @@ export class AgentDevStore {
     await writeFile(join(task.workspacePath, 'TASK_APPROVAL.md'), `# Feature Task Approval\n\n- Task: ${approved.title}\n- Approved by: ${approved.approvedBy}\n- Approved at: ${approved.approvedAt}\n- Blueprint revision: ${approved.blueprintRevision}\n\nThe acceptance criteria in FEATURE_TASK.md are the governing human approval boundary for this task.\n`, 'utf8');
     await execFileAsync('git', ['add', 'feature-task.json', 'FEATURE_TASK.md', 'TASK_APPROVAL.md'], { cwd: task.workspacePath });
     await execFileAsync('git', ['-c', 'user.name=Agent-Dev Local', '-c', 'user.email=agent-dev@localhost', 'commit', '-qm', `task: approve ${approved.title}`], { cwd: task.workspacePath });
-    await this.advanceDelivery(projectId, [{ type: 'START_IMPLEMENTATION' }]);
+    // The approval is already persisted and committed. A project that has
+    // already reached its terminal delivery state has no START_IMPLEMENTATION
+    // transition, but that must not turn a successful approval into an HTTP
+    // error that makes the caller think nothing was approved.
+    try {
+      await this.advanceDelivery(projectId, [{ type: 'START_IMPLEMENTATION' }]);
+    } catch (error) {
+      console.warn(`Delivery transition after approval was skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return approved;
   }
 
@@ -1161,7 +1169,15 @@ export class AgentDevStore {
       : completed;
     await this.writeRuntimeRun(finished, `runtime: ${finished.status}`);
     if (finished.status === 'completed') {
-      await this.advanceDelivery(task.projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }]);
+      // The run and its commit are already durable; a terminal delivery state
+      // without IMPLEMENTATION_COMPLETE must not be reported as an execution
+      // failure. Keep the completed run and surface the skipped transition in
+      // the daemon log instead.
+      try {
+        await this.advanceDelivery(task.projectId, [{ type: 'IMPLEMENTATION_COMPLETE' }]);
+      } catch (error) {
+        console.warn(`Delivery transition after runtime completion was skipped: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     return finished;
   }
