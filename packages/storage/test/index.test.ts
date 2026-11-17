@@ -794,6 +794,34 @@ describe('the Runtime executor is resolved once', () => {
     }
   }, 30_000);
 
+  it('starts a fresh run after a completed or cancelled run', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agent-dev-runtime-executor-'));
+    try {
+      const store = await AgentDevStore.open(join(directory, 'agent-dev.sqlite'));
+      const { projectId, revision, workspacePath } = await seedAppliedProject(store, 'local-opencode');
+
+      const first = await store.prepareRuntimeRun(projectId, revision, 'local-opencode');
+      // Preparing while a run is still planned is idempotent, not a second run.
+      await expect(store.prepareRuntimeRun(projectId, revision, 'local-opencode')).resolves.toMatchObject({ id: first.id });
+      await store.cancelRuntimeRun(projectId, revision);
+
+      const second = await store.prepareRuntimeRun(projectId, revision, 'local-opencode');
+      expect(second.id).not.toBe(first.id);
+      expect(second).toMatchObject({ status: 'planned', attempts: 0, previousRunId: first.id });
+      await expect(readFile(join(workspacePath, 'RUNTIME_RUN_REPORT.md'), 'utf8')).resolves.toContain(`- Previous run: ${first.id}`);
+
+      const completed = await store.executeRuntimeRun(projectId, revision, fakeRunner([{ exitCode: 0 }]));
+      expect(completed).toMatchObject({ id: second.id, status: 'completed', attempts: 1 });
+
+      const third = await store.prepareRuntimeRun(projectId, revision, 'local-opencode');
+      expect(third.id).not.toBe(second.id);
+      expect(third).toMatchObject({ status: 'planned', attempts: 0, previousRunId: second.id });
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  }, 30_000);
+
   it('refuses to prepare a run instead of quietly planning one for Codex', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agent-dev-runtime-executor-'));
     try {
