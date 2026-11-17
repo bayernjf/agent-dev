@@ -333,6 +333,9 @@ describe('daemon API', () => {
     await expect(runtimeRun.json()).resolves.toMatchObject({ run: { status: 'planned' } });
     const runtimeEvidence = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/evidence`);
     await expect(runtimeEvidence.json()).resolves.toMatchObject({ evidence: { branch: 'feature/agent-dev/revision-1' } });
+    const runtimeLastCommit = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/last-commit`);
+    expect(runtimeLastCommit.status).toBe(200);
+    await expect(runtimeLastCommit.json()).resolves.toHaveProperty('lastCommit');
     const runtimeCancel = await app.request(`http://localhost/api/projects/${createdPayload.project.id}/runtime/cancel`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation: 'CANCEL_RUNTIME_RUN' }),
     });
