@@ -854,6 +854,16 @@ export function createDaemonApp(store: AgentDevStore, events = new DaemonEventBu
     }
   });
 
+  app.get('/api/projects/:projectId/runtime/last-commit', async context => {
+    const project = store.getProject(context.req.param('projectId'));
+    if (!project) return context.json({ error: 'Project not found.' }, 404);
+    try {
+      return context.json({ lastCommit: await store.getLastImplementationCommit(project.id, project.blueprint.metadata.revision) });
+    } catch (error) {
+      return context.json({ error: error instanceof Error ? error.message : 'Unable to collect commit evidence.' }, 409);
+    }
+  });
+
   app.get('/api/projects/:projectId/acceptance', async context => {
     const project = store.getProject(context.req.param('projectId'));
     if (!project) return context.json({ error: 'Project not found.' }, 404);
