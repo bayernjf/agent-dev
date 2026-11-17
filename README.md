@@ -92,6 +92,7 @@ Agent Runtime  -> 用户电脑中的 Codex
 - 只有已批准的 Feature Task 才能作为后续 Runtime 执行输入；默认仍先生成 dry-run 计划。
 - Runtime Adapter 能生成受 sandbox、workspace 和禁止路径约束的执行计划（命令按解析出的 Agent 拼），并通过环境变量白名单启动显式批准的 `workspace-write` 执行；2026-08-11 已在隔离生成工作区完成一次产生实际源码 diff 的真实 Codex feature task、质量门和 Git evidence 验证。Human Acceptance 仍由用户明确批准。
 - Runtime Run 已支持 dry-run 的 prepare/cancel 生命周期，以及显式 Execute 的 running/completed/failed 证据、Git branch/HEAD/diff evidence、attempt 历史和 `RUNTIME_RUN_REPORT.md`；失败运行可通过 `RETRY_RUNTIME_RUN` 显式重试，历史不会被覆盖。
+- Runtime 执行结束后 `GET /api/projects/:projectId/runtime/evidence` 返回分支、HEAD 与工作区状态；Runtime 会自动提交 Agent 改动，因此 `git diff --stat` 为空，`GET /api/projects/:projectId/runtime/last-commit` 会返回最近一条 `feat:` 提交的 `hash` / `subject` / `diffStat`（没有实现提交时 `{ lastCommit: null }`，apply run 未完成时 409）。
 - Studio 已展示 Runtime Run 状态、取消动作、按执行者命名的显式运行/重试按钮和 Git evidence；Execute/Retry 都需要确认字符串，不允许绕过任务批准。
 - 「这个任务由谁执行」只有一个答案：Agent Profile 解到 base Agent、剥掉 `local-` 命名空间后查 `AGENT_ADAPTERS`，只有 `verified` 能承接任务；解析不通过时 daemon 直接拒（409 + `code: agent_not_executable` + `agentId`），**任何一层都不会把执行者换成另一个 Agent**，Studio 把被拒的 Agent 名字和“没换人”一起说出来。
 - Daemon 已提供 `/api/runtime/catalog`，内置 Agent 来自 `agents.builtin.conf`，可登记名称 + 启动命令的 custom Agent；内置未安装项隐藏，custom 未安装项置灰并保存到 `.agent-dev/agents.conf`。
