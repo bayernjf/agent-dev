@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentDevStore } from '@agent-dev/storage';
-import { getAgentAdapterStatus } from '@agent-dev/agent-runtime';
+import { getAgentAdapterStatus, type CodexProcessRunner } from '@agent-dev/agent-runtime';
 import type { DaemonDependencies } from '../src/app.js';
 import type { AccountDiscoveryReport, ConnectorPreflightReport } from '@agent-dev/policy';
 import { createDaemonApp } from '../src/app.js';
@@ -20,6 +20,25 @@ const RELEASE_SOURCE = {
   commit: 'b'.repeat(40),
   acceptedCommit: ACCEPTED_COMMIT,
 };
+
+// A scripted stand-in for the real CLI spawn: the execute route is about the run
+// lifecycle around the spawn, not about codex itself.
+function fakeRunner(script: Array<{ exitCode: number | null; timedOut?: boolean; output?: string }>): CodexProcessRunner {
+  let call = 0;
+  return async () => {
+    const step = script[Math.min(call, script.length - 1)];
+    call += 1;
+    const now = new Date().toISOString();
+    return {
+      exitCode: step.exitCode,
+      signal: null,
+      timedOut: step.timedOut ?? false,
+      output: step.output ?? 'fixture output',
+      startedAt: now,
+      completedAt: now,
+    };
+  };
+}
 
 // A production release is only allowed once a repository is recorded and a human accepted a commit,
 // so a release test has to stand those two facts up rather than assume them.
@@ -1298,6 +1317,50 @@ describe('daemon API', () => {
         // A response that reports a probe of its own must report the executor it just prepared, not
         // whichever CLI the route author had in mind; the field is gone until it can say the right one.
         expect(body.probe).toBeUndefined();
+      } finally {
+        await store.close();
+      }
+    }, 30_000);
+
+    it('opens a fresh run through the routes once the previous run completed', async () => {
+      // P1: a completed run is terminal for execution, so preparing again must open a new run
+      // (with previousRunId) instead of returning the dead one. Storage covers the branch with a
+      // direct call; this is the route-level walk: prepare → execute → prepare again, with the
+      // execute route handed a fake CLI so the real one is never spawned.
+      const { store, projectId } = await openProjectWithApprovedTask('local-codex', { isAgentDetected: () => true });
+      const storeWithFakeCli = new Proxy(store, {
+        get(target, prop, receiver) {
+          if (prop === 'executeRuntimeRun') {
+            return (pid: string, revision: number) =>
+              target.executeRuntimeRun(pid, revision, fakeRunner([{ exitCode: 0 }]));
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const { app } = createDaemonApp(storeWithFakeCli, undefined, { isAgentDetected: () => true });
+      try {
+        const first = await app.request(`http://localhost/api/projects/${projectId}/runtime/run`, post({
+          confirmation: 'PREPARE_RUNTIME_RUN',
+        }));
+        expect(first.status).toBe(201);
+        const firstRun = (await first.json() as { run: { id: string; status: string; previousRunId?: string } }).run;
+        expect(firstRun).toMatchObject({ status: 'planned' });
+        expect(firstRun.previousRunId).toBeUndefined();
+
+        const executed = await app.request(`http://localhost/api/projects/${projectId}/runtime/execute`, post({
+          confirmation: 'EXECUTE_RUNTIME_RUN',
+        }));
+        expect(executed.status).toBe(200);
+        await expect(executed.json()).resolves.toMatchObject({ run: { id: firstRun.id, status: 'completed', attempts: 1 } });
+
+        const second = await app.request(`http://localhost/api/projects/${projectId}/runtime/run`, post({
+          confirmation: 'PREPARE_RUNTIME_RUN',
+        }));
+        expect(second.status).toBe(201);
+        const secondRun = (await second.json() as { run: { id: string; status: string; previousRunId?: string } }).run;
+        expect(secondRun.id).not.toBe(firstRun.id);
+        expect(secondRun).toMatchObject({ status: 'planned', previousRunId: firstRun.id });
       } finally {
         await store.close();
       }
